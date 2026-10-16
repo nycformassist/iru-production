@@ -1,0 +1,71 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Merriweather:ital,wght@0,400;0,700;1,400&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Merriweather", ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: #fcfcfc;
+  color: #1a1a1a;
+}
+
+h1, h2, h3, h4, h5, h6, .font-serif {
+  font-family: var(--font-serif);
+}
+
+/* ── CONFIDENTIAL WATERMARK ───────────────────────────────────────────────────
+   CSS text-only — no external image, no imgur dependency.
+   Survives Vercel/Netlify asset stripping.
+   @media print forces it into the PDF stream on all browsers.
+   ─────────────────────────────────────────────────────────────────────────── */
+.watermark {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(-35deg);
+  font-family: "Merriweather", serif;
+  font-size: 5rem;
+  font-weight: 700;
+  color: rgba(79, 70, 229, 0.07);
+  white-space: nowrap;
+  pointer-events: none;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  z-index: 0;
+}
+
+@media print {
+  /* Force color rendering — required for watermark to survive PDF export */
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+
+  body {
+    background-color: white;
+  }
+
+  .watermark {
+    display: block !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+  .print-break-inside-avoid {
+    break-inside: avoid;
+  }
+  .print-break-before {
+    break-before: page;
+  }
+  .shadow-sm, .shadow-md, .shadow-lg {
+    box-shadow: none !important;
+    border: 1px solid #e5e7eb !important;
+  }
+}
