@@ -4,6 +4,23 @@ import { motion } from 'framer-motion';
 
 import { LANGUAGES, UI_LABELS, PHASE_1_QUESTIONS, TRIAGE_QUESTION, PHASE_2_QUESTIONS, PHASE_3_QUESTIONS, NYC_RESOURCES, CONSULATES, PROXIES, NARRATIVE_STARTERS, USCIS_FORMS, FEE_SCHEDULE_AS_OF } from './constants';
 
+// Evidence intelligence (server-side source of truth, pure module — no
+// secrets, no I/O). Imported read-only for honest packet rendering.
+import { EVIDENCE_KB, requiresLegalReview, legalReviewReason, nextActionFor } from '../api/lib/evidence.js';
+
+/** Display names for the 9 evidence checklist keys (packet rendering). */
+const EVIDENCE_ITEM_NAMES: Record<string, string> = {
+  has_passport: 'Passport',
+  has_i94: 'I-94 Record',
+  has_lease: 'Formal Lease',
+  has_persecution_proof: 'Proof of Persecution',
+  has_green_card: 'Green Card',
+  has_tax_transcripts: 'Tax Transcripts',
+  has_marriage_cert: 'Marriage/Divorce Certs',
+  has_proof_of_relationship: 'Proof of Relationship',
+  has_arrests: 'Certificates of Disposition',
+};
+
 /** Escape user/AI content before injecting into the printable packet HTML. */
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -32,13 +49,19 @@ function stripForServer(answers: Record<string, string>): Record<string, string>
 
 export default function App() {
   const [lang, setLang] = useState('EN');
-  const [stage, setStage] = useState<'LANG' | 'PHASE1' | 'TRIAGE' | 'PHASE2' | 'PHASE3' | 'PHASE4' | 'ANALYZING' | 'PACKET'>('LANG');
+  const [stage, setStage] = useState<'LANG' | 'PHASE1' | 'TRIAGE' | 'PHASE2' | 'PHASE3' | 'PHASE4' | 'PHOTO' | 'ANALYZING' | 'PACKET'>('LANG');
   const [currentQ, setCurrentQ] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [resources, setResources] = useState<any[]>([]);
   const [consulate, setConsulate] = useState<any>(null);
   const [copied, setCopied] = useState(false);
   const [assessment, setAssessment] = useState<any>(null);
+  // Optional one-time document photo review (never persisted server-side).
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoEvidenceKey, setPhotoEvidenceKey] = useState('');
+  const [imageReview, setImageReview] = useState<any>(null);
+  const [reviewing, setReviewing] = useState(false);
+  const [reviewError, setReviewError] = useState('');
 
   /** Plain-text rendering of the structured assessment for the packet. */
   const renderAssessmentText = (a: any): string => {
@@ -86,13 +109,19 @@ export default function App() {
         setStage('PHASE4');
         setCurrentQ(0);
       } else if (stage === 'PHASE4') {
+        setStage('PHOTO');
+        setCurrentQ(0);
+      } else if (stage === 'PHOTO') {
         handleInterviewComplete();
       }
     }
   };
 
   const handlePrevQuestion = () => {
-    if (stage === 'PHASE4') {
+    if (stage === 'PHOTO') {
+      setStage('PHASE4');
+      setCurrentQ(0);
+    } else if (stage === 'PHASE4') {
       setStage('PHASE3');
       setCurrentQ(PHASE_3_QUESTIONS.length - 1);
     } else if (currentQ > 0) {
@@ -110,6 +139,48 @@ export default function App() {
       } else if (stage === 'PHASE1') {
         setStage('LANG');
       }
+    }
+  };
+
+  /** One-time document photo review. The image is sent once and never stored by IRU. */
+  const handlePhotoReview = async () => {
+    if (!photoFile || reviewing) return;
+    setReviewError('');
+    setImageReview(null);
+    if (photoFile.size > 4 * 1024 * 1024) {
+      setReviewError(ui.photoError || 'Review unavailable.');
+      return;
+    }
+    setReviewing(true);
+    try {
+      const dataUrl: string = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(r.result as string);
+        r.onerror = reject;
+        r.readAsDataURL(photoFile);
+      });
+      const imageBase64 = dataUrl.split(',')[1] || '';
+      const response = await fetch('/api/review-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageBase64,
+          mimeType: photoFile.type || 'image/jpeg',
+          relatedEvidenceKey: photoEvidenceKey || undefined,
+        }),
+      });
+      if (!response.ok) throw new Error(`Server error: ${response.status}`);
+      const data = await response.json();
+      if (data && data.ok && data.review) {
+        setImageReview(data.review);
+      } else {
+        throw new Error('Bad review response');
+      }
+    } catch (e) {
+      console.error('Photo review error:', e);
+      setReviewError(ui.photoError || 'Review unavailable. You can continue without it.');
+    } finally {
+      setReviewing(false);
     }
   };
 
@@ -215,6 +286,7 @@ export default function App() {
     if (stage === 'PHASE2') return 60;
     if (stage === 'PHASE3') return 80;
     if (stage === 'PHASE4') return 90;
+    if (stage === 'PHOTO') return 95;
     if (stage === 'PACKET') return 100;
     return 0;
   };
@@ -239,31 +311,58 @@ export default function App() {
     `).join('');
 
     const triageRows: string[] = [];
-    let hasProxies = false;
+    let hasAlternatives = false;
+    const badge = (text: string, kind: 'green' | 'red' | 'amber' | 'gray') => {
+      const styles: Record<string, string> = {
+        green: 'background-color: #dcfce7; color: #166534;',
+        red: 'background-color: #fee2e2; color: #991b1b;',
+        amber: 'background-color: #fef3c7; color: #92400e;',
+        gray: 'background-color: #f1f5f9; color: #475569;',
+      };
+      return `<span class="status-green" style="${styles[kind]}">${escapeHtml(text)}</span>`;
+    };
+    /**
+     * Honest evidence states (mirrors api/lib/evidence.js resolveState):
+     * - "yes" → reported, NOT verified (amber — never green "ready")
+     * - "no" → action required; self-reported alternatives listed as
+     *   alternatives, never as verification
+     * - "unknown" → unknown
+     * Nothing the system has not reviewed is ever styled as ready.
+     */
     const addRow = (item: string, key: string, nextStepYes: string, nextStepNo: string) => {
-      if (answers[key]) {
-        const isYes = answers[key] === 'yes';
-        let statusHtml = isYes ? `<span class="status-green">${ui.statusGreen}</span>` : `<span class="status-red">${ui.statusRed}</span>`;
-        let nextStepHtml = isYes ? nextStepYes : nextStepNo;
-        
-        if (!isYes && PROXIES[key]) {
-          const selectedProxies = PROXIES[key].items.filter((i: any) => answers[i.id] === 'yes');
-          if (selectedProxies.length > 0) {
-            hasProxies = true;
-            const proxyNames = selectedProxies.map((i: any) => i.label[lang]).join(', ');
-            statusHtml = `<span class="status-green" style="background-color: #fef3c7; color: #92400e;">${ui.readyViaSecondary || 'Ready via Secondary Verification'}</span>`;
-            nextStepHtml = `${ui.readinessEstablishedViaProxy || 'Readiness Established via Proxy'}: ${proxyNames}`;
-          }
+      if (!answers[key]) return;
+      const ans = answers[key];
+      const st = ui.evidenceStates || {};
+      let statusHtml: string;
+      let nextStepHtml: string;
+      if (ans === 'yes') {
+        statusHtml = badge(st.reportedNotVerified || 'Reported — not verified', 'amber');
+        nextStepHtml = nextStepYes;
+      } else if (ans === 'unknown') {
+        statusHtml = badge(st.unknown || 'Unknown', 'gray');
+        nextStepHtml = nextStepNo;
+      } else {
+        statusHtml = badge(st.actionRequired || 'Action required', 'red');
+        const selectedProxies = (PROXIES[key]?.items || []).filter((i: any) => answers[i.id] === 'yes');
+        if (selectedProxies.length > 0) {
+          hasAlternatives = true;
+          const proxyNames = selectedProxies.map((i: any) => escapeHtml(i.label[lang])).join(', ');
+          nextStepHtml = `${escapeHtml(st.alternativeIdentified || ui.alternativesReported || 'Alternatives reported')}: ${proxyNames}. ${escapeHtml(ui.alternativesNotReviewed || '')}`;
+        } else {
+          nextStepHtml = nextStepNo;
         }
+      }
+      const legalNote = requiresLegalReview(key)
+        ? `<div style="margin-top:0.5rem;font-size:0.75rem;color:#92400e;font-weight:600;">⚖️ ${escapeHtml(st.legalReviewRequired || 'Needs qualified legal review')}</div>`
+        : '';
 
-        triageRows.push(`
+      triageRows.push(`
           <tr>
-            <td style="font-weight: 500;">${item}</td>
+            <td style="font-weight: 500;">${escapeHtml(item)}</td>
             <td>${statusHtml}</td>
-            <td style="color: #64748b;">${nextStepHtml}</td>
+            <td style="color: #64748b;">${nextStepHtml}${legalNote}</td>
           </tr>
         `);
-      }
     };
 
     addRow('Passport', 'has_passport', 'Photo-Vault & Email to self', consulate ? `Visit ${consulate.name} at ${consulate.address}` : 'Locate alternative ID');
@@ -275,6 +374,39 @@ export default function App() {
     addRow('Marriage/Divorce Certs', 'has_marriage_cert', 'Photo-Vault & Email to self', 'Request from vital records');
     addRow('Proof of Relationship', 'has_proof_of_relationship', 'Photo-Vault & Email to self', 'Gather photos, joint accounts');
     addRow('Certificates of Disposition', 'has_arrests', 'Photo-Vault & Email to self', 'Request from criminal court');
+
+    // Evidence Gaps & Alternatives section — rendered from the server-side KB.
+    // Alternatives are per-item with supports/limitations; nothing is marked ready.
+    const gapKeys = Object.keys(EVIDENCE_KB).filter(k => answers[k] && answers[k] !== 'yes');
+    const gapSectionHtml = gapKeys.length > 0 ? `
+        <div class="section">
+          <h3 class="section-title font-serif">${escapeHtml(ui.gapSectionTitle || 'Evidence Gaps & Alternatives')}</h3>
+          ${gapKeys.map(k => {
+            const kb: any = (EVIDENCE_KB as any)[k];
+            if (!kb) return '';
+            const na = nextActionFor(k, answers[k]);
+            const legalFlag = requiresLegalReview(k)
+              ? `<p style="font-size:0.875rem;color:#92400e;font-weight:600;">⚖️ ${escapeHtml(legalReviewReason(k) || '')}</p>`
+              : '';
+            return `
+            <div style="border: 1px solid #e2e8f0; border-radius: 0.75rem; padding: 1.25rem; margin-bottom: 1rem; background-color: #fffbeb;">
+              <h4 style="margin: 0 0 0.5rem 0; font-size: 1rem; font-weight: 700; color: #0f172a;">${escapeHtml(EVIDENCE_ITEM_NAMES[k] || k)} — ${escapeHtml(answers[k] === 'unknown' ? (ui.evidenceStates?.unknown || 'Unknown') : (ui.evidenceStates?.actionRequired || 'Action required'))}</h4>
+              <p style="margin: 0 0 0.5rem 0; font-size: 0.875rem; color: #334155;"><strong>Target fact:</strong> ${escapeHtml(kb.targetFact)}</p>
+              <p style="margin: 0 0 0.5rem 0; font-size: 0.875rem; color: #334155;"><strong>Primary evidence:</strong> ${escapeHtml(kb.primaryEvidence)}</p>
+              <ul style="margin: 0 0 0.5rem 0; padding-left: 1.25rem; font-size: 0.875rem; color: #334155;">
+                ${kb.alternatives.map((a: any) => `
+                <li style="margin-bottom: 0.5rem;">
+                  <strong>${escapeHtml(a.label)}</strong><br/>
+                  <span>${escapeHtml(ui.gapMaySupport || 'May help show')}: ${escapeHtml(a.supports)}</span><br/>
+                  <span>${escapeHtml(ui.gapCannotShow || 'Cannot show by itself')}: ${escapeHtml(a.limitations)}</span>
+                </li>`).join('')}
+              </ul>
+              <p style="margin: 0 0 0.5rem 0; font-size: 0.875rem; color: #334155;"><strong>${escapeHtml(ui.gapNextAction || 'Next step')}:</strong> ${escapeHtml(na.step)} <em>(${(na.responsible || '')}, ${(na.priority || '')} priority)</em></p>
+              ${legalFlag}
+            </div>`;
+          }).join('')}
+          <p style="font-size: 0.8rem; color: #64748b; font-style: italic;">Alternative descriptions are in English. Ask your legal representative to explain any item you do not understand.</p>
+        </div>` : '';
 
     const selectedStarters = NARRATIVE_STARTERS.filter(s => answers[s.id] === 'yes').map(s => s.labels[lang as keyof typeof s.labels]);
     const narrativeText = answers.narrative_text || '';
@@ -349,12 +481,24 @@ export default function App() {
             <tbody>${triageRows.join('')}</tbody>
           </table>
         </div>
+        ${gapSectionHtml}
+        ${imageReview ? `
+        <div class="section">
+          <h3 class="section-title font-serif">${escapeHtml(ui.photoTitle || 'Document Photo Review')}</h3>
+          <div style="background-color: #f8fafc; padding: 1.25rem; border: 1px solid #e2e8f0; border-radius: 0.75rem; font-size: 0.875rem; color: #334155;">
+            <p style="margin: 0 0 0.5rem 0;"><strong>Category:</strong> ${escapeHtml(String(imageReview.documentCategory || ''))}</p>
+            <p style="margin: 0 0 0.5rem 0;"><strong>Legibility:</strong> ${escapeHtml(String(imageReview.legibility || ''))} &nbsp; <strong>Appears complete:</strong> ${escapeHtml(String(imageReview.appearsComplete || ''))}</p>
+            ${(imageReview.inconsistencies || []).length > 0 ? `<ul style="margin: 0 0 0.5rem 0; padding-left: 1.25rem;">${(imageReview.inconsistencies || []).map((x: any) => `<li>${escapeHtml(String(x))}</li>`).join('')}</ul>` : ''}
+            ${(imageReview.limitations || []).length > 0 ? `<ul style="margin: 0; padding-left: 1.25rem; color: #64748b;">${(imageReview.limitations || []).map((x: any) => `<li>${escapeHtml(String(x))}</li>`).join('')}</ul>` : ''}
+            <p style="margin: 0.75rem 0 0 0; font-size: 0.8rem; color: #64748b; font-style: italic;">${escapeHtml(ui.photoPrivacy || '')} This review does not establish authenticity or legal sufficiency.</p>
+          </div>
+        </div>` : ''}
         <div class="section">
           <h3 class="section-title font-serif">${ui.localResources}</h3>
           ${resourcesHtml || '<p style="color: #64748b; font-style: italic;">No specific resources found.</p>'}
         </div>
         <div class="footer">
-          ${hasProxies ? `<p style="font-size: 0.875rem; font-weight: 600; color: #92400e; background-color: #fef3c7; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem; text-align: left;">${ui.noteForLegalCounsel}</p>` : ''}
+          ${hasAlternatives ? `<p style="font-size: 0.875rem; font-weight: 600; color: #92400e; background-color: #fef3c7; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem; text-align: left;">${ui.noteForLegalCounsel}</p>` : ''}
           <p>${ui.privacyShield}</p>
           <small>${ui.disclaimer}</small>
           <div style="margin-top: 2rem; font-size: 0.75rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.1em;">
@@ -643,6 +787,103 @@ export default function App() {
           </motion.div>
         )}
 
+        {stage === 'PHOTO' && (
+          <motion.div
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3 }}
+            className="p-8 sm:p-12"
+          >
+            <div className="space-y-8">
+              <h2 className="text-3xl font-serif font-semibold text-slate-900">
+                {ui.photoTitle}
+              </h2>
+
+              <div className="bg-indigo-50 rounded-xl p-4 flex items-start space-x-3 border border-indigo-100">
+                <Info className="w-5 h-5 text-indigo-600 flex-shrink-0 mt-0.5" />
+                <p className="text-sm text-indigo-900 leading-relaxed font-medium">
+                  {ui.photoDesc}
+                </p>
+              </div>
+
+              <div className="space-y-4">
+                <label className="block w-full p-6 rounded-xl border-2 border-dashed border-slate-300 hover:border-indigo-400 transition-colors cursor-pointer text-center">
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/gif"
+                    className="hidden"
+                    onChange={(e) => { setPhotoFile(e.target.files && e.target.files[0] ? e.target.files[0] : null); setImageReview(null); setReviewError(''); }}
+                  />
+                  <span className="text-slate-600 font-medium">
+                    {photoFile ? photoFile.name : (ui.photoChoose || 'Choose a photo…')}
+                  </span>
+                </label>
+
+                <select
+                  value={photoEvidenceKey}
+                  onChange={(e) => setPhotoEvidenceKey(e.target.value)}
+                  className="w-full p-3 rounded-xl border-2 border-slate-200 text-slate-700"
+                >
+                  <option value="">—</option>
+                  {Object.keys(EVIDENCE_ITEM_NAMES).map(k => (
+                    <option key={k} value={k}>{EVIDENCE_ITEM_NAMES[k]}</option>
+                  ))}
+                </select>
+
+                <p className="text-xs text-slate-500 flex items-start gap-1">
+                  <span aria-hidden="true">🔒</span>
+                  <span>{ui.photoPrivacy}</span>
+                </p>
+
+                {reviewError && (
+                  <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl p-3">{reviewError}</p>
+                )}
+
+                {imageReview && (
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 text-left space-y-2">
+                    <p className="text-sm text-slate-700"><strong>Category:</strong> {imageReview.documentCategory}</p>
+                    <p className="text-sm text-slate-700"><strong>Legibility:</strong> {imageReview.legibility}</p>
+                    <p className="text-sm text-slate-700"><strong>Appears complete:</strong> {imageReview.appearsComplete}</p>
+                    {imageReview.inconsistencies && imageReview.inconsistencies.length > 0 && (
+                      <ul className="text-sm text-amber-800 list-disc pl-5">
+                        {imageReview.inconsistencies.map((x: string, i: number) => <li key={i}>{x}</li>)}
+                      </ul>
+                    )}
+                    {imageReview.limitations && imageReview.limitations.length > 0 && (
+                      <ul className="text-xs text-slate-500 list-disc pl-5">
+                        {imageReview.limitations.map((x: string, i: number) => <li key={i}>{x}</li>)}
+                      </ul>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-between pt-6 border-t border-slate-100">
+                <button onClick={handlePrevQuestion} className="px-6 py-3 text-slate-600 font-medium hover:text-slate-900 transition-colors flex items-center space-x-2">
+                  <ArrowLeft className="w-4 h-4" />
+                  <span>{ui.back}</span>
+                </button>
+                <div className="flex gap-3">
+                  <button
+                    onClick={handlePhotoReview}
+                    disabled={!photoFile || reviewing}
+                    className="px-6 py-3 border-2 border-indigo-600 text-indigo-700 font-medium rounded-xl hover:bg-indigo-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {reviewing ? (ui.photoReviewing || 'Reviewing…') : (ui.photoReview || 'Review photo')}
+                  </button>
+                  <button
+                    onClick={handleNextQuestion}
+                    className="px-8 py-3 bg-indigo-600 text-white font-medium rounded-xl hover:bg-indigo-700 transition-colors flex items-center space-x-2"
+                  >
+                    <span>{ui.photoSkip || ui.next}</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
         {stage === 'ANALYZING' && (
           <motion.div 
             initial={{ opacity: 0 }}
@@ -712,7 +953,7 @@ export default function App() {
               </button>
               
               <button 
-                onClick={() => { setStage('LANG'); setAnswers({}); setCurrentQ(0); }} 
+                onClick={() => { setStage('LANG'); setAnswers({}); setCurrentQ(0); setImageReview(null); setPhotoFile(null); setReviewError(''); }} 
                 className="px-8 py-4 text-slate-600 font-medium hover:bg-slate-100 rounded-xl transition-colors w-full sm:w-auto justify-center border border-slate-200"
               >
                 {ui.startOver}
