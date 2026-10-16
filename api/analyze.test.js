@@ -29,7 +29,7 @@ function sseEvents(res) {
 const GOOD_ASSESSMENT = {
   readinessSummary: 'ok', factsProvided: [], missingInformation: [],
   contradictions: [], inferences: [], suggestedQuestions: [],
-  uncertaintyNotes: [], notLegalAdvice: 'Not legal advice.',
+  uncertaintyNotes: [], notLegalAdvice: 'Not legal advice.', evidenceGaps: [],
 };
 
 function stubClient(text) {
@@ -171,5 +171,35 @@ describe('handler', () => {
     const src = fs.readFileSync('./api/analyze.js', 'utf8');
     assert.ok(!src.includes('model: "gemini-2.5-flash"'), 'no hardcoded retired model');
     assert.ok(src.includes('process.env.GEMINI_MODEL'), 'model is env-configurable');
+  });
+
+  it('evidence gaps flow into the prompt and the fallback', async () => {
+    stubClient('not json');
+    const { req, res } = mockReqRes({
+      ip: 't11',
+      body: { answers: { country_of_origin: 'Haiti', has_passport: 'no', has_i94: 'unknown' }, lang: 'EN' },
+    });
+    await handler(req, res);
+    const prompt = globalThis.__LAST_PROMPT__;
+    assert.ok(prompt.includes('<evidence_gaps>'), 'gaps section in prompt');
+    assert.ok(/has_passport/.test(prompt), 'passport gap present in prompt');
+    const done = sseEvents(res).find(e => e.type === 'done');
+    assert.ok(done, 'done event emitted');
+    assert.ok(Array.isArray(done.assessment.evidenceGaps), 'fallback carries evidenceGaps');
+    const pp = done.assessment.evidenceGaps.find(g => g.key === 'has_passport');
+    assert.ok(pp, 'passport gap in fallback');
+    assert.ok(pp.alternatives.length > 0 && pp.alternatives[0].limitation, 'fallback alternatives carry limitations');
+    assert.ok(!/ready/i.test(JSON.stringify(done.assessment).replace(/already/gi, '')), 'fallback has no ready claims');
+  });
+
+  it('proxy fields are dropped at the boundary and never reach the model', async () => {
+    stubClient(JSON.stringify(GOOD_ASSESSMENT));
+    const { req, res } = mockReqRes({
+      ip: 't12',
+      body: { answers: { country_of_origin: 'Haiti', has_passport: 'no', proxy_passport_2: 'yes' }, lang: 'EN' },
+    });
+    await handler(req, res);
+    const prompt = globalThis.__LAST_PROMPT__;
+    assert.ok(!/^- proxy_.*: yes$/m.test(prompt), 'proxy answers must not appear as evidence lines');
   });
 });
