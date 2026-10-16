@@ -16,6 +16,7 @@ export const maxDuration = 60;
 import { GoogleGenAI } from "@google/genai";
 import { sanitizeAnswers, minimizeForModel, droppedFieldNames, MAX_BODY_BYTES } from "./lib/privacy.js";
 import { buildPrompt, validateModelOutput, fallbackAssessment } from "./lib/prompt.js";
+import { buildGapRecords } from "./lib/evidence.js";
 import { createLimiter, clientIp } from "./lib/ratelimit.js";
 
 const limiter = createLimiter({ capacity: 10, windowMs: 10 * 60 * 1000 });
@@ -80,7 +81,10 @@ export default async function handler(req, res) {
   }
 
   const min = minimizeForModel(sanitized.answers, narrativeStarters);
-  const prompt = buildPrompt(min, lang);
+  // Evidence-gap engine: server-side KB records for every missing/unknown
+  // item. The model tailors these; it never invents alternatives.
+  const gaps = buildGapRecords(min);
+  const prompt = buildPrompt(min, lang, gaps);
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
@@ -100,7 +104,7 @@ export default async function handler(req, res) {
     }
 
     const validated = validateModelOutput(fullText);
-    const assessment = validated.ok ? validated.data : fallbackAssessment(min);
+    const assessment = validated.ok ? validated.data : fallbackAssessment(min, gaps);
     if (!validated.ok) {
       console.log(`[iru] model output failed validation: ${validated.error}`);
     }
@@ -109,7 +113,7 @@ export default async function handler(req, res) {
   } catch (err) {
     // Never leak provider internals or prompt content to the client.
     console.error("[iru] analysis provider error:", err && err.message ? err.message : err);
-    send({ type: "error", assessment: fallbackAssessment(min) });
+    send({ type: "error", assessment: fallbackAssessment(min, gaps) });
     res.end();
   }
 }
