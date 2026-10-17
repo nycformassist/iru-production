@@ -211,7 +211,14 @@ export default function App() {
       const response = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ answers: serverAnswers, lang, narrativeStarters }),
+        body: JSON.stringify({
+          answers: serverAnswers,
+          lang,
+          narrativeStarters,
+          // Optional: the server re-validates this strictly and treats it as
+          // unverified observations only. Never includes image bytes.
+          imageReviews: imageReview ? [imageReview] : [],
+        }),
         signal: controller.signal,
       }).finally(() => clearTimeout(timeout));
 
@@ -388,6 +395,12 @@ export default function App() {
             const legalFlag = requiresLegalReview(k)
               ? `<p style="font-size:0.875rem;color:#92400e;font-weight:600;">⚖️ ${escapeHtml(legalReviewReason(k) || '')}</p>`
               : '';
+            // Cross-reference the standalone Document Photo Review section when
+            // the uploaded photo was reviewed for this gap — avoids duplicating
+            // the findings here while showing the integration.
+            const imageRef = (imageReview && imageReview.relatedReadinessItem === k)
+              ? `<p style="font-size:0.875rem;color:#4f46e5;background-color:#eef2ff;border-radius:0.5rem;padding:0.75rem 1rem;margin:0 0 0.5rem 0;">📷 ${escapeHtml(ui.imageInformedGap || 'An uploaded photo was reviewed for this item. The observations informed the guidance above — nothing has been verified.')}</p>`
+              : '';
             return `
             <div style="border: 1px solid #e2e8f0; border-radius: 0.75rem; padding: 1.25rem; margin-bottom: 1rem; background-color: #fffbeb;">
               <h4 style="margin: 0 0 0.5rem 0; font-size: 1rem; font-weight: 700; color: #0f172a;">${escapeHtml(EVIDENCE_ITEM_NAMES[k] || k)} — ${escapeHtml(answers[k] === 'unknown' ? (ui.evidenceStates?.unknown || 'Unknown') : (ui.evidenceStates?.actionRequired || 'Action required'))}</h4>
@@ -402,6 +415,7 @@ export default function App() {
                 </li>`).join('')}
               </ul>
               <p style="margin: 0 0 0.5rem 0; font-size: 0.875rem; color: #334155;"><strong>${escapeHtml(ui.gapNextAction || 'Next step')}:</strong> ${escapeHtml(na.step)} <em>(${(na.responsible || '')}, ${(na.priority || '')} priority)</em></p>
+              ${imageRef}
               ${legalFlag}
             </div>`;
           }).join('')}
