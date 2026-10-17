@@ -41,8 +41,9 @@ const LANG_NAMES = {
  * @param {object} min minimized model payload
  * @param {string} lang target language code
  * @param {Array} gaps server-side gap records from buildGapRecords(min); optional
+ * @param {Array} imageReviews validated image-review findings (lib/vision.js); optional
  */
-export function buildPrompt(min, lang = 'EN', gaps = []) {
+export function buildPrompt(min, lang = 'EN', gaps = [], imageReviews = []) {
   const evidenceLines = Object.entries(min.evidence)
     .map(([k, v]) => `- ${k}: ${v}`)
     .join('\n');
@@ -69,6 +70,35 @@ specific facts (e.g. which alternative is most practical for them). You must NOT
 - mark any item "ready", "verified", "authenticated", or "legally sufficient".
 `
     : 'No evidence gaps were identified by the system for this submission.';
+
+  const imageSection = (imageReviews && imageReviews.length > 0)
+    ? `
+AUTOMATED IMAGE-REVIEW OBSERVATIONS (unverified — from a one-time automated
+look at uploaded document photos; the images were NOT retained):
+${imageReviews.map((r, i) => `
+Observation ${i + 1} (relates to evidence item: ${r.relatedReadinessItem}):
+- Apparent document category: ${r.documentCategory}
+- Legibility: ${r.legibility} | Appears complete: ${r.appearsComplete}
+- Field labels visible (labels only, never values): ${r.fieldsVisible.join(', ') || 'none identified'}
+- Apparent inconsistencies noted: ${r.inconsistencies.join('; ') || 'none'}
+- Stated limitations: ${r.limitations.join('; ')}`).join('\n')}
+
+How to use these observations:
+- You MAY use them to tailor WHICH alternative from the gap list is most
+  practical for this applicant (e.g. if the photo appears to show a consular
+  ID, prioritize guidance about confirming it is current and matches other
+  records).
+- You MUST present every observation as an unverified automated observation,
+  never as an established fact. Phrase as "the uploaded photo appears to
+  show…" — never "the applicant has…".
+- You must NOT: declare the document authentic, genuine, verified, legally
+  sufficient, or eligible; infer fraud from visual anomalies; treat the
+  observation as independent verification of any evidence item; or mark any
+  item ready/verified on the basis of an image review.
+- If an observation seems relevant to a gap, explain what it appears to show,
+  what remains unverified, and what a qualified human should do next.
+`
+    : 'No document photos were uploaded for automated review.';
 
   return `
 You are an immigration information-readiness assistant. Your job is to help an
@@ -100,6 +130,11 @@ ${legalHardRules().split('\n').map(l => '  * ' + l).join('\n')}
 - Do not recommend efforts to obtain evidence that could endanger the
   applicant, their family, or witnesses without prominent caution and a
   direction to consult qualified counsel first.
+- Image-review observations (if any) are UNVERIFIED automated observations.
+  They may refine which alternative is most practical, but they establish
+  nothing: not authenticity, not legal sufficiency, not eligibility. Never
+  present an observation as a fact, and never mark any item verified,
+  authenticated, or ready because of an image review.
 - Keep the tone supportive and plain. Avoid jargon where possible.
 - LANGUAGE: write all string VALUES in ${targetLang}. The JSON KEYS must stay
   exactly as specified (English keys), but every human-readable value should
@@ -124,6 +159,10 @@ ${min.narrativeText || 'None'}
 <evidence_gaps>
 ${gapSection}
 </evidence_gaps>
+
+<image_review_observations>
+${imageSection}
+</image_review_observations>
 
 Respond with a single JSON object and nothing else, using exactly these keys:
 {
@@ -190,6 +229,11 @@ export function validateModelOutput(text) {
   if (/legally sufficient/i.test(haystack)) {
     return { ok: false, error: 'model output claimed legal sufficiency' };
   }
+  // An image review can never independently verify anything. Reject any
+  // claim that evidence was independently verified on that basis.
+  if (/independently[- ]verified/i.test(haystack)) {
+    return { ok: false, error: 'model output claimed independent verification' };
+  }
   // The model must not declare anything "ready" as a case-status claim.
   if (/(case|application|requirement)\s+is\s+ready/i.test(haystack)) {
     return { ok: false, error: 'model output declared the case ready' };
@@ -198,13 +242,16 @@ export function validateModelOutput(text) {
 }
 
 /** Safe fallback when the model fails or its output is invalid. */
-export function fallbackAssessment(min, gaps = []) {
+export function fallbackAssessment(min, gaps = [], imageReviews = []) {
   const missing = Object.entries(min.evidence)
     .filter(([, v]) => v === 'no' || v === 'unknown')
     .map(([k]) => k);
+  const imageNote = (imageReviews && imageReviews.length > 0)
+    ? ' One or more document photos were uploaded for automated review; the observations were not verified and did not change any evidence state — a qualified human must still examine the originals.'
+    : '';
   return {
     readinessSummary:
-      'The automated readiness review could not be completed. The evidence checklist below is complete — please present this packet to a qualified legal professional for review.',
+      'The automated readiness review could not be completed. The evidence checklist below is complete — please present this packet to a qualified legal professional for review.' + imageNote,
     factsProvided: [`Case type: ${min.caseType}`, `Country of origin: ${min.countryOfOrigin}`, `Entry year: ${min.entryYear}`],
     missingInformation: missing.length > 0 ? missing : ['No evidence items were marked missing.'],
     contradictions: min.entryDateFlag === 'future-date'
@@ -225,6 +272,11 @@ export function fallbackAssessment(min, gaps = []) {
       })),
       nextAction: `${g.nextAction.step} (Responsible: ${g.nextAction.responsible}; priority: ${g.nextAction.priority}.)`,
       legalReviewRequired: g.legalReviewRequired,
+      // Surface validated image observations in the fallback too, clearly
+      // marked as unverified — never as established facts.
+      imageObservations: (g.imageObservations || []).map(o => ({
+        note: `Automated observation (NOT verified): the uploaded photo appears to show "${o.documentCategory}" (legibility: ${o.legibility}). A qualified human must examine the original document.`,
+      })),
     })),
   };
 }

@@ -17,6 +17,7 @@ import { GoogleGenAI } from "@google/genai";
 import { sanitizeAnswers, minimizeForModel, droppedFieldNames, MAX_BODY_BYTES } from "./lib/privacy.js";
 import { buildPrompt, validateModelOutput, fallbackAssessment } from "./lib/prompt.js";
 import { buildGapRecords } from "./lib/evidence.js";
+import { validateImageReviews } from "./lib/vision.js";
 import { createLimiter, clientIp } from "./lib/ratelimit.js";
 
 const limiter = createLimiter({ capacity: 10, windowMs: 10 * 60 * 1000 });
@@ -69,22 +70,32 @@ export default async function handler(req, res) {
     return res.status(413).json({ error: "Request too large." });
   }
 
-  const { answers, lang, narrativeStarters } = rawBody || {};
+  const { answers, lang, narrativeStarters, imageReviews } = rawBody || {};
   const sanitized = sanitizeAnswers(answers);
   if (!sanitized.ok) {
     return res.status(400).json({ error: "Invalid submission.", details: sanitized.errors });
+  }
+  // Optional image-review findings: strictly re-validated server-side.
+  // Client-supplied reviews are treated as unverified observations only —
+  // they can refine guidance, never establish facts or verification.
+  const validatedReviews = validateImageReviews(imageReviews);
+  if (!validatedReviews.ok) {
+    return res.status(400).json({ error: "Invalid submission.", details: [validatedReviews.error] });
   }
   const dropped = droppedFieldNames(sanitized.answers);
   if (dropped.length > 0) {
     // Audit the boundary: field NAMES only, never values. No PII in logs.
     console.log(`[iru] dropped non-allowlisted fields: ${dropped.join(',')}`);
   }
+  if (validatedReviews.reviews.length > 0) {
+    console.log(`[iru] analyze with ${validatedReviews.reviews.length} validated image observation(s)`);
+  }
 
   const min = minimizeForModel(sanitized.answers, narrativeStarters);
   // Evidence-gap engine: server-side KB records for every missing/unknown
   // item. The model tailors these; it never invents alternatives.
-  const gaps = buildGapRecords(min);
-  const prompt = buildPrompt(min, lang, gaps);
+  const gaps = buildGapRecords(min, validatedReviews.reviews);
+  const prompt = buildPrompt(min, lang, gaps, validatedReviews.reviews);
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
@@ -104,7 +115,7 @@ export default async function handler(req, res) {
     }
 
     const validated = validateModelOutput(fullText);
-    const assessment = validated.ok ? validated.data : fallbackAssessment(min, gaps);
+    const assessment = validated.ok ? validated.data : fallbackAssessment(min, gaps, validatedReviews.reviews);
     if (!validated.ok) {
       console.log(`[iru] model output failed validation: ${validated.error}`);
     }
@@ -113,7 +124,7 @@ export default async function handler(req, res) {
   } catch (err) {
     // Never leak provider internals or prompt content to the client.
     console.error("[iru] analysis provider error:", err && err.message ? err.message : err);
-    send({ type: "error", assessment: fallbackAssessment(min, gaps) });
+    send({ type: "error", assessment: fallbackAssessment(min, gaps, validatedReviews.reviews) });
     res.end();
   }
 }
