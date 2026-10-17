@@ -19,6 +19,10 @@ export const maxDuration = 60;
 import { GoogleGenAI } from "@google/genai";
 import { createLimiter, clientIp } from "./lib/ratelimit.js";
 import { EVIDENCE_KEYS } from "./lib/evidence.js";
+import { sanitizeVisionReview } from "./lib/vision.js";
+
+// Re-exported for tests and for /api/analyze (shared validation contract).
+export { sanitizeVisionReview };
 
 // Stricter than /api/analyze: image review is more expensive per call.
 const limiter = createLimiter({ capacity: 5, windowMs: 10 * 60 * 1000 });
@@ -26,16 +30,6 @@ const limiter = createLimiter({ capacity: 5, windowMs: 10 * 60 * 1000 });
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024; // 4 MB decoded
 const MAX_BODY_BYTES = 6 * 1024 * 1024; // base64 overhead + JSON
 const ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
-
-const REVIEW_SCHEMA_KEYS = [
-  'documentCategory',
-  'legibility',
-  'fieldsVisible',
-  'appearsComplete',
-  'inconsistencies',
-  'relatedReadinessItem',
-  'limitations',
-];
 
 const AUTHENTICITY_DISCLAIMER =
   'This automated review does not establish authenticity or legal sufficiency. ' +
@@ -85,39 +79,6 @@ HARD RULES:
 - List field LABELS only. Do not transcribe names, numbers, dates, or other personal details from the image.
 - If you cannot determine something, say so. Do not guess.
 `.trim();
-}
-
-/** Strip authenticity/sufficiency claims; enforce the disclaimer. Never throws. */
-export function sanitizeVisionReview(obj) {
-  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
-    return { ok: false, error: 'vision output was not an object' };
-  }
-  for (const key of REVIEW_SCHEMA_KEYS) {
-    if (!(key in obj)) return { ok: false, error: `missing key: ${key}` };
-  }
-  if (typeof obj.documentCategory !== 'string' ||
-      typeof obj.legibility !== 'string' ||
-      typeof obj.appearsComplete !== 'string' ||
-      typeof obj.relatedReadinessItem !== 'string') {
-    return { ok: false, error: 'string fields must be strings' };
-  }
-  if (!Array.isArray(obj.fieldsVisible) || !Array.isArray(obj.inconsistencies) || !Array.isArray(obj.limitations)) {
-    return { ok: false, error: 'list fields must be arrays' };
-  }
-  const strip = (s) => String(s).replace(/\b(authentic|genuine|verified|legally sufficient)\b/gi, '[unverifiable claim removed]');
-  const data = {
-    documentCategory: strip(obj.documentCategory).slice(0, 200),
-    legibility: strip(obj.legibility).slice(0, 50),
-    fieldsVisible: obj.fieldsVisible.filter(f => typeof f === 'string').map(f => strip(f).slice(0, 100)).slice(0, 30),
-    appearsComplete: strip(obj.appearsComplete).slice(0, 50),
-    inconsistencies: obj.inconsistencies.filter(f => typeof f === 'string').map(f => strip(f).slice(0, 300)).slice(0, 20),
-    relatedReadinessItem: strip(obj.relatedReadinessItem).slice(0, 100),
-    limitations: obj.limitations.filter(f => typeof f === 'string').map(f => strip(f).slice(0, 300)).slice(0, 20),
-  };
-  if (!data.limitations.some(l => /authenticity|legal sufficiency/i.test(l))) {
-    data.limitations.push(AUTHENTICITY_DISCLAIMER);
-  }
-  return { ok: true, data };
 }
 
 function withTimeout(promise, ms) {

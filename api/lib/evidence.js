@@ -395,6 +395,8 @@ export const EVIDENCE_KB = Object.freeze({
   },
 });
 
+import { matchReviewsToGap } from './vision.js';
+
 /**
  * Build structured gap records for every evidence key the applicant did not
  * answer "yes" to. Each record has the 10 directive fields. Alternatives come
@@ -402,10 +404,15 @@ export const EVIDENCE_KB = Object.freeze({
  * witnesses, or corroboration.
  *
  * @param {object} min minimized model payload ({ evidence: {key: 'yes'|'no'|'unknown'} })
+ * @param {Array} imageReviews validated image-review findings (from lib/vision.js
+ *   validateImageReviews). Reviews whose relatedReadinessItem matches a gap key
+ *   are attached as unverified observations. They refine guidance only — they
+ *   NEVER change an evidence state and NEVER set INDEPENDENTLY_VERIFIED.
  * @returns {Array} gap records
  */
-export function buildGapRecords(min) {
+export function buildGapRecords(min, imageReviews = []) {
   const evidence = (min && min.evidence) || {};
+  const reviews = Array.isArray(imageReviews) ? imageReviews : [];
   const records = [];
   for (const key of EVIDENCE_KEYS) {
     const answer = evidence[key];
@@ -416,6 +423,19 @@ export function buildGapRecords(min) {
       answer === 'no'
         ? 'Applicant reported they do not have this document.'
         : 'Applicant does not know whether they have this document, or it does not apply as asked.';
+    // Attach validated image-review observations relevant to this gap.
+    // Observations refine guidance only: they never change the gap's state,
+    // never mark anything ready/verified, and never set independently-verified.
+    const imageObservations = matchReviewsToGap(key, reviews).map(r => ({
+      documentCategory: r.documentCategory,
+      legibility: r.legibility,
+      appearsComplete: r.appearsComplete,
+      fieldsVisible: r.fieldsVisible,
+      inconsistencies: r.inconsistencies,
+      limitations: r.limitations,
+      // Explicit provenance marker: observation, not fact.
+      source: 'automated-image-observation-not-verified',
+    }));
     records.push({
       key,
       targetFact: kb.targetFact,
@@ -440,6 +460,8 @@ export function buildGapRecords(min) {
       reviewRequirements: kb.alternatives.map(a => `${a.label}: ${a.reviewNeeded}`).join(' '),
       legalReviewRequired: requiresLegalReview(key),
       legalReviewReason: legalReviewReason(key),
+      imageObservations,
+      imageReviewed: imageObservations.length > 0,
       nextAction: nextActionFor(key, answer),
     });
   }
