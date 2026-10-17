@@ -442,7 +442,7 @@ export default function App() {
       </head>
       <body>
         <div class="header">
-          <img src="/seal.png" alt="The Human Anchor Seal" />
+          <img src="/seal.png" alt="SMRG - Saint Martin Revenue Group" />
           <h1 class="font-serif">${ui.packetTitle}</h1>
           <p>${ui.humanAnchorSeal} • ${new Date().toLocaleDateString()}</p>
           <div style="margin-top: 1rem; display: inline-block; background-color: #eef2ff; color: #4f46e5; padding: 0.5rem 1rem; border-radius: 9999px; font-weight: 700; font-size: 0.875rem;">
@@ -531,7 +531,7 @@ export default function App() {
   return (
     <div className="min-h-screen flex flex-col items-center py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-3xl w-full text-center mb-8">
-        <img src="/seal.png" alt="The Human Anchor Seal" className="w-24 h-24 mx-auto mb-6 object-contain" />
+        <img src="/seal.png" alt="SMRG - Saint Martin Revenue Group" className="w-24 h-24 mx-auto mb-6 object-contain" />
         <h1 className="text-4xl font-serif font-bold text-slate-900 mb-4 tracking-tight">
           {ui.title}
         </h1>
