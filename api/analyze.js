@@ -106,13 +106,23 @@ export default async function handler(req, res) {
   try {
     const client = getAiClient(apiKey);
     let fullText = "";
-    for await (const chunk of client.generateContentStream(prompt)) {
-      const text = chunk.text || "";
-      if (text) {
-        fullText += text;
-        send({ type: "chunk", text });
+    // Timeout the AI stream: if Vercel kills the function mid-stream, the client
+    // gets a truncated response with no 'done' event. Abort early and use fallback.
+    const AI_TIMEOUT_MS = 45000; // Leave headroom under Vercel's 60s maxDuration
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('AI generation timeout')), AI_TIMEOUT_MS);
+    });
+    const streamPromise = (async () => {
+      for await (const chunk of client.generateContentStream(prompt)) {
+        const text = chunk.text || "";
+        if (text) {
+          fullText += text;
+          send({ type: "chunk", text });
+        }
       }
-    }
+      return fullText;
+    })();
+    await Promise.race([streamPromise, timeoutPromise]);
 
     const validated = validateModelOutput(fullText);
     const assessment = validated.ok ? validated.data : fallbackAssessment(min, gaps, validatedReviews.reviews);
