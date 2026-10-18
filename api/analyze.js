@@ -141,7 +141,9 @@ export default async function handler(req, res) {
         responseLength: fullText ? fullText.length : 0,
       }));
     }
-    send({ type: "done", assessment });
+    // Include ai_unavailable status when validation fails (fallback used)
+    const status = validated.ok ? undefined : "ai_unavailable";
+    send({ type: "done", status, assessment });
     res.end();
   } catch (err) {
     // Structured, privacy-safe logging. Never log intake answers, PII, or prompt content.
