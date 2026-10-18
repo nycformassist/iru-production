@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import { Shield, Globe, Printer, ArrowRight, ArrowLeft, CheckCircle2, Copy, Info } from 'lucide-react';
 import { motion } from 'framer-motion';
 
@@ -189,16 +189,8 @@ export default function App() {
     }
   };
 
-  // ── Complete reset (prevents stale results) ────────────────────────────────
+  // ── Complete reset ───────────────────────────────────────────────────────
   const handleStartOver = () => {
-    // Abort any in-flight request
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
-    }
-    // Bump runId so late responses are ignored
-    setRunId(prev => prev + 1);
-    // Reset all state
     setStage('LANG');
     setAnswers({});
     setCurrentQ(0);
@@ -210,9 +202,6 @@ export default function App() {
   };
 
   const handleInterviewComplete = async () => {
-    const currentRunId = runId;
-    // Create abort controller for this request
-    abortControllerRef.current = new AbortController();
     setStage('ANALYZING');
     const zip = answers.zip_code || '';
     const prefix = zip.substring(0, 3);
@@ -274,11 +263,6 @@ export default function App() {
             }
           } catch { /* skip malformed lines */ }
         }
-      }
-      // Ignore stale responses (user clicked Start Over during request)
-      if (currentRunId !== runId) {
-        console.log('[iru] Ignoring stale response after reset');
-        return;
       }
       setAssessment(finalAssessment);
     } catch (error) {
