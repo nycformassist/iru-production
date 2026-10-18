@@ -56,6 +56,7 @@ export default function App() {
   const [consulate, setConsulate] = useState<any>(null);
   const [copied, setCopied] = useState(false);
   const [assessment, setAssessment] = useState<any>(null);
+  const [aiUnavailable, setAiUnavailable] = useState(false);
   // Optional one-time document photo review (never persisted server-side).
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoEvidenceKey, setPhotoEvidenceKey] = useState('');
@@ -66,6 +67,10 @@ export default function App() {
   /** Plain-text rendering of the structured assessment for the packet. */
   const renderAssessmentText = (a: any): string => {
     if (!a) return 'Analysis could not be generated.';
+    if (aiUnavailable) {
+      return 'AI analysis unavailable. Showing rule-based findings from your intake answers.\n\n' +
+        (a.readinessSummary || '');
+    }
     const section = (title: string, items: string[]) =>
       items && items.length > 0 ? `${title}:\n${items.map(i => `\u2022 ${i}`).join('\n')}` : '';
     return [
@@ -184,7 +189,30 @@ export default function App() {
     }
   };
 
+  // ── Complete reset (prevents stale results) ────────────────────────────────
+  const handleStartOver = () => {
+    // Abort any in-flight request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    // Bump runId so late responses are ignored
+    setRunId(prev => prev + 1);
+    // Reset all state
+    setStage('LANG');
+    setAnswers({});
+    setCurrentQ(0);
+    setImageReview(null);
+    setPhotoFile(null);
+    setReviewError('');
+    setAssessment(null);
+    setAiUnavailable(false);
+  };
+
   const handleInterviewComplete = async () => {
+    const currentRunId = runId;
+    // Create abort controller for this request
+    abortControllerRef.current = new AbortController();
     setStage('ANALYZING');
     const zip = answers.zip_code || '';
     const prefix = zip.substring(0, 3);
@@ -239,9 +267,18 @@ export default function App() {
             const event = JSON.parse(line.slice(6));
             if (event.type === 'done' || event.type === 'error') {
               if (event.assessment) finalAssessment = event.assessment;
+              if (event.status === 'ai_unavailable') {
+                // AI failed; fallback assessment provided but marked as unavailable
+                setAiUnavailable(true);
+              }
             }
           } catch { /* skip malformed lines */ }
         }
+      }
+      // Ignore stale responses (user clicked Start Over during request)
+      if (currentRunId !== runId) {
+        console.log('[iru] Ignoring stale response after reset');
+        return;
       }
       setAssessment(finalAssessment);
     } catch (error) {
