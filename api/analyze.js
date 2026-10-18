@@ -47,6 +47,8 @@ function getAiClient(apiKey) {
 }
 
 export default async function handler(req, res) {
+  const startTime = Date.now();
+  const requestId = Math.random().toString(36).slice(2, 8);
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
@@ -127,14 +129,48 @@ export default async function handler(req, res) {
     const validated = validateModelOutput(fullText);
     const assessment = validated.ok ? validated.data : fallbackAssessment(min, gaps, validatedReviews.reviews);
     if (!validated.ok) {
-      console.log(`[iru] model output failed validation: ${validated.error}`);
+      const durationMs = Date.now() - startTime;
+      console.error(JSON.stringify({
+        event: 'iru_analyze_validation_failure',
+        requestId,
+        stage: 'output_validation',
+        errorClass: 'validation',
+        durationMs,
+        message: String(validated.error).slice(0, 200),
+        responseEmpty: !fullText || fullText.length === 0,
+        responseLength: fullText ? fullText.length : 0,
+      }));
     }
     send({ type: "done", assessment });
     res.end();
   } catch (err) {
-    // Never leak provider internals or prompt content to the client.
-    console.error("[iru] analysis provider error:", err && err.message ? err.message : err);
-    send({ type: "error", assessment: fallbackAssessment(min, gaps, validatedReviews.reviews) });
+    // Structured, privacy-safe logging. Never log intake answers, PII, or prompt content.
+    const durationMs = Date.now() - startTime;
+    const errMsg = err && err.message ? String(err.message).slice(0, 200) : String(err).slice(0, 200);
+    const errName = err && err.name ? String(err.name).slice(0, 50) : 'unknown';
+    // Extract provider HTTP status if available (without exposing details)
+    let providerStatus = 'unknown';
+    if (err && typeof err === 'object') {
+      const e = err;
+      if (e.status) providerStatus = String(e.status).slice(0, 10);
+      else if (e.code) providerStatus = String(e.code).slice(0, 20);
+    }
+    console.error(JSON.stringify({
+      event: 'iru_analyze_failure',
+      requestId,
+      stage: 'ai_stream',
+      errorClass: errName,
+      providerStatus,
+      durationMs,
+      message: errMsg,
+      // Never include: answers, imageReviews content, prompt, apiKey
+    }));
+    // Return explicit ai_unavailable status instead of fake assessment
+    send({ 
+      type: "error", 
+      status: "ai_unavailable",
+      assessment: fallbackAssessment(min, gaps, validatedReviews.reviews) 
+    });
     res.end();
   }
 }
