@@ -29,7 +29,9 @@ const limiter = createLimiter({ capacity: 5, windowMs: 10 * 60 * 1000 });
 
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024; // 4 MB decoded
 const MAX_BODY_BYTES = 6 * 1024 * 1024; // base64 overhead + JSON
-const ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+const ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'application/pdf']);
+// PDF page limit: controls Gemini token costs (each page is processed as images)
+const MAX_PDF_PAGES = 20;
 
 const AUTHENTICITY_DISCLAIMER =
   'This automated review does not establish authenticity or legal sufficiency. ' +
@@ -121,8 +123,11 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Invalid submission.', details: ['imageBase64 is required'] });
   }
   if (!ALLOWED_MIME.has(mimeType)) {
-    return res.status(400).json({ error: 'Invalid submission.', details: ['unsupported image type'] });
+    return res.status(400).json({ error: 'Invalid submission.', details: ['unsupported file type'] });
   }
+
+  // Validate file signatures (magic bytes) — do not trust MIME type alone
+  const isPdf = mimeType === 'application/pdf';
   if (relatedEvidenceKey !== undefined && relatedEvidenceKey !== null && !EVIDENCE_KEYS.includes(relatedEvidenceKey)) {
     return res.status(400).json({ error: 'Invalid submission.', details: ['unknown relatedEvidenceKey'] });
   }
@@ -135,7 +140,31 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Invalid submission.', details: ['malformed image data'] });
   }
   if (imageBytes.length === 0 || imageBytes.length > MAX_IMAGE_BYTES) {
-    return res.status(413).json({ error: 'Image too large. Maximum 4 MB.' });
+    return res.status(413).json({ error: isPdf ? 'PDF too large. Maximum 4 MB.' : 'Image too large. Maximum 4 MB.' });
+  }
+
+  // PDF-specific validation: check magic bytes and page count
+  if (isPdf) {
+    // Validate PDF signature: must start with %PDF-
+    const header = imageBytes.subarray(0, 5).toString('ascii');
+    if (header !== '%PDF-') {
+      return res.status(400).json({ error: 'Invalid submission.', details: ['file is not a valid PDF'] });
+    }
+    // Count pages by scanning for /Type /Page (not /Pages)
+    // This is a heuristic; exact count requires a PDF parser
+    const pdfText = imageBytes.toString('latin1');
+    const pageMatches = pdfText.match(/\/Type\s*\/Page[^s]/g);
+    const pageCount = pageMatches ? pageMatches.length : 0;
+    if (pageCount === 0) {
+      return res.status(400).json({ error: 'Invalid submission.', details: ['PDF appears to have no pages or is corrupted'] });
+    }
+    if (pageCount > MAX_PDF_PAGES) {
+      return res.status(413).json({ error: `PDF has ${pageCount} pages. Maximum ${MAX_PDF_PAGES} pages.` });
+    }
+    // Check for encryption
+    if (pdfText.includes('/Encrypt')) {
+      return res.status(400).json({ error: 'Invalid submission.', details: ['encrypted PDFs are not supported'] });
+    }
   }
   // Drop the decoded buffer reference as early as possible; only the
   // original base64 string is forwarded to the provider in this request.
