@@ -988,7 +988,7 @@ export default function App() {
               </button>
               
               <button 
-                onClick={() => { setStage('LANG'); setAnswers({}); setCurrentQ(0); setImageReview(null); setPhotoFile(null); setReviewError(''); }} 
+                onClick={handleStartOver} 
                 className="px-8 py-4 text-slate-600 font-medium hover:bg-slate-100 rounded-xl transition-colors w-full sm:w-auto justify-center border border-slate-200"
               >
                 {ui.startOver}
