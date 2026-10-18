@@ -824,7 +824,7 @@ export default function App() {
                 <label className="block w-full p-6 rounded-xl border-2 border-dashed border-slate-300 hover:border-indigo-400 transition-colors cursor-pointer text-center">
                   <input
                     type="file"
-                    accept="image/jpeg,image/png,image/webp,image/gif"
+                    accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,.pdf"
                     className="hidden"
                     onChange={(e) => { setPhotoFile(e.target.files && e.target.files[0] ? e.target.files[0] : null); setImageReview(null); setReviewError(''); }}
                   />
