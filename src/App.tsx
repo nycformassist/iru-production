@@ -66,11 +66,11 @@ export default function App() {
 
   /** Plain-text rendering of the structured assessment for the packet. */
   const renderAssessmentText = (a: any): string => {
-    if (!a) return 'Analysis could not be generated.';
     if (aiUnavailable) {
       return 'AI analysis unavailable. Showing rule-based findings from your intake answers.\n\n' +
-        (a.readinessSummary || '');
+        (a?.readinessSummary || 'The automated readiness review could not be completed. Please present your packet to a qualified legal professional.');
     }
+    if (!a) return 'Analysis could not be generated.';
     const section = (title: string, items: string[]) =>
       items && items.length > 0 ? `${title}:\n${items.map(i => `\u2022 ${i}`).join('\n')}` : '';
     return [
