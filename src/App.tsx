@@ -57,6 +57,7 @@ export default function App() {
   const [copied, setCopied] = useState(false);
   const [assessment, setAssessment] = useState<any>(null);
   const [aiUnavailable, setAiUnavailable] = useState(false);
+  const [isNycCoverage, setIsNycCoverage] = useState(true);
   // Optional one-time document photo review (never persisted server-side).
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoEvidenceKey, setPhotoEvidenceKey] = useState('');
@@ -199,6 +200,7 @@ export default function App() {
     setReviewError('');
     setAssessment(null);
     setAiUnavailable(false);
+    setIsNycCoverage(true);
   };
 
   const handleInterviewComplete = async () => {
@@ -206,8 +208,15 @@ export default function App() {
     const zip = answers.zip_code || '';
     const prefix = zip.substring(0, 3);
     const match = NYC_RESOURCES.find(r => r.prefix === prefix);
-    if (match) setResources([match]);
-    else setResources(NYC_RESOURCES.filter(r => r.prefix === '100' || r.prefix === '104'));
+    if (match) {
+      setResources([match]);
+      setIsNycCoverage(true);
+    } else {
+      // Outside NYC coverage area: show NYC resources with clear labeling
+      // plus national directory guidance. Do not misrepresent as local.
+      setResources(NYC_RESOURCES.filter(r => r.prefix === '100' || r.prefix === '104'));
+      setIsNycCoverage(false);
+    }
 
     const country = (answers.country_of_origin || '').toLowerCase().trim();
     if (country && CONSULATES[country]) setConsulate(CONSULATES[country]);
@@ -530,6 +539,13 @@ export default function App() {
         </div>` : ''}
         <div class="section">
           <h3 class="section-title font-serif">${ui.localResources}</h3>
+          ${!isNycCoverage ? `<div style="background-color: #fef3c7; border: 1px solid #f59e0b; border-radius: 0.5rem; padding: 1rem; margin-bottom: 1rem;">
+            <p style="font-size: 0.875rem; color: #92400e; margin: 0; font-weight: 600;">
+              Note: IRU's curated resource directory currently covers New York City. The organizations below are NYC-based.
+              For legal aid in your area (ZIP ${answers.zip_code || ''}), visit <a href="https://www.lawhelp.org" style="color: #1d4ed8; text-decoration: underline;">LawHelp.org</a> 
+              or call the National Immigration Legal Aid Hotline.
+            </p>
+          </div>` : ''}
           ${resourcesHtml || '<p style="color: #64748b; font-style: italic;">No specific resources found.</p>'}
         </div>
         <div class="footer">
