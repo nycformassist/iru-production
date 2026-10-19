@@ -4,6 +4,9 @@ import { motion } from 'framer-motion';
 
 import { LANGUAGES, UI_LABELS, PHASE_1_QUESTIONS, TRIAGE_QUESTION, PHASE_2_QUESTIONS, PHASE_3_QUESTIONS, NYC_RESOURCES, CONSULATES, PROXIES, NARRATIVE_STARTERS, USCIS_FORMS, FEE_SCHEDULE_AS_OF } from './constants';
 
+// Nationwide layered resource model (local → statewide → national → fallback).
+import { resolveResources, ResourceResult, ResourceOrg } from './resources';
+
 // Evidence intelligence (server-side source of truth, pure module — no
 // secrets, no I/O). Imported read-only for honest packet rendering.
 import { EVIDENCE_KB, requiresLegalReview, legalReviewReason, nextActionFor } from '../api/lib/evidence.js';
@@ -53,6 +56,7 @@ export default function App() {
   const [currentQ, setCurrentQ] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [resources, setResources] = useState<any[]>([]);
+  const [resourceResult, setResourceResult] = useState<ResourceResult | null>(null);
   const [consulate, setConsulate] = useState<any>(null);
   const [copied, setCopied] = useState(false);
   const [assessment, setAssessment] = useState<any>(null);
@@ -201,22 +205,19 @@ export default function App() {
     setAssessment(null);
     setAiUnavailable(false);
     setIsNycCoverage(true);
+    setResourceResult(null);
   };
 
   const handleInterviewComplete = async () => {
     setStage('ANALYZING');
     const zip = answers.zip_code || '';
-    const prefix = zip.substring(0, 3);
-    const match = NYC_RESOURCES.find(r => r.prefix === prefix);
-    if (match) {
-      setResources([match]);
-      setIsNycCoverage(true);
-    } else {
-      // Outside NYC coverage area: show NYC resources with clear labeling
-      // plus national directory guidance. Do not misrepresent as local.
-      setResources(NYC_RESOURCES.filter(r => r.prefix === '100' || r.prefix === '104'));
-      setIsNycCoverage(false);
-    }
+    // Layered resource resolution: local → statewide → national → fallback.
+    // Never misrepresents an org as local; fallback shows honest notice + directory links.
+    const result = resolveResources(zip);
+    setResourceResult(result);
+    setIsNycCoverage(result.isNycCoverage);
+    // Flatten verified orgs for the packet renderer (local first, then statewide).
+    setResources([...result.local, ...result.statewide]);
 
     const country = (answers.country_of_origin || '').toLowerCase().trim();
     if (country && CONSULATES[country]) setConsulate(CONSULATES[country]);
@@ -332,18 +333,47 @@ export default function App() {
     const { score, total } = calculateReadinessScore();
     const readinessPercent = Math.round((score / total) * 100);
 
-    const resourcesHtml = resources.map(res => `
+    const resourcesHtml = resources.map((res: ResourceOrg) => {
+      const layerLabel = res.layer === 'statewide' ? 'Statewide' : (res.borough || 'Local');
+      const eligibilityHtml = res.eligibility
+        ? `<p style="font-size: 0.875rem; color: #92400e; background-color: #fef3c7; padding: 0.5rem 0.75rem; border-radius: 0.375rem; margin: 0 0 0.75rem 0;"><strong>Eligibility:</strong> ${escapeHtml(res.eligibility)}</p>`
+        : '';
+      const servicesHtml = res.servicesOffered
+        ? `<p style="font-size: 0.875rem; color: #334155; margin: 0 0 0.75rem 0;"><strong>Services:</strong> ${escapeHtml(res.servicesOffered)}</p>`
+        : '';
+      const transitHtml = (res.transit || res.exit)
+        ? `<div style="background-color: white; padding: 1rem; border-radius: 0.5rem; border: 1px solid #c7d2fe; margin-bottom: 1rem;">
+          ${res.transit ? `<p style="font-size: 0.875rem; font-weight: 600; color: #312e81; margin: 0 0 0.5rem 0;">🚇 ${escapeHtml(res.transit)}</p>` : ''}
+          ${res.exit ? `<p style="font-size: 0.875rem; font-weight: 500; color: #475569; margin: 0;">🚶 ${escapeHtml(ui.subwayExit)}: ${escapeHtml(res.exit)}</p>` : ''}
+        </div>`
+        : '';
+      const websiteHtml = res.website
+        ? `<p style="margin: 0 0 0.75rem 0;"><a href="${escapeHtml(res.website)}" style="color: #1d4ed8; text-decoration: underline; font-size: 0.875rem;">${escapeHtml(res.website.replace(/^https?:\/\//, ''))}</a></p>`
+        : '';
+      return `
       <div style="padding: 1.5rem; border: 2px solid #e0e7ff; background-color: #eef2ff; border-radius: 0.75rem; margin-bottom: 1rem; position: relative;">
         <div style="position: absolute; top: 0; right: 0; background-color: #4f46e5; color: white; font-size: 0.75rem; font-weight: 700; padding: 0.25rem 0.75rem; border-bottom-left-radius: 0.5rem; text-transform: uppercase;">
-          ${res.borough}
+          ${escapeHtml(layerLabel)}
         </div>
-        <h4 style="font-size: 1.25rem; font-weight: 700; color: #0f172a; margin: 0 0 0.5rem 0;">${res.name}</h4>
-        <p style="color: #334155; margin: 0 0 0.25rem 0; font-weight: 500;">${res.address}</p>
-        <p style="color: #334155; margin: 0 0 1rem 0; font-weight: 500;">${res.phone}</p>
-        <div style="background-color: white; padding: 1rem; border-radius: 0.5rem; border: 1px solid #c7d2fe; margin-bottom: 1rem;">
-          <p style="font-size: 0.875rem; font-weight: 600; color: #312e81; margin: 0 0 0.5rem 0;">🚇 ${res.transit}</p>
-          <p style="font-size: 0.875rem; font-weight: 500; color: #475569; margin: 0;">🚶 ${ui.subwayExit}: ${res.exit}</p>
-        </div>
+        <h4 style="font-size: 1.25rem; font-weight: 700; color: #0f172a; margin: 0 0 0.5rem 0;">${escapeHtml(res.name)}</h4>
+        <p style="color: #334155; margin: 0 0 0.25rem 0; font-weight: 500;">${escapeHtml(res.address)}</p>
+        <p style="color: #334155; margin: 0 0 0.75rem 0; font-weight: 500;">${escapeHtml(res.phone)}</p>
+        ${websiteHtml}
+        ${servicesHtml}
+        ${eligibilityHtml}
+        <p style="font-size: 0.8rem; color: #64748b; margin: 0 0 0.75rem 0; font-style: italic;">Service area: ${escapeHtml(res.serviceArea)}${res.legalRepresentation ? ' · Provides legal representation' : ''}</p>
+        ${transitHtml}
+      </div>
+    `;
+    }).join('');
+
+    // National directory links (always shown; ZIP is embedded in the ImmigrationLawHelp.org URL).
+    const nationalDirsHtml = (resourceResult?.national || []).map(dir => `
+      <div style="padding: 1rem; border: 1px solid #cbd5e1; background-color: #f8fafc; border-radius: 0.5rem; margin-bottom: 0.75rem;">
+        <p style="margin: 0 0 0.25rem 0; font-weight: 700; color: #0f172a; font-size: 0.95rem;">
+          <a href="${escapeHtml(dir.url)}" style="color: #1d4ed8; text-decoration: underline;">${escapeHtml(dir.name)}</a>
+        </p>
+        <p style="margin: 0; font-size: 0.85rem; color: #475569;">${escapeHtml(dir.description)}</p>
       </div>
     `).join('');
 
@@ -539,14 +569,14 @@ export default function App() {
         </div>` : ''}
         <div class="section">
           <h3 class="section-title font-serif">${ui.localResources}</h3>
-          ${!isNycCoverage ? `<div style="background-color: #fef3c7; border: 1px solid #f59e0b; border-radius: 0.5rem; padding: 1rem; margin-bottom: 1rem;">
+          ${resourceResult?.fallback ? `<div style="background-color: #fef3c7; border: 1px solid #f59e0b; border-radius: 0.5rem; padding: 1rem; margin-bottom: 1rem;">
             <p style="font-size: 0.875rem; color: #92400e; margin: 0; font-weight: 600;">
-              Note: IRU's curated resource directory currently covers New York City. The organizations below are NYC-based.
-              For legal aid in your area (ZIP ${answers.zip_code || ''}), visit <a href="https://www.lawhelp.org" style="color: #1d4ed8; text-decoration: underline;">LawHelp.org</a> 
-              or call the National Immigration Legal Aid Hotline.
+              No verified local providers found for ZIP ${escapeHtml(answers.zip_code || '')} in IRU's curated directory yet.
+              The national directories below can help you find immigration legal aid in your area.
             </p>
           </div>` : ''}
           ${resourcesHtml || '<p style="color: #64748b; font-style: italic;">No specific resources found.</p>'}
+          ${nationalDirsHtml ? `<h4 style="font-size: 1rem; font-weight: 700; color: #0f172a; margin: 1.5rem 0 0.75rem 0;">National Directories</h4>${nationalDirsHtml}` : ''}
         </div>
         <div class="footer">
           ${hasAlternatives ? `<p style="font-size: 0.875rem; font-weight: 600; color: #92400e; background-color: #fef3c7; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem; text-align: left;">${ui.noteForLegalCounsel}</p>` : ''}
