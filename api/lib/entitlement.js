@@ -41,8 +41,17 @@ export function createEntitlementStore(now = () => Date.now()) {
   }
 
   return {
-    /** Create a RESERVED entitlement. Returns the record + one-time raw token. */
-    create({ sku, amountCents, currency = 'usd', sessionId = null, ttlMs = DEFAULT_TTL_MS, claimWindowMs = DEFAULT_CLAIM_WINDOW_MS }) {
+    /**
+     * Create a RESERVED entitlement. Returns the record + one-time raw token.
+     *
+     * B2C scope (lib/pricing.js): `scope` describes what the purchase
+     * grants — { kind: 'evaluation' } or { kind: 'forms', forms: [...] }.
+     * A null scope is the pre-B2C legacy grant (any one form draft, whole-
+     * token consumption). `parentId` links an upgrade/add-on entitlement
+     * to the entitlement it builds on; `creditedCents`/`totalCents` record
+     * the server-computed price chain (credit applied / buyer's total).
+     */
+    create({ sku, amountCents, currency = 'usd', sessionId = null, ttlMs = DEFAULT_TTL_MS, claimWindowMs = DEFAULT_CLAIM_WINDOW_MS, scope = null, parentId = null, creditedCents = 0, totalCents = null }) {
       const id = `ent_${randomBytes(9).toString('hex')}`;
       const token = randomBytes(24).toString('base64url');
       const ent = {
@@ -51,6 +60,11 @@ export function createEntitlementStore(now = () => Date.now()) {
         state: 'RESERVED',
         createdAt: now(), paidAt: null, consumedAt: null, expiredAt: null, voidedAt: null,
         ttlMs, claimWindowMs, lastEventId: null,
+        scope: scope ? JSON.parse(JSON.stringify(scope)) : null,
+        parentId: parentId || null,
+        creditedCents: creditedCents || 0,
+        totalCents: totalCents === null || totalCents === undefined ? amountCents : totalCents,
+        consumedForms: [],
       };
       byId.set(id, ent);
       byTokenHash.set(ent.tokenHash, id);
@@ -137,6 +151,69 @@ export function createEntitlementStore(now = () => Date.now()) {
       return { ok: true, entitlement: ent };
     },
 
+    /** Entitlements created as upgrades/add-ons of a parent entitlement. */
+    childrenOf(parentId) {
+      if (!parentId) return [];
+      const out = [];
+      for (const ent of byId.values()) {
+        if (ent.parentId === parentId) out.push(expireIfNeeded(ent));
+      }
+      return out;
+    },
+
+    /**
+     * Scope-aware check for FORM generation: the token must be paid, its
+     * scope must cover this specific form, and that form must not already
+     * have been delivered under this entitlement. A legacy (null-scope)
+     * entitlement covers any one form, as before.
+     */
+    peekForForm(token, formId) {
+      const ent = this.getByToken(token);
+      if (!ent) return { ok: false, reason: 'unknown-token' };
+      if (!ent.paidAt) return { ok: false, reason: 'not-paid' };
+      if (ent.state !== 'RESERVED') return { ok: false, reason: `state-${ent.state}` };
+      if (!ent.scope) return { ok: true, entitlement: ent };
+      if (ent.scope.kind !== 'forms') return { ok: false, reason: 'scope-mismatch' };
+      if (!Array.isArray(ent.scope.forms) || !ent.scope.forms.includes(formId)) {
+        return { ok: false, reason: 'form-not-covered' };
+      }
+      if ((ent.consumedForms || []).includes(formId)) return { ok: false, reason: 'form-already-delivered' };
+      return { ok: true, entitlement: ent };
+    },
+
+    /**
+     * Scope-aware consumption for one form delivery. Per-form for scoped
+     * entitlements (a two-form bundle is exhausted only when BOTH forms
+     * have been delivered); whole-token for legacy entitlements.
+     */
+    consumeForForm(token, formId) {
+      const peek = this.peekForForm(token, formId);
+      if (!peek.ok) return peek;
+      const ent = peek.entitlement;
+      if (!ent.scope) return this.consumeByToken(token);
+      ent.consumedForms = [...(ent.consumedForms || []), formId];
+      const covered = ent.scope.forms || [];
+      if (covered.length > 0 && covered.every((f) => ent.consumedForms.includes(f))) {
+        ent.state = 'CONSUMED';
+        ent.consumedAt = now();
+      }
+      return { ok: true, entitlement: ent };
+    },
+
+    /**
+     * Scope-aware check for the LIMITED EVALUATION: only an entitlement
+     * whose scope is the evaluation itself qualifies. A form entitlement
+     * (or a legacy token) never unlocks it, and vice versa.
+     */
+    peekForEvaluation(token) {
+      const ent = this.getByToken(token);
+      if (!ent) return { ok: false, reason: 'unknown-token' };
+      if (!ent.paidAt) return { ok: false, reason: 'not-paid' };
+      if (ent.state !== 'RESERVED') return { ok: false, reason: `state-${ent.state}` };
+      if (!ent.scope || ent.scope.kind !== 'evaluation') return { ok: false, reason: 'scope-mismatch' };
+      return { ok: true, entitlement: ent };
+    },
+
     void(id, reason) {
       const ent = byId.get(id);
       if (!ent) return null;
@@ -148,13 +225,19 @@ export function createEntitlementStore(now = () => Date.now()) {
       return ent;
     },
 
-    /** Public view: never exposes the token hash. */
+    /** Public view: never exposes the token hash or the session id. */
     publicView(ent) {
       if (!ent) return null;
       return {
         id: ent.id, sku: ent.sku, amountCents: ent.amountCents, currency: ent.currency,
         state: ent.state, paid: !!ent.paidAt,
         createdAt: ent.createdAt, paidAt: ent.paidAt, consumedAt: ent.consumedAt,
+        scope: ent.scope
+          ? { kind: ent.scope.kind, forms: Array.isArray(ent.scope.forms) ? [...ent.scope.forms] : [] }
+          : null,
+        creditedCents: ent.creditedCents || 0,
+        totalCents: ent.totalCents === undefined ? ent.amountCents : ent.totalCents,
+        consumedForms: [...(ent.consumedForms || [])],
       };
     },
   };

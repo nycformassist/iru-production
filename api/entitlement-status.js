@@ -3,12 +3,23 @@
 // A buyer whose delivery was interrupted can return with their
 // entitlement token and learn whether it is paid and still usable.
 // The token travels in a POST body (never a URL) to keep it out of logs.
+// Rate-limited: the token is a bearer credential, so guessing is
+// throttled per source (the tokens themselves are 192-bit random and
+// stored only as SHA-256 hashes).
 
 import { entitlementStore } from './lib/entitlement.js';
+import { createLimiter, clientIp } from './lib/ratelimit.js';
+
+const limiter = createLimiter({ capacity: 10, windowMs: 10 * 60 * 1000 });
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
+  }
+  const rl = limiter.check(clientIp(req));
+  if (!rl.allowed) {
+    res.setHeader('Retry-After', Math.ceil(rl.retryAfterMs / 1000));
+    return res.status(429).json({ error: 'Too many requests. Please try again later.' });
   }
   const body = typeof req.body === 'string' ? safeParse(req.body) : (req.body || {});
   const token = body && typeof body.token === 'string' ? body.token : '';
@@ -16,10 +27,18 @@ export default async function handler(req, res) {
   const ent = entitlementStore.getByToken(token);
   if (!ent) return res.status(404).json({ error: 'Entitlement not found.' });
   const view = entitlementStore.publicView(ent);
+  // Usable = paid, still RESERVED, and (for scoped form grants) at
+  // least one covered form has not been delivered yet. Legacy grants
+  // keep their original whole-token semantics.
+  let usable = !!ent.paidAt && ent.state === 'RESERVED';
+  if (usable && ent.scope && ent.scope.kind === 'forms') {
+    const forms = Array.isArray(ent.scope.forms) ? ent.scope.forms : [];
+    usable = forms.some((f) => !(ent.consumedForms || []).includes(f));
+  }
   return res.status(200).json({
     ok: true,
     entitlement: view,
-    usable: !!ent.paidAt && ent.state === 'RESERVED',
+    usable,
   });
 }
 
