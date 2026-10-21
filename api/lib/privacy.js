@@ -17,6 +17,11 @@ export const MAX_STARTERS = 20;
 // (a_number, zip_code, unknown/future fields) is dropped at the boundary.
 const ALLOWED_FIELDS = new Set([
   'country_of_origin',
+  // Country-aware location facts (directive §3.2). Country-level only:
+  // postal codes, cities and street addresses NEVER leave the device.
+  'residence_country',
+  'country_of_birth',
+  'citizenship',
   'entry_date',
   'case_type',
   'has_passport',
@@ -99,6 +104,9 @@ export function minimizeForModel(answers, narrativeStarters) {
   return {
     applicantRef: 'the applicant', // no name, no A-number, no zip
     countryOfOrigin: answers.country_of_origin || 'Unknown',
+    residenceCountry: answers.residence_country || 'Unknown',
+    countryOfBirth: answers.country_of_birth || 'Unknown',
+    citizenship: answers.citizenship || 'Unknown',
     entryYear: entryYear.year,               // e.g. "2023" or "Unknown"
     entryRecency: entryYear.recency,         // '<1y' | '1-5y' | '>5y' | 'unknown' | 'future?'
     entryDateFlag: entryYear.flag,           // null | 'future-date'

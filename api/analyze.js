@@ -18,6 +18,7 @@ import { sanitizeAnswers, minimizeForModel, droppedFieldNames, MAX_BODY_BYTES } 
 import { buildPrompt, validateModelOutput, fallbackAssessment } from "./lib/prompt.js";
 import { buildGapRecords } from "./lib/evidence.js";
 import { validateImageReviews } from "./lib/vision.js";
+import { sanitizeFactRecord } from "./lib/facts.js";
 import { createLimiter, clientIp } from "./lib/ratelimit.js";
 
 const limiter = createLimiter({ capacity: 10, windowMs: 10 * 60 * 1000 });
@@ -72,7 +73,7 @@ export default async function handler(req, res) {
     return res.status(413).json({ error: "Request too large." });
   }
 
-  const { answers, lang, narrativeStarters, imageReviews } = rawBody || {};
+  const { answers, lang, narrativeStarters, imageReviews, factRecord } = rawBody || {};
   const sanitized = sanitizeAnswers(answers);
   if (!sanitized.ok) {
     return res.status(400).json({ error: "Invalid submission.", details: sanitized.errors });
@@ -94,10 +95,24 @@ export default async function handler(req, res) {
   }
 
   const min = minimizeForModel(sanitized.answers, narrativeStarters);
+  // Canonical fact record (directive §4/§5): strictly re-validated here.
+  // Only document-extracted facts are passed to the model — as document
+  // CONTENTS to cross-check against the applicant's answers, never as
+  // established facts. Client-claimed 'verified' facts are dropped by the
+  // sanitizer. Identifier-class facts (names, A-numbers, passport numbers)
+  // are excluded: the model never needs their values.
+  const cleanRecord = sanitizeFactRecord(factRecord);
+  const IDENTIFIER_FACTS = new Set(['full_name', 'a_number', 'passport_number', 'ssn', 'usci_number', 'spouse_name']);
+  const documentFacts = cleanRecord
+    ? Object.values(cleanRecord.facts)
+        .filter(f => f && f.source === 'document' && f.value && !IDENTIFIER_FACTS.has(f.id))
+        .slice(0, 20)
+        .map(f => ({ id: f.id, value: f.value, status: f.status, sourceRef: f.sourceRef }))
+    : [];
   // Evidence-gap engine: server-side KB records for every missing/unknown
   // item. The model tailors these; it never invents alternatives.
   const gaps = buildGapRecords(min, validatedReviews.reviews);
-  const prompt = buildPrompt(min, lang, gaps, validatedReviews.reviews);
+  const prompt = buildPrompt(min, lang, gaps, validatedReviews.reviews, documentFacts);
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");

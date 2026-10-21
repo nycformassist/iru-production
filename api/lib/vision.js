@@ -31,6 +31,36 @@ export const VISION_SCHEMA_KEYS = Object.freeze([
 
 export const MAX_IMAGE_REVIEWS_PER_REQUEST = 3;
 
+/**
+ * Fact fields a document review may extract VALUES for (directive §5).
+ * Deliberate, closed list: only fields the form/readiness workflow needs.
+ * Extracted values become canonical facts with status
+ * 'extracted-unconfirmed' on the consumer's own device; the server never
+ * logs them, and /api/analyze excludes identifier-class values from the
+ * model payload (see analyze.js IDENTIFIER_FACTS).
+ */
+export const EXTRACTABLE_FACT_FIELDS = Object.freeze([
+  'full_name', 'date_of_birth', 'country_of_birth', 'city_of_birth',
+  'citizenship', 'gender', 'marital_status', 'passport_number',
+  'passport_country', 'a_number', 'entry_date', 'employer_name',
+]);
+
+/** Validate an extractedFields array from a vision review. Never throws. */
+export function sanitizeExtractedFields(raw) {
+  if (raw === undefined || raw === null) return { ok: true, fields: [] };
+  if (!Array.isArray(raw)) return { ok: false, error: 'extractedFields must be an array' };
+  const fields = [];
+  for (const item of raw.slice(0, 20)) {
+    if (!item || typeof item !== 'object') continue;
+    if (!EXTRACTABLE_FACT_FIELDS.includes(item.field)) continue; // unknown field: dropped
+    if (typeof item.value !== 'string' || item.value.trim() === '') continue;
+    const out = { field: item.field, value: item.value.trim().slice(0, 120) };
+    if (typeof item.page === 'number' && item.page >= 1 && item.page <= 99) out.page = Math.floor(item.page);
+    fields.push(out);
+  }
+  return { ok: true, fields };
+}
+
 const AUTHENTICITY_DISCLAIMER =
   'This automated review does not establish authenticity or legal sufficiency. ' +
   'A qualified human reviewer must examine the original document.';
@@ -77,6 +107,13 @@ export function sanitizeVisionReview(obj) {
   };
   if (!data.limitations.some(l => /authenticity|legal sufficiency/i.test(l))) {
     data.limitations.push(AUTHENTICITY_DISCLAIMER);
+  }
+  // Optional structured extraction (directive §5). Absent = labels-only
+  // review (the long-standing default); present = strictly allowlisted.
+  if ('extractedFields' in obj) {
+    const ex = sanitizeExtractedFields(obj.extractedFields);
+    if (!ex.ok) return { ok: false, error: ex.error };
+    data.extractedFields = ex.fields;
   }
   return { ok: true, data };
 }

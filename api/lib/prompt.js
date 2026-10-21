@@ -43,7 +43,7 @@ const LANG_NAMES = {
  * @param {Array} gaps server-side gap records from buildGapRecords(min); optional
  * @param {Array} imageReviews validated image-review findings (lib/vision.js); optional
  */
-export function buildPrompt(min, lang = 'EN', gaps = [], imageReviews = []) {
+export function buildPrompt(min, lang = 'EN', gaps = [], imageReviews = [], documentFacts = []) {
   const evidenceLines = Object.entries(min.evidence)
     .map(([k, v]) => `- ${k}: ${v}`)
     .join('\n');
@@ -100,6 +100,22 @@ How to use these observations:
 `
     : 'No document photos were uploaded for automated review.';
 
+  const documentFactsSection = (documentFacts && documentFacts.length > 0)
+    ? `
+DOCUMENT-EXTRACTED FACTS (machine-extracted from documents the applicant
+uploaded; each is the CONTENT of a document as extracted — it is NOT proof
+the fact is authentic or legally established, and the applicant has not
+necessarily confirmed it):
+${documentFacts.map(f => `- ${f.id}: "${String(f.value).slice(0, 200)}" [status: ${f.status}${f.sourceRef && f.sourceRef.documentType ? `; from: ${f.sourceRef.documentType}` : ''}]`).join('\n')}
+
+How to use these facts:
+- If a document-extracted fact CONTRADICTS something the applicant stated,
+  list it under "contradictions" for the applicant to resolve.
+- NEVER present an extracted value as verified. Say "a document you uploaded
+  shows…" and note it needs the applicant's confirmation.
+`
+    : 'No document-extracted facts were provided.';
+
   return `
 You are an immigration information-readiness assistant. Your job is to help an
 applicant organize their immigration-related information so a qualified legal
@@ -143,6 +159,9 @@ ${legalHardRules().split('\n').map(l => '  * ' + l).join('\n')}
 <applicant_data>
 Case type: ${min.caseType}
 Country of origin: ${min.countryOfOrigin}
+Country of residence: ${min.residenceCountry || 'Unknown'}
+Country of birth: ${min.countryOfBirth || 'Unknown'}
+Citizenship: ${min.citizenship || 'Unknown'}
 Entry year: ${min.entryYear} (recency band: ${min.entryRecency})
 Entry date flag: ${min.entryDateFlag || 'none'}
 
@@ -163,6 +182,10 @@ ${gapSection}
 <image_review_observations>
 ${imageSection}
 </image_review_observations>
+
+<document_facts>
+${documentFactsSection}
+</document_facts>
 
 Respond with a single JSON object and nothing else, using exactly these keys:
 {
