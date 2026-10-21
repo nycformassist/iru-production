@@ -5,7 +5,18 @@ import { motion } from 'framer-motion';
 import { LANGUAGES, UI_LABELS, PHASE_1_QUESTIONS, TRIAGE_QUESTION, PHASE_2_QUESTIONS, PHASE_3_QUESTIONS, NYC_RESOURCES, CONSULATES, PROXIES, NARRATIVE_STARTERS, USCIS_FORMS, FEE_SCHEDULE_AS_OF } from './constants';
 
 // Nationwide layered resource model (local → statewide → national → fallback).
-import { resolveResources, ResourceResult, ResourceOrg } from './resources';
+import { resolveResources, resolveResourcesForLocation, ResourceResult, ResourceOrg } from './resources';
+
+// Country-aware location model (directive §3).
+import { COUNTRIES, isUsCountry } from './location';
+
+// Canonical fact record (directive §4) — one shared model for answers,
+// document extraction, corrections, the packet, and form preparation.
+import { createFactRecord, upsertFact, confirmFact, resolveConflict } from '../api/lib/facts.js';
+// Form engine (directive §7): registry + mapper run client-side for the
+// review UI; the PDF itself is generated server-side from the same record.
+import { FORM_REGISTRY, getFormEntry } from '../api/lib/forms/registry.js';
+import { buildFillPlan, splitFullName } from '../api/lib/formmap.js';
 
 // Evidence intelligence (server-side source of truth, pure module — no
 // secrets, no I/O). Imported read-only for honest packet rendering.
@@ -24,6 +35,19 @@ const EVIDENCE_ITEM_NAMES: Record<string, string> = {
   has_arrests: 'Certificates of Disposition',
 };
 
+const FACT_LABELS: Record<string, string> = {
+  full_name: 'Full name', family_name: 'Family name', given_name: 'Given name', middle_name: 'Middle name',
+  other_names_used: 'Other names used', date_of_birth: 'Date of birth', gender: 'Sex', marital_status: 'Marital status',
+  country_of_origin: 'Country of origin', country_of_birth: 'Country of birth', city_of_birth: 'City of birth',
+  citizenship: 'Citizenship', nationality: 'Nationality at birth', a_number: 'A-Number', ssn: 'SSN',
+  passport_number: 'Passport number', passport_country: 'Passport country', entry_date: 'Entry date',
+  entry_place: 'Place of last entry', current_status: 'Current status', application_reason: 'Application reason',
+  residence_country: 'Country of residence', residence_region: 'State/region of residence',
+  residence_city: 'City of residence', residence_postal_code: 'Postal code', residence_street: 'Street address',
+  mailing_street: 'Mailing street', mailing_city: 'Mailing city', mailing_region: 'Mailing state/region',
+  mailing_postal_code: 'Mailing postal code', phone: 'Phone', email: 'Email',
+};
+
 /** Escape user/AI content before injecting into the printable packet HTML. */
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -36,7 +60,8 @@ function escapeHtml(s: string): string {
  * again as defense in depth (see api/lib/privacy.js).
  */
 const SERVER_FIELD_ALLOWLIST = new Set([
-  'country_of_origin', 'entry_date', 'case_type',
+  'country_of_origin', 'residence_country', 'country_of_birth', 'citizenship',
+  'entry_date', 'case_type',
   'has_passport', 'has_i94', 'has_lease', 'has_persecution_proof',
   'has_green_card', 'has_tax_transcripts', 'has_marriage_cert',
   'has_proof_of_relationship', 'has_arrests', 'narrative_text',
@@ -68,6 +93,14 @@ export default function App() {
   const [imageReview, setImageReview] = useState<any>(null);
   const [reviewing, setReviewing] = useState(false);
   const [reviewError, setReviewError] = useState('');
+  // Canonical fact record + form preparation (directives §4/§7/§8).
+  const [factRecord, setFactRecord] = useState<any>(null);
+  const [selectedFormId, setSelectedFormId] = useState<string>('');
+  const [formSummary, setFormSummary] = useState<any>(null);
+  const [formPdfBase64, setFormPdfBase64] = useState<string>('');
+  const [formBusy, setFormBusy] = useState(false);
+  const [formError, setFormError] = useState('');
+  const [formAnswers, setFormAnswers] = useState<Record<string, string>>({});
 
   /** Plain-text rendering of the structured assessment for the packet. */
   const renderAssessmentText = (a: any): string => {
@@ -90,6 +123,56 @@ export default function App() {
   };
 
   const ui = UI_LABELS[lang] || UI_LABELS['EN'];
+  // New-feature strings: translated for EN/ES; other languages fall back to English.
+  const t = (key: string, fallback: string) => (ui[key] as string) || fallback;
+
+  /**
+   * Build the canonical fact record from the interview answers and any
+   * document extraction. Answers are consumer-reported; extracted values
+   * stay 'extracted-unconfirmed' until the consumer confirms them;
+   * disagreements become traceable conflicts (see api/lib/facts.js).
+   */
+  const buildFactRecord = (ans: Record<string, string>, review: any) => {
+    const now = new Date().toISOString();
+    const rec: any = createFactRecord(now);
+    const ANSWER_FACTS = [
+      'full_name', 'country_of_origin', 'country_of_birth', 'citizenship',
+      'gender', 'marital_status', 'entry_date', 'case_type',
+      'has_passport', 'has_i94', 'has_lease', 'has_persecution_proof',
+      'has_green_card', 'has_tax_transcripts', 'has_marriage_cert',
+      'has_proof_of_relationship', 'has_arrests',
+    ];
+    for (const id of ANSWER_FACTS) {
+      if (ans[id]) upsertFact(rec, { id, value: ans[id], source: 'answer' }, now);
+    }
+    if (ans.narrative_text) {
+      upsertFact(rec, { id: 'narrative_text', value: ans.narrative_text, source: 'narrative', type: 'text' }, now);
+    }
+    // Country-aware location facts (distinct fields — §3.2).
+    const country = ans.residence_country || 'US';
+    upsertFact(rec, { id: 'residence_country', value: country, source: 'answer' }, now);
+    if (ans.residence_city) upsertFact(rec, { id: 'residence_city', value: ans.residence_city, source: 'answer' }, now);
+    if (ans.residence_region) upsertFact(rec, { id: 'residence_region', value: ans.residence_region, source: 'answer' }, now);
+    const postal = country === 'US' ? (ans.zip_code || '') : (ans.residence_postal_code || '');
+    if (postal) upsertFact(rec, { id: 'residence_postal_code', value: postal, source: 'answer' }, now);
+    if (ans.residence_street) upsertFact(rec, { id: 'residence_street', value: ans.residence_street, source: 'answer' }, now);
+    // Name parts for official forms: derived from the consumer's own
+    // stated name; the form-prep panel lets them correct each part.
+    const parts = splitFullName(ans.full_name || '');
+    for (const [k, v] of Object.entries(parts)) {
+      upsertFact(rec, { id: k, value: v as string, source: 'answer' }, now);
+    }
+    // Document extraction → canonical facts (never verified, §5).
+    if (review && Array.isArray(review.extractedFields)) {
+      for (const ef of review.extractedFields) {
+        upsertFact(rec, {
+          id: ef.field, value: ef.value, source: 'document',
+          sourceRef: { documentType: review.documentCategory || 'uploaded document', page: ef.page },
+        }, now);
+      }
+    }
+    return rec;
+  };
 
   const getQuestionsForStage = () => {
     if (stage === 'PHASE1') return PHASE_1_QUESTIONS;
@@ -206,15 +289,126 @@ export default function App() {
     setAiUnavailable(false);
     setIsNycCoverage(true);
     setResourceResult(null);
+    setFactRecord(null);
+    setSelectedFormId('');
+    setFormSummary(null);
+    setFormPdfBase64('');
+    setFormError('');
+    setFormAnswers({});
+    setPhotoEvidenceKey('');
+    setConsulate(null);
+    setResources([]);
+    setCopied(false);
+  };
+
+  // ── Facts: consumer confirmation / conflict resolution / correction (§8).
+  // Every mutation goes through the canonical record; derived outputs are
+  // marked stale by the record itself and the UI offers regeneration.
+  const applyFactMutation = (mutate: (rec: any) => void) => {
+    if (!factRecord) return;
+    const next = JSON.parse(JSON.stringify(factRecord));
+    mutate(next);
+    setFactRecord(next);
+    // A previously generated form draft no longer matches the record.
+    setFormSummary(null);
+    setFormPdfBase64('');
+  };
+
+  const handleConfirmFact = (factId: string) => {
+    applyFactMutation((rec) => { confirmFact(rec, factId, new Date().toISOString()); });
+  };
+
+  const handleResolveConflict = (factId: string, chosenSource: string) => {
+    applyFactMutation((rec) => { resolveConflict(rec, factId, chosenSource, new Date().toISOString()); });
+  };
+
+  const handleCorrectFact = (factId: string, value: string) => {
+    if (!value.trim()) return;
+    applyFactMutation((rec) => {
+      upsertFact(rec, { id: factId, value: value.trim(), source: 'correction' }, new Date().toISOString());
+    });
+  };
+
+  const handleSaveFormAnswers = (entry: any, plan: any) => {
+    // Focused follow-up questions (§7.3): ask only for what is missing.
+    applyFactMutation((rec) => {
+      for (const m of plan.missing) {
+        const v = (formAnswers[m.factId] || '').trim();
+        if (v) upsertFact(rec, { id: m.factId, value: v, source: 'answer' }, new Date().toISOString());
+      }
+    });
+    setFormAnswers({});
+  };
+
+  const handleGenerateForm = async () => {
+    if (!selectedFormId || !factRecord || formBusy) return;
+    setFormBusy(true);
+    setFormError('');
+    setFormSummary(null);
+    setFormPdfBase64('');
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      const savedToken = sessionStorage.getItem('iru_entitlement_token');
+      if (savedToken) headers['x-entitlement-token'] = savedToken;
+      const resp = await fetch('/api/generate-form', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ formId: selectedFormId, factRecord }),
+      });
+      const data = await resp.json().catch(() => null);
+      if (!resp.ok || !data || !data.ok) {
+        throw new Error((data && data.error) || `Server error: ${resp.status}`);
+      }
+      setFormSummary(data.summary);
+      setFormPdfBase64(data.pdfBase64);
+    } catch (e: any) {
+      setFormError(e && e.message ? e.message : 'Form generation unavailable.');
+    } finally {
+      setFormBusy(false);
+    }
+  };
+
+  const handleCheckout = async () => {
+    // Test-mode checkout (only rendered when the build flag enables it).
+    try {
+      const resp = await fetch('/api/checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const data = await resp.json().catch(() => null);
+      if (!resp.ok || !data || !data.checkoutUrl) throw new Error((data && data.error) || 'Checkout unavailable.');
+      sessionStorage.setItem('iru_entitlement_token', data.entitlementToken);
+      sessionStorage.setItem('iru_entitlement_id', data.entitlementId);
+      window.location.href = data.checkoutUrl;
+    } catch (e: any) {
+      setFormError(e && e.message ? e.message : 'Checkout unavailable.');
+    }
+  };
+
+  const downloadFormPdf = () => {
+    if (!formPdfBase64) return;
+    const bytes = Uint8Array.from(atob(formPdfBase64), (c) => c.charCodeAt(0));
+    const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${selectedFormId}-DRAFT.pdf`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
   };
 
   const handleInterviewComplete = async () => {
     setStage('ANALYZING');
-    const zip = answers.zip_code || '';
-    // Layered resource resolution: local → statewide → national → fallback.
-    // Never misrepresents an org as local; fallback shows honest notice + directory links.
-    const result = resolveResources(zip);
+    // Country-aware layered resolution (§3.3): ZIP/postal selects resources
+    // only — it never gates the federal readiness workflow. Non-U.S. users
+    // get honestly-labeled national directories, never a U.S. org as "local".
+    const residenceCountry = answers.residence_country || 'US';
+    const result = resolveResourcesForLocation({
+      country: residenceCountry,
+      postalCode: residenceCountry === 'US' ? (answers.zip_code || '') : (answers.residence_postal_code || ''),
+      region: answers.residence_region || '',
+      city: answers.residence_city || '',
+    });
     setResourceResult(result);
+    // One canonical fact record for the packet and form preparation (§4).
+    const record = buildFactRecord(answers, imageReview);
+    setFactRecord(record);
     setIsNycCoverage(result.isNycCoverage);
     // Flatten verified orgs for the packet renderer (local first, then statewide).
     setResources([...result.local, ...result.statewide]);
@@ -245,6 +439,9 @@ export default function App() {
           // Optional: the server re-validates this strictly and treats it as
           // unverified observations only. Never includes image bytes.
           imageReviews: imageReview ? [imageReview] : [],
+          // Canonical fact record (§4/§5): server re-validates; document
+          // facts reach the analysis as unverified document contents.
+          factRecord: record,
         }),
         signal: controller.signal,
       }).finally(() => clearTimeout(timeout));
@@ -292,7 +489,11 @@ export default function App() {
     const country = answers.country_of_origin || "their home country";
     const caseType = answers.case_type === 'asylum' ? "asylum" : answers.case_type === 'family' ? "a family petition" : "citizenship";
     const entry = answers.entry_date ? `entered the United States on ${answers.entry_date}` : "entered the United States on an unspecified date";
-    return `${name}, originally from ${country}, ${entry} and is currently seeking ${caseType}. They reside in the ${answers.zip_code || 'unspecified'} zip code area and have completed an initial evidence audit to prepare for their legal consultation.`;
+    const residenceCountry = answers.residence_country || 'US';
+    const residence = residenceCountry === 'US'
+      ? `They reside in the ${answers.zip_code || 'unspecified'} zip code area`
+      : `They currently live in ${answers.residence_city ? answers.residence_city + ', ' : ''}${residenceCountry}`;
+    return `${name}, originally from ${country}, ${entry} and is currently seeking ${caseType}. ${residence} and have completed an initial evidence audit to prepare for their legal consultation.`;
   };
 
   const calculateReadinessScore = () => {
@@ -482,6 +683,30 @@ export default function App() {
           <p style="font-size: 0.8rem; color: #64748b; font-style: italic;">Alternative descriptions are in English. Ask your legal representative to explain any item you do not understand.</p>
         </div>` : '';
 
+    // Information on Record (§6): the consumer can see exactly which facts
+    // IRU used, where each came from, and its honest status. Extracted
+    // values are never shown as verified.
+    const FACT_DISPLAY_NAMES: Record<string, string> = {
+      full_name: 'Full name', family_name: 'Family name', given_name: 'Given name', middle_name: 'Middle name',
+      country_of_origin: 'Country of origin', country_of_birth: 'Country of birth', citizenship: 'Citizenship',
+      gender: 'Sex', marital_status: 'Marital status', date_of_birth: 'Date of birth', entry_date: 'Entry date',
+      residence_country: 'Country of residence', residence_city: 'City of residence', residence_region: 'State/region of residence',
+      residence_postal_code: 'Postal code', residence_street: 'Street address',
+      passport_number: 'Passport number (from document)', a_number: 'A-Number (from document)',
+    };
+    const factStatusLabel = (f: any) => f.status === 'conflicting' ? 'Sources disagree — needs your decision'
+      : f.status === 'extracted-unconfirmed' ? 'From your document — not yet confirmed by you'
+      : f.source === 'document' ? 'From your document — confirmed by you' : 'Provided by you';
+    const factRows = factRecord ? Object.values(factRecord.facts)
+      .filter((f: any) => f && f.value && FACT_DISPLAY_NAMES[f.id])
+      .map((f: any) => `<tr><td style="font-weight:500;">${escapeHtml(FACT_DISPLAY_NAMES[f.id])}</td><td>${escapeHtml(String(f.value))}</td><td style="color:#64748b;">${escapeHtml(factStatusLabel(f))}</td></tr>`).join('') : '';
+    const factsSectionHtml = factRows ? `
+        <div class="section">
+          <h3 class="section-title font-serif">${escapeHtml(t('factsTitle', 'Your Information on Record'))}</h3>
+          <table><thead><tr><th>Item</th><th>Value</th><th>Status</th></tr></thead><tbody>${factRows}</tbody></table>
+          <p style="font-size:0.8rem;color:#64748b;font-style:italic;">Document-extracted values show what a document contains; they are not proof of authenticity. Correct anything that is wrong before relying on it.</p>
+        </div>` : '';
+
     const selectedStarters = NARRATIVE_STARTERS.filter(s => answers[s.id] === 'yes').map(s => s.labels[lang as keyof typeof s.labels]);
     const narrativeText = answers.narrative_text || '';
     const hasNarrative = selectedStarters.length > 0 || narrativeText.trim().length > 0;
@@ -555,6 +780,7 @@ export default function App() {
             <tbody>${triageRows.join('')}</tbody>
           </table>
         </div>
+        ${factsSectionHtml}
         ${gapSectionHtml}
         ${imageReview ? `
         <div class="section">
@@ -569,7 +795,11 @@ export default function App() {
         </div>` : ''}
         <div class="section">
           <h3 class="section-title font-serif">${ui.localResources}</h3>
-          ${resourceResult?.fallback ? `<div style="background-color: #fef3c7; border: 1px solid #f59e0b; border-radius: 0.5rem; padding: 1rem; margin-bottom: 1rem;">
+          ${resourceResult?.isInternational ? `<div style="background-color: #eff6ff; border: 1px solid #3b82f6; border-radius: 0.5rem; padding: 1rem; margin-bottom: 1rem;">
+            <p style="font-size: 0.875rem; color: #1e40af; margin: 0; font-weight: 600;">
+              ${escapeHtml(t('intlResourcesNote', "You are located outside the United States. IRU's verified local directory covers parts of the U.S. only, so no local provider is shown — the U.S. national directories below can still help you find immigration legal help."))}
+            </p>
+          </div>` : resourceResult?.fallback ? `<div style="background-color: #fef3c7; border: 1px solid #f59e0b; border-radius: 0.5rem; padding: 1rem; margin-bottom: 1rem;">
             <p style="font-size: 0.875rem; color: #92400e; margin: 0; font-weight: 600;">
               No verified local providers found for ZIP ${escapeHtml(answers.zip_code || '')} in IRU's curated directory yet.
               The national directories below can help you find immigration legal aid in your area.
@@ -645,6 +875,16 @@ export default function App() {
               <Globe className="w-12 h-12 text-indigo-500 mx-auto mb-4" />
               <h2 className="text-2xl font-serif font-semibold text-slate-900">{ui.selectLanguage}</h2>
             </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8 text-left">
+              <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4">
+                <h3 className="font-bold text-indigo-900 mb-1">{t('whatWeDo', 'What IRU does')}</h3>
+                <p className="text-sm text-indigo-900/80">{t('whatWeDoText', 'IRU helps you organize your circumstances and documents, identify missing information, prepare for your next steps, find relevant resources, and fill in supported official immigration forms (currently I-589 and I-765 drafts) from information you provide.')}</p>
+              </div>
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                <h3 className="font-bold text-slate-800 mb-1">{t('whatWeDont', 'What IRU does not do')}</h3>
+                <p className="text-sm text-slate-600">{t('whatWeDontText', 'IRU is not a law firm and does not give legal advice, decide your eligibility, sign, or submit any form. You review and control everything.')}</p>
+              </div>
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {LANGUAGES.map((l) => (
                 <button
@@ -688,7 +928,67 @@ export default function App() {
               </div>
 
               <div>
-                {question.type === 'radio' && question.options ? (
+                {question.id === 'zip_code' ? (
+                  <div className="space-y-4 text-left">
+                    <label className="block">
+                      <span className="block text-sm font-semibold text-slate-600 mb-1">{t('locationCountry', 'Country where you live')}</span>
+                      <select
+                        value={answers.residence_country || 'US'}
+                        onChange={(e) => setAnswers({ ...answers, residence_country: e.target.value })}
+                        className="w-full p-4 rounded-xl border-2 border-slate-200 text-lg"
+                      >
+                        {COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
+                      </select>
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <label className="block">
+                        <span className="block text-sm font-semibold text-slate-600 mb-1">{t('locationCity', 'City')}</span>
+                        <input
+                          type="text" value={answers.residence_city || ''}
+                          onChange={(e) => setAnswers({ ...answers, residence_city: e.target.value })}
+                          className="w-full p-3 rounded-xl border-2 border-slate-200"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="block text-sm font-semibold text-slate-600 mb-1">{t('locationRegion', 'State / Province / Region')}</span>
+                        <input
+                          type="text" value={answers.residence_region || ''}
+                          onChange={(e) => setAnswers({ ...answers, residence_region: e.target.value })}
+                          className="w-full p-3 rounded-xl border-2 border-slate-200"
+                        />
+                      </label>
+                    </div>
+                    {isUsCountry(answers.residence_country || 'US') ? (
+                      <label className="block">
+                        <span className="block text-sm font-semibold text-slate-600 mb-1">ZIP Code (optional — for local resources)</span>
+                        <input
+                          type="text" inputMode="numeric" value={answers.zip_code || ''}
+                          onChange={(e) => setAnswers({ ...answers, zip_code: e.target.value })}
+                          placeholder="e.g., 10451"
+                          className="w-full p-3 rounded-xl border-2 border-slate-200"
+                        />
+                      </label>
+                    ) : (
+                      <label className="block">
+                        <span className="block text-sm font-semibold text-slate-600 mb-1">{t('locationPostal', 'Postal code (optional)')}</span>
+                        <input
+                          type="text" value={answers.residence_postal_code || ''}
+                          onChange={(e) => setAnswers({ ...answers, residence_postal_code: e.target.value })}
+                          className="w-full p-3 rounded-xl border-2 border-slate-200"
+                        />
+                      </label>
+                    )}
+                    <label className="block">
+                      <span className="block text-sm font-semibold text-slate-600 mb-1">Street address (optional — used only if you prepare a form)</span>
+                      <input
+                        type="text" value={answers.residence_street || ''}
+                        onChange={(e) => setAnswers({ ...answers, residence_street: e.target.value })}
+                        className="w-full p-3 rounded-xl border-2 border-slate-200"
+                      />
+                    </label>
+                    <p className="text-sm text-slate-500">{t('locationNote', 'Your location is used only to find resources near you. It is never required — you can continue without it, from any country.')}</p>
+                  </div>
+                ) : question.type === 'radio' && question.options ? (
                   <div className="space-y-3">
                     {question.options.map((opt: any) => (
                       <button
@@ -783,9 +1083,9 @@ export default function App() {
                   <ArrowLeft className="w-4 h-4" />
                   <span>{ui.back}</span>
                 </button>
-                <button 
-                  onClick={handleNextQuestion} 
-                  disabled={!answers[question.id]}
+                <button
+                  onClick={handleNextQuestion}
+                  disabled={!answers[question.id] && !['zip_code', 'country_of_birth', 'citizenship', 'gender', 'marital_status'].includes(question.id)}
                   className="px-8 py-3 bg-indigo-600 text-white font-medium rounded-xl hover:bg-indigo-700 transition-colors flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <span>{ui.next}</span>
@@ -1024,8 +1324,135 @@ export default function App() {
               );
             })()}
 
+            {/* ── Your Information on Record (§8): review, confirm, resolve, correct ── */}
+            {factRecord && (
+              <div className="mt-8 mb-8 text-left">
+                <h3 className="text-lg font-serif font-bold text-slate-900 mb-2">{t('factsTitle', 'Your Information on Record')}</h3>
+                <p className="text-xs text-slate-500 mb-4">{t('factsIntro', 'Everything IRU is using, where it came from, and what still needs your confirmation.')}</p>
+                {factRecord.outputsStale && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4 flex flex-wrap items-center gap-3">
+                    <p className="text-sm text-amber-900 font-medium flex-1">{t('factsChanged', 'Your information changed. Re-run the analysis or regenerate your form draft so everything stays consistent.')}</p>
+                    <button onClick={() => handleInterviewComplete()} className="px-4 py-2 bg-amber-600 text-white text-sm font-semibold rounded-lg hover:bg-amber-700">{t('rerunAnalysis', 'Re-run analysis')}</button>
+                  </div>
+                )}
+                <div className="space-y-2">
+                  {Object.values(factRecord.facts).filter((f: any) => f && f.value && FACT_LABELS[f.id]).map((f: any) => (
+                    <div key={f.id} className="border border-slate-200 rounded-xl p-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-semibold text-slate-800 text-sm">{FACT_LABELS[f.id]}</span>
+                        <span className="text-slate-700 text-sm">{String(f.value)}</span>
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${f.status === 'conflicting' ? 'bg-red-100 text-red-800' : f.status === 'extracted-unconfirmed' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600'}`}>
+                          {f.status === 'conflicting' ? t('factStatusConflicting', 'Sources disagree') : f.status === 'extracted-unconfirmed' ? t('factStatusExtracted', 'From your document — please confirm') : t('factStatusReported', 'You provided this')}
+                        </span>
+                      </div>
+                      {f.status === 'extracted-unconfirmed' && (
+                        <button onClick={() => handleConfirmFact(f.id)} className="mt-2 px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-lg hover:bg-indigo-700">{t('confirmFact', 'Confirm')}</button>
+                      )}
+                      {f.status === 'conflicting' && (
+                        <div className="mt-2 space-y-1">
+                          <button onClick={() => handleResolveConflict(f.id, f.source)} className="block px-3 py-1.5 border border-slate-300 text-xs font-semibold rounded-lg hover:bg-slate-50">
+                            Keep: {String(f.value)} <span className="text-slate-400">({f.source === 'document' ? 'from document' : 'your answer'})</span>
+                          </button>
+                          {(f.alternatives || []).map((a: any, i: number) => (
+                            <button key={i} onClick={() => handleResolveConflict(f.id, a.source)} className="block px-3 py-1.5 border border-slate-300 text-xs font-semibold rounded-lg hover:bg-slate-50">
+                              Use instead: {String(a.value)} <span className="text-slate-400">({a.source === 'document' ? 'from document' : 'your answer'})</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* ── Form preparation (§7): select, review mapping, generate DRAFT ── */}
+            {factRecord && (
+              <div className="mt-8 mb-8 text-left">
+                <h3 className="text-lg font-serif font-bold text-slate-900 mb-2">{t('formPrepTitle', 'Prepare an Official Form Draft')}</h3>
+                <p className="text-xs text-slate-500 mb-4">{t('formPrepIntro', 'IRU can fill a draft of an official USCIS form from your information on record. You choose the form — IRU does not decide what you should file. Drafts are never signed or submitted by IRU.')}</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+                  {FORM_REGISTRY.map((entry: any) => (
+                    <button key={entry.id} onClick={() => { setSelectedFormId(entry.id); setFormSummary(null); setFormPdfBase64(''); setFormError(''); }}
+                      className={`p-4 rounded-xl border-2 text-left ${selectedFormId === entry.id ? 'border-indigo-600 bg-indigo-50' : 'border-slate-200 hover:border-indigo-300'}`}>
+                      <span className="block font-bold text-slate-900">{entry.id}</span>
+                      <span className="block text-xs text-slate-500 mt-1">{entry.name}</span>
+                      <span className="block text-xs text-slate-400 mt-1">{t('formEdition', 'Edition')} {entry.editionDate} · uscis.gov</span>
+                    </button>
+                  ))}
+                </div>
+                {selectedFormId && (() => {
+                  const entry: any = getFormEntry(selectedFormId);
+                  const plan: any = buildFillPlan(factRecord, entry);
+                  return (
+                    <div className="border border-slate-200 rounded-xl p-4 space-y-4">
+                      <p className="text-xs text-slate-500">{entry.applicability}</p>
+                      <p className="text-sm text-slate-700"><strong>{plan.fill.length}</strong> {t('formPopulated', 'fields can be filled from your information')}.</p>
+                      {plan.needsConfirmation.length > 0 && (
+                        <div>
+                          <p className="text-sm font-semibold text-amber-800">{t('formNeedsConfirm', 'Needs your confirmation before it can be used')}:</p>
+                          <ul className="text-sm text-slate-600 list-disc pl-5">
+                            {plan.needsConfirmation.map((n: any) => <li key={n.factId}>{n.label}: “{String(n.value)}” — confirm it in Your Information above.</li>)}
+                          </ul>
+                        </div>
+                      )}
+                      {plan.conflicts.length > 0 && (
+                        <p className="text-sm font-semibold text-red-700">{t('formConflicts', 'Conflicting values — resolve above')}: {plan.conflicts.map((c: any) => c.label).join('; ')}</p>
+                      )}
+                      {plan.missing.length > 0 && (
+                        <div>
+                          <p className="text-sm font-semibold text-slate-800">{t('formMissing', 'Still needed for this form')}:</p>
+                          <div className="space-y-2 mt-2">
+                            {plan.missing.map((m: any) => (
+                              <label key={m.factId} className="block">
+                                <span className="block text-xs font-semibold text-slate-500">{m.question}</span>
+                                <input type="text" value={formAnswers[m.factId] || ''} onChange={(e) => setFormAnswers({ ...formAnswers, [m.factId]: e.target.value })}
+                                  className="w-full p-2.5 rounded-lg border-2 border-slate-200 text-sm" />
+                              </label>
+                            ))}
+                          </div>
+                          <button onClick={() => handleSaveFormAnswers(entry, plan)} className="mt-3 px-4 py-2 border-2 border-indigo-600 text-indigo-700 text-sm font-semibold rounded-lg hover:bg-indigo-50">Save answers</button>
+                        </div>
+                      )}
+                      {formError && <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl p-3">{formError}</p>}
+                      <div className="flex flex-wrap gap-3">
+                        <button onClick={handleGenerateForm} disabled={formBusy} className="px-6 py-3 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-50">
+                          {formBusy ? t('generatingDraft', 'Generating…') : t('generateDraft', 'Generate DRAFT PDF')}
+                        </button>
+                        {(import.meta as any).env && (import.meta as any).env.VITE_PAYWALL_ENABLED === 'true' && (
+                          <button onClick={handleCheckout} className="px-6 py-3 border-2 border-slate-300 text-slate-700 font-semibold rounded-xl hover:bg-slate-50">Checkout (test mode)</button>
+                        )}
+                        {formPdfBase64 && (
+                          <button onClick={downloadFormPdf} className="px-6 py-3 bg-green-600 text-white font-semibold rounded-xl hover:bg-green-700">{t('downloadDraft', 'Download draft PDF')}</button>
+                        )}
+                      </div>
+                      {formSummary && (
+                        <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-sm text-slate-700 space-y-3">
+                          <p className="font-bold text-slate-900">{formSummary.formId} — {t('formEdition', 'Edition')} {formSummary.editionDate}</p>
+                          <p className="text-xs font-semibold text-red-700 uppercase tracking-wide">{formSummary.draftLabel}</p>
+                          <div>
+                            <p className="font-semibold">{t('formPopulated', 'Filled in from your information')} ({formSummary.populated.length}):</p>
+                            <ul className="list-disc pl-5">{formSummary.populated.map((p: any, i: number) => <li key={i}>{p.label}: {p.value}</li>)}</ul>
+                          </div>
+                          {formSummary.missingRequired.length > 0 && (
+                            <div><p className="font-semibold">{t('formMissing', 'Still needed for this form')}:</p>
+                            <ul className="list-disc pl-5">{formSummary.missingRequired.map((m: any, i: number) => <li key={i}>{m.label}</li>)}</ul></div>
+                          )}
+                          <div>
+                            <p className="font-semibold">{t('formConsumerSections', 'You complete these parts yourself')}:</p>
+                            <ul className="list-disc pl-5">{formSummary.consumerCompletedSections.map((c: string, i: number) => <li key={i}>{c}</li>)}</ul>
+                          </div>
+                          <p className="text-xs text-slate-500">{t('formSignatureNote', 'No signature was added and nothing was submitted. Signing and filing are your responsibility, after your review.')}</p>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+
             <div className="flex flex-col sm:flex-row justify-center items-center gap-4">
-              <button 
+              <button
                 onClick={openPrintablePacket}
                 className="px-8 py-4 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-colors flex items-center space-x-2 shadow-lg w-full sm:w-auto justify-center"
               >
