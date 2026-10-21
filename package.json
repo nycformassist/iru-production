@@ -9,27 +9,28 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "start": "npx serve -s dist -l 8080",
-    "test": "node --test api/lib/privacy.test.js api/lib/prompt.test.js api/lib/ratelimit.test.js api/lib/evidence.test.js api/lib/legal.test.js api/analyze.test.js api/cuban-regression.test.js api/review-image.test.js api/image-integration.test.js api/pdf-validation.test.js api/analyze-failure.test.js api/zip-coverage.test.js"
+    "test": "node --experimental-strip-types --test api/lib/privacy.test.js api/lib/prompt.test.js api/lib/ratelimit.test.js api/lib/evidence.test.js api/lib/legal.test.js api/lib/facts.test.js api/analyze.test.js api/cuban-regression.test.js api/review-image.test.js api/image-integration.test.js api/pdf-validation.test.js api/analyze-failure.test.js api/zip-coverage.test.js api/resource-resolution.test.js api/location-international.test.js api/formmap.test.js api/payment-flow.test.js api/narrative.test.js api/app-regression.test.js api/b2c-pricing.test.js api/evaluation-security.test.js api/form-review.test.js api/nextsteps-zip.test.js"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",
+    "dotenv": "^17.2.3",
+    "express": "^4.21.2",
     "lucide-react": "^0.546.0",
+    "motion": "^12.23.24",
+    "pdf-lib": "^1.17.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "vite": "^5.4.0",
-    "express": "^4.21.2",
-    "dotenv": "^17.2.3",
-    "motion": "^12.23.24"
+    "vite": "^5.4.0"
   },
   "devDependencies": {
+    "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
     "autoprefixer": "^10.4.21",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
-    "vite": "^5.4.0",
-    "@types/express": "^4.17.21"
+    "vite": "^5.4.0"
   }
 }

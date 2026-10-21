@@ -74,11 +74,13 @@ Examine the image ONCE and return a single JSON object with exactly these keys:
   "appearsComplete": "yes | no | unclear — whether all pages/fields appear present",
   "inconsistencies": ["anything that warrants human attention, or empty array"],
   "relatedReadinessItem": "which evidence checklist item this may help address, or 'none'",
-  "limitations": ["what this review cannot determine"]
+  "limitations": ["what this review cannot determine"],
+  "extractedFields": [{"field": "one of: full_name, date_of_birth, country_of_birth, city_of_birth, citizenship, gender, marital_status, passport_number, passport_country, a_number, entry_date, employer_name", "value": "the value exactly as it appears on the document", "page": 1}]
 }
 HARD RULES:
 - NEVER claim the document is authentic, genuine, verified, or legally sufficient. Looking plausible proves nothing.
-- List field LABELS only. Do not transcribe names, numbers, dates, or other personal details from the image.
+- "fieldsVisible" lists LABELS only. Separately, "extractedFields" transcribes values ONLY for the allowlisted fields above, ONLY when the value is actually legible on the document. These values are unverified document contents for the applicant's own review — never present them as established facts anywhere else in your output.
+- If a value is not legible or not present, omit that field. Do not guess, infer, or complete partial values.
 - If you cannot determine something, say so. Do not guess.
 `.trim();
 }

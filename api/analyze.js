@@ -18,9 +18,16 @@ import { sanitizeAnswers, minimizeForModel, droppedFieldNames, MAX_BODY_BYTES } 
 import { buildPrompt, validateModelOutput, fallbackAssessment } from "./lib/prompt.js";
 import { buildGapRecords } from "./lib/evidence.js";
 import { validateImageReviews } from "./lib/vision.js";
+import { sanitizeFactRecord } from "./lib/facts.js";
 import { createLimiter, clientIp } from "./lib/ratelimit.js";
+import { buildLimitedEvaluation } from "./lib/evaluation.js";
+import { entitlementStore } from "./lib/entitlement.js";
 
 const limiter = createLimiter({ capacity: 10, windowMs: 10 * 60 * 1000 });
+// The limited evaluation is a paid, one-shot deliverable: a stricter
+// quota applies on top of the general limiter, whether or not the
+// paywall is enabled, so the endpoint cannot be strip-mined.
+const evaluationLimiter = createLimiter({ capacity: 3, windowMs: 10 * 60 * 1000 });
 
 /**
  * Test hook: globalThis.__IRU_AI_CLIENT__ may provide { generateContentStream(prompt) }
@@ -60,19 +67,22 @@ export default async function handler(req, res) {
     return res.status(429).json({ error: "Too many requests. Please try again later." });
   }
 
+  // Body-size cap before parsing trust.
+  const rawBody = req.body;
+  // The limited evaluation (mode: 'limited') is deterministic — it makes
+  // no model call — so it does not require the AI service to be configured.
+  const wantsLimited = !!(rawBody && typeof rawBody === 'object' && rawBody.mode === 'limited');
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey && !globalThis.__IRU_AI_CLIENT__) {
+  if (!apiKey && !globalThis.__IRU_AI_CLIENT__ && !wantsLimited) {
     return res.status(500).json({ error: "Analysis service is not configured." });
   }
 
-  // Body-size cap before parsing trust.
-  const rawBody = req.body;
   const bodySize = typeof rawBody === 'string' ? Buffer.byteLength(rawBody) : JSON.stringify(rawBody || {}).length;
   if (bodySize > MAX_BODY_BYTES) {
     return res.status(413).json({ error: "Request too large." });
   }
 
-  const { answers, lang, narrativeStarters, imageReviews } = rawBody || {};
+  const { answers, lang, narrativeStarters, imageReviews, factRecord } = rawBody || {};
   const sanitized = sanitizeAnswers(answers);
   if (!sanitized.ok) {
     return res.status(400).json({ error: "Invalid submission.", details: sanitized.errors });
@@ -94,10 +104,61 @@ export default async function handler(req, res) {
   }
 
   const min = minimizeForModel(sanitized.answers, narrativeStarters);
+  // Canonical fact record (directive §4/§5): strictly re-validated here.
+  // Only document-extracted facts are passed to the model — as document
+  // CONTENTS to cross-check against the applicant's answers, never as
+  // established facts. Client-claimed 'verified' facts are dropped by the
+  // sanitizer. Identifier-class facts (names, A-numbers, passport numbers)
+  // are excluded: the model never needs their values.
+  const cleanRecord = sanitizeFactRecord(factRecord);
+  const IDENTIFIER_FACTS = new Set(['full_name', 'a_number', 'passport_number', 'ssn', 'usci_number', 'spouse_name']);
+  const documentFacts = cleanRecord
+    ? Object.values(cleanRecord.facts)
+        .filter(f => f && f.source === 'document' && f.value && !IDENTIFIER_FACTS.has(f.id))
+        .slice(0, 20)
+        .map(f => ({ id: f.id, value: f.value, status: f.status, sourceRef: f.sourceRef }))
+    : [];
   // Evidence-gap engine: server-side KB records for every missing/unknown
   // item. The model tailors these; it never invents alternatives.
   const gaps = buildGapRecords(min, validatedReviews.reviews);
-  const prompt = buildPrompt(min, lang, gaps, validatedReviews.reviews);
+
+  // ── Limited evaluation (B2C §3/§4): the $1 deliverable. Deterministic
+  // category-level result ONLY — it never reaches the model, the prompt,
+  // or any paid deliverable. When the paywall is enabled, a paid
+  // evaluation-scoped entitlement is required and is consumed exactly
+  // once on delivery; the authorization check lives here on the server,
+  // independent of anything the client shows or hides.
+  if (wantsLimited) {
+    const eq = evaluationLimiter.check(clientIp(req));
+    if (!eq.allowed) {
+      res.setHeader("Retry-After", Math.ceil(eq.retryAfterMs / 1000));
+      return res.status(429).json({ error: "Too many requests. Please try again later." });
+    }
+    const paywallOn = process.env.PAYWALL_ENABLED === 'true';
+    let entitlementToken = '';
+    if (paywallOn) {
+      entitlementToken = (req.headers && req.headers['x-entitlement-token']) || rawBody.entitlementToken || '';
+      const peek = entitlementStore.peekForEvaluation(entitlementToken);
+      if (!peek.ok) {
+        return res.status(402).json({
+          error: 'A paid limited-evaluation entitlement is required, or it has already been used.',
+          reason: peek.reason,
+        });
+      }
+    }
+    const evaluation = buildLimitedEvaluation(min);
+    if (paywallOn) {
+      const consumed = entitlementStore.consumeByToken(entitlementToken);
+      if (!consumed.ok) {
+        console.error(`[iru] evaluation entitlement consume failed: ${consumed.reason}`);
+        return res.status(409).json({ error: 'This entitlement could not be completed. Please contact support with your entitlement reference.' });
+      }
+    }
+    console.log(`[iru] limited evaluation delivered (paywall=${paywallOn})`);
+    return res.status(200).json({ ok: true, mode: 'limited', evaluation });
+  }
+
+  const prompt = buildPrompt(min, lang, gaps, validatedReviews.reviews, documentFacts);
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");

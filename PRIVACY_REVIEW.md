@@ -55,3 +55,29 @@ claims must match demonstrated behavior.
 - ✅ "IRU does not save your photo — it is reviewed once, in memory, and IRU keeps no copy."
 - ✅ "The review cannot determine whether a document is authentic or legally sufficient."
 - ❌ Never claim: "your photo is never saved anywhere," "immediately deleted from all systems," or "never shared" — the provider's abuse-monitoring retention contradicts absolute versions of these claims.
+
+---
+
+## Addendum 2026-10-21 — Structured document extraction (directive §5)
+
+Deliberate change, made under the owner's 2026-10-19 product principle
+(privacy and data minimization are architectural considerations, not
+blanket capability limits) and directive §5's requirement that document
+findings feed the canonical fact record and form preparation:
+
+- The vision prompt now ALSO returns `extractedFields`: values for a
+  CLOSED allowlist of fields (name, dates, birthplace, citizenship,
+  passport/A-number, entry date, employer) when legibly present on the
+  document. `fieldsVisible` remains labels-only.
+- Extracted values are validated server-side against the allowlist
+  (`api/lib/vision.js`), are NEVER logged, and exist only in the
+  response and the consumer's own in-memory session record, where they
+  carry the status `extracted-unconfirmed` until the consumer confirms
+  or corrects them.
+- When the fact record is sent to `/api/analyze`, identifier-class
+  extracted values (names, A-number, passport number, SSN) are excluded
+  from the model payload; non-identifier document facts are presented to
+  the model strictly as unverified document contents.
+- Everything else in this review is unchanged: images are processed in
+  memory only, never written to disk or a database by IRU, and provider-
+  side retention limits (see the original review) still apply.
