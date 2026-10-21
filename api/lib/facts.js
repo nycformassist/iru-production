@@ -42,7 +42,9 @@ export const FACT_RECORD_VERSION = 1;
  */
 export const FACT_IDS = [
   // Identity
-  'full_name', 'other_names_used', 'date_of_birth', 'gender',
+  'full_name', 'family_name', 'given_name', 'middle_name',
+  'other_names_used', 'other_family_name', 'other_given_name',
+  'date_of_birth', 'gender',
   'country_of_birth', 'city_of_birth', 'citizenship', 'nationality',
   'a_number', 'ssn', 'usci_number',
   'marital_status', 'spouse_name', 'spouse_date_of_birth',
@@ -55,7 +57,8 @@ export const FACT_IDS = [
   // Contact
   'phone', 'email',
   // Immigration history / case
-  'country_of_origin', 'entry_date', 'entry_manner', 'current_status',
+  'country_of_origin', 'entry_date', 'entry_manner', 'entry_place', 'current_status',
+  'application_reason',
   'case_type', 'has_passport', 'passport_country', 'passport_number',
   'has_i94', 'has_lease', 'has_persecution_proof', 'has_green_card',
   'has_tax_transcripts', 'has_marriage_cert', 'has_proof_of_relationship',
