@@ -32,6 +32,8 @@ export const FACT_STATUSES = [
   'verified',              // RESERVED — set only by a real verification process
 ];
 
+import { sanitizeNarrative } from './narrative.js';
+
 export const FACT_RECORD_VERSION = 1;
 
 /**
@@ -75,6 +77,7 @@ export function createFactRecord(nowIso) {
   return {
     version: FACT_RECORD_VERSION,
     facts: {},          // factId -> Fact
+    narrative: null,    // lib/narrative.js object when a narrative exists
     outputsStale: false,
     createdAt: nowIso || null,
     updatedAt: nowIso || null,
@@ -329,6 +332,7 @@ export function sanitizeFactRecord(raw) {
         : [],
     };
   }
+  record.narrative = sanitizeNarrative(raw.narrative);
   record.outputsStale = !!raw.outputsStale;
   record.updatedAt = raw.updatedAt || null;
   return record;

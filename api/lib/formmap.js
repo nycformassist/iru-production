@@ -12,6 +12,8 @@
  * - Signature fields are never filled (registry denylist + pattern guard).
  */
 
+import { isNarrativeApproved } from './narrative.js';
+
 export const TRANSFORMS = {
   /** A-Number: official fields hold digits only (max 9). Strip a leading "A". */
   aNumber(value) {
@@ -119,6 +121,25 @@ export function buildFillPlan(record, entry) {
           label: field.label,
           value: fact.value,
           sourceRef: fact.sourceRef || null,
+        });
+      }
+      continue;
+    }
+
+    // Narrative gate (successive directive §4): a fact whose source is
+    // the applicant's narrative may be used in form preparation ONLY
+    // after the applicant has reviewed and approved the narrative.
+    // Until then it is surfaced as needing that approval — never
+    // silently written, never re-asked as if unknown.
+    if (fact.source === 'narrative' && record?.narrative && !isNarrativeApproved(record.narrative)) {
+      if (!seenConfirmFacts.has(field.factId)) {
+        seenConfirmFacts.add(field.factId);
+        needsConfirmation.push({
+          factId: field.factId,
+          label: field.label,
+          value: fact.value,
+          sourceRef: null,
+          reason: 'narrative-not-approved',
         });
       }
       continue;

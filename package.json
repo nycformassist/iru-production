@@ -9,7 +9,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "start": "npx serve -s dist -l 8080",
-    "test": "node --experimental-strip-types --test api/lib/privacy.test.js api/lib/prompt.test.js api/lib/ratelimit.test.js api/lib/evidence.test.js api/lib/legal.test.js api/lib/facts.test.js api/analyze.test.js api/cuban-regression.test.js api/review-image.test.js api/image-integration.test.js api/pdf-validation.test.js api/analyze-failure.test.js api/zip-coverage.test.js api/resource-resolution.test.js api/location-international.test.js api/formmap.test.js api/payment-flow.test.js api/app-regression.test.js"
+    "test": "node --experimental-strip-types --test api/lib/privacy.test.js api/lib/prompt.test.js api/lib/ratelimit.test.js api/lib/evidence.test.js api/lib/legal.test.js api/lib/facts.test.js api/analyze.test.js api/cuban-regression.test.js api/review-image.test.js api/image-integration.test.js api/pdf-validation.test.js api/analyze-failure.test.js api/zip-coverage.test.js api/resource-resolution.test.js api/location-international.test.js api/formmap.test.js api/payment-flow.test.js api/narrative.test.js api/app-regression.test.js"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",

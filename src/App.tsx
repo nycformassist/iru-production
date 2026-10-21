@@ -17,6 +17,9 @@ import { createFactRecord, upsertFact, confirmFact, resolveConflict } from '../a
 // review UI; the PDF itself is generated server-side from the same record.
 import { FORM_REGISTRY, getFormEntry } from '../api/lib/forms/registry.js';
 import { buildFillPlan, splitFullName } from '../api/lib/formmap.js';
+// Personal Narrative as a first-class stage (successive directive §4):
+// chronology + issue analysis + applicant approval gate for form use.
+import { createNarrative, addNarrativeEvent, analyzeNarrative, approveNarrative, correctNarrativeEvent, confirmNarrativeEvent, narrativeForPacket } from '../api/lib/narrative.js';
 
 // Evidence intelligence (server-side source of truth, pure module — no
 // secrets, no I/O). Imported read-only for honest packet rendering.
@@ -95,6 +98,8 @@ export default function App() {
   const [reviewError, setReviewError] = useState('');
   // Canonical fact record + form preparation (directives §4/§7/§8).
   const [factRecord, setFactRecord] = useState<any>(null);
+  const [narrativeError, setNarrativeError] = useState('');
+  const [narrativeDates, setNarrativeDates] = useState<Record<string, string>>({});
   const [selectedFormId, setSelectedFormId] = useState<string>('');
   const [formSummary, setFormSummary] = useState<any>(null);
   const [formPdfBase64, setFormPdfBase64] = useState<string>('');
@@ -147,6 +152,17 @@ export default function App() {
     }
     if (ans.narrative_text) {
       upsertFact(rec, { id: 'narrative_text', value: ans.narrative_text, source: 'narrative', type: 'text' }, now);
+      // First-class narrative (successive §4): the applicant's own words
+      // as a chronology event, anchored to the entry date they reported.
+      // Nothing is added to or rewritten in their account.
+      const narrative = createNarrative(now);
+      addNarrativeEvent(narrative, {
+        id: 'story_main',
+        text: ans.narrative_text,
+        date: ans.entry_date || null,
+        factIds: ans.entry_date ? ['entry_date'] : [],
+      }, now);
+      rec.narrative = narrative;
     }
     // Country-aware location facts (distinct fields — §3.2).
     const country = ans.residence_country || 'US';
@@ -327,6 +343,39 @@ export default function App() {
     applyFactMutation((rec) => {
       upsertFact(rec, { id: factId, value: value.trim(), source: 'correction' }, new Date().toISOString());
     });
+  };
+
+  // ── Narrative: correction / confirmation / approval (successive §4).
+  // Approval is the gate that lets narrative-stated facts be used in
+  // form preparation (enforced again server-side in lib/formmap.js).
+  const handleNarrativeDate = (eventId: string) => {
+    const date = (narrativeDates[eventId] || '').trim();
+    if (!date) return;
+    setNarrativeError('');
+    applyFactMutation((rec) => {
+      if (rec.narrative) correctNarrativeEvent(rec.narrative, rec, eventId, { date }, new Date().toISOString());
+    });
+  };
+
+  const handleNarrativeConfirm = (eventId: string) => {
+    setNarrativeError('');
+    applyFactMutation((rec) => {
+      if (rec.narrative) confirmNarrativeEvent(rec.narrative, eventId, new Date().toISOString());
+    });
+  };
+
+  const handleApproveNarrative = () => {
+    if (!factRecord || !factRecord.narrative) return;
+    try {
+      const next = JSON.parse(JSON.stringify(factRecord));
+      approveNarrative(next.narrative, next, new Date().toISOString());
+      setFactRecord(next);
+      setFormSummary(null);
+      setFormPdfBase64('');
+      setNarrativeError('');
+    } catch (e: any) {
+      setNarrativeError(String((e && e.message) || e));
+    }
   };
 
   const handleSaveFormAnswers = (entry: any, plan: any) => {
@@ -760,6 +809,9 @@ export default function App() {
             <ul style="margin-top: 0; margin-bottom: 1rem; padding-left: 1.5rem; color: #334155; font-weight: 500;">
               ${selectedStarters.map(s => `<li style="margin-bottom: 0.5rem;">${escapeHtml(s)}</li>`).join('')}
             </ul>
+            ` : ''}
+            ${factRecord && factRecord.narrative ? `
+            <p style="margin: 0 0 0.75rem; font-size: 0.8rem; font-weight: 600; color: #475569;">${escapeHtml(narrativeForPacket(factRecord.narrative, factRecord)?.label || '')}</p>
             ` : ''}
             ${narrativeText ? `
             <p style="margin: 0; color: #1e293b; line-height: 1.6; white-space: pre-wrap;">${escapeHtml(narrativeText)}</p>
@@ -1365,6 +1417,56 @@ export default function App() {
                 </div>
               </div>
             )}
+
+            {/* ── Your Story (successive §4): chronology, issues, approval gate ── */}
+            {factRecord && factRecord.narrative && (() => {
+              const analysis: any = analyzeNarrative(factRecord.narrative, factRecord);
+              const approved = factRecord.narrative.status === 'approved';
+              const blocking = analysis.issues.filter((i: any) => i.blocking);
+              return (
+                <div className="mt-8 mb-8 text-left">
+                  <h3 className="text-lg font-serif font-bold text-slate-900 mb-2">{t('narrativePanelTitle', 'Your Story — Review and Approve')}</h3>
+                  <p className="text-xs text-slate-500 mb-4">{t('narrativePanelIntro', 'Your own words in time order. IRU flags what is missing or unclear and asks — it never adds to your story. Facts from your story are used in form preparation only after you approve it here.')}</p>
+                  <div className="space-y-2 mb-4">
+                    {analysis.chronology.map((e: any) => (
+                      <div key={e.id} className="border border-slate-200 rounded-xl p-3">
+                        <div className="flex flex-wrap items-center gap-2 mb-1">
+                          <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">{e.date ? `${e.date}${e.datePrecision !== 'exact' ? ' (approximate)' : ''}` : t('narrativeNoDate', 'Date not given')}</span>
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">{e.origin === 'document-extracted' ? t('narrativeFromDocument', 'From your document') : t('narrativeFromYou', 'Your statement')}</span>
+                          {e.needsConfirmation && (
+                            <button onClick={() => handleNarrativeConfirm(e.id)} className="px-3 py-1 bg-indigo-600 text-white text-xs font-bold rounded-lg hover:bg-indigo-700">{t('confirmFact', 'Confirm')}</button>
+                          )}
+                        </div>
+                        <p className="text-sm text-slate-700" style={{ whiteSpace: 'pre-wrap' }}>{e.text}</p>
+                      </div>
+                    ))}
+                  </div>
+                  {analysis.issues.length > 0 && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4 space-y-3">
+                      {analysis.issues.map((issue: any, idx: number) => (
+                        <div key={idx}>
+                          <p className="text-sm text-amber-900">{issue.question}</p>
+                          {issue.kind === 'missing-date' && (
+                            <span className="flex gap-2 mt-1">
+                              <input type="date" value={narrativeDates[issue.eventId] || ''} onChange={(ev) => setNarrativeDates({ ...narrativeDates, [issue.eventId]: ev.target.value })} className="border border-amber-300 rounded-lg px-2 py-1 text-sm" />
+                              <button onClick={() => handleNarrativeDate(issue.eventId)} className="px-3 py-1 bg-amber-600 text-white text-xs font-bold rounded-lg hover:bg-amber-700">{t('saveDate', 'Save date')}</button>
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {narrativeError && <p className="text-sm text-red-700 mb-3">{narrativeError}</p>}
+                  {approved ? (
+                    <p className="text-sm font-semibold text-emerald-700">{t('narrativeApproved', 'You reviewed and approved your story. Facts from it can now be used in form preparation. Correcting it later will ask you to approve it again.')}</p>
+                  ) : (
+                    <button onClick={handleApproveNarrative} disabled={blocking.length > 0} className="px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 disabled:opacity-40">
+                      {t('approveNarrative', 'I reviewed my story — approve it for form preparation')}
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* ── Form preparation (§7): select, review mapping, generate DRAFT ── */}
             {factRecord && (

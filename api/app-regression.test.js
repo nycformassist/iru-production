@@ -61,3 +61,23 @@ describe('App.tsx regression guards', () => {
     assert.ok(app.includes('factRecord: record'));
   });
 });
+
+describe('App.tsx narrative stage guards (successive directive §4)', () => {
+  it('buildFactRecord attaches a first-class narrative from the applicant\'s own words', () => {
+    assert.ok(app.includes('rec.narrative = narrative'), 'record must carry the narrative object');
+    assert.ok(app.includes('createNarrative(now)'), 'narrative must be built via lib/narrative.js');
+    assert.ok(app.includes("text: ans.narrative_text"), 'event text must be the applicant\'s verbatim words');
+  });
+
+  it('narrative panel renders chronology, issues, and the approval gate', () => {
+    assert.ok(app.includes('analyzeNarrative(factRecord.narrative, factRecord)'), 'panel must analyze the narrative');
+    assert.ok(app.includes('onClick={handleApproveNarrative}'), 'approve button must be bound');
+    assert.ok(app.includes('disabled={blocking.length > 0}'), 'approval must be disabled while blocking issues remain');
+    assert.ok(app.includes('handleNarrativeDate(issue.eventId)'), 'missing-date issues must offer the correction path');
+    assert.ok(app.includes('handleNarrativeConfirm(e.id)'), 'document-extracted events must offer applicant confirmation');
+  });
+
+  it('packet labels the narrative with its approval status', () => {
+    assert.ok(app.includes('narrativeForPacket(factRecord.narrative, factRecord)'), 'packet must carry the honest narrative status label');
+  });
+});
