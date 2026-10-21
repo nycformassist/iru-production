@@ -13,6 +13,30 @@
  */
 
 import { isNarrativeApproved } from './narrative.js';
+import { buildFormNextSteps } from './nextsteps.js';
+
+/**
+ * Pre-download review instructions (B2C directive §5.A). Shown with
+ * every generated draft. A generated form is a DRAFT to be checked by
+ * the applicant — never presented as automatically correct, legally
+ * sufficient, or guaranteed to be accepted.
+ */
+export const FORM_REVIEW_INSTRUCTIONS = [
+  'This is a DRAFT. It has not been signed, submitted, or filed, and it must be checked by you before any use.',
+  'Verify your name, dates, addresses, identifying information, and every other populated field against your own records and supporting documents.',
+  'Review anything listed as unanswered, inconsistent, uncertain, or needing confirmation in the completion summary.',
+  'Confirm that every applicable question has been answered accurately — questions left blank were left blank because the information was not provided, not because they do not apply.',
+  'Correct mistakes in your information and regenerate the draft before signing, submitting, or otherwise using the form.',
+  'A form prepared with software assistance is not automatically correct or legally sufficient, and no outcome is guaranteed.',
+];
+
+/** Explicit final-review checklist (B2C directive §5.D) — a review aid, not a legal certification. */
+export const FINAL_REVIEW_CHECKLIST = [
+  'I checked every populated field on the draft against my own records and documents.',
+  'I reviewed the supporting material and the items listed as missing, inconsistent, or unconfirmed.',
+  'I addressed the known inconsistencies, or I understand they remain unresolved.',
+  'I understand this draft is not signed, filed, or submitted, and that signing and filing are my responsibility.',
+];
 
 export const TRANSFORMS = {
   /** A-Number: official fields hold digits only (max 9). Strip a leading "A". */
@@ -174,6 +198,23 @@ export function buildCompletionSummary(entry, plan, record) {
     editionDate: entry.editionDate,
     registryCheckedDate: entry.checkedDate,
     draftLabel: 'DRAFT — for consumer review only. Not signed, not submitted, not legal advice.',
+    // The two documents in a form package, labeled exactly (B2C §5.B).
+    draftDocumentLabel: 'IRU Pre-filled Draft — Review and Correct',
+    blankForm: {
+      label: 'Official Blank Form — Reference Copy',
+      formId: entry.id,
+      editionDate: entry.editionDate,
+      // The blank served alongside the draft is the same verified
+      // official template the draft was generated from — unfilled.
+      downloadPath: `/api/blank-form?form=${encodeURIComponent(entry.id)}`,
+      sourceUrl: entry.sourceUrl,
+      instructionsUrl: entry.instructionsUrl,
+      note: 'The blank official form is a reference for checking the draft\u2019s answers and noting corrections. Downloading it does not grant preparation of any form.',
+    },
+    reviewInstructions: [...FORM_REVIEW_INSTRUCTIONS],
+    finalReviewChecklist: [...FINAL_REVIEW_CHECKLIST],
+    nextSteps: buildFormNextSteps(entry, plan),
+    staleVersionNote: 'If you correct any information after downloading this draft, the download is stale. Regenerate the draft and use only the latest version.',
     populated: plan.fill.map((f) => ({ label: f.label, pdfField: f.pdfField, value: f.kind === 'text' ? f.value : '✓ checked' })),
     fillErrors: (plan.fillErrors || []).map((e) => ({ label: e.label, reason: e.reason })),
     needsConfirmation: plan.needsConfirmation,
