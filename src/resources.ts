@@ -65,6 +65,21 @@ export interface ResourceResult {
   isNycCoverage: boolean;
   /** The normalized 3-digit prefix, or empty string. */
   prefix: string;
+  /** Country the resolution was performed for (ISO alpha-2 or 'US'). */
+  country: string;
+  /** True when the user is outside the U.S. — no U.S. org is "local" to them. */
+  isInternational: boolean;
+}
+
+export interface LocationInput {
+  /** ISO 3166-1 alpha-2 country of residence. Absent/empty means U.S. (legacy). */
+  country?: string;
+  /** Postal code in the country's own format (ZIP for the U.S.). */
+  postalCode?: string;
+  /** State / province / region, when known. */
+  region?: string;
+  /** City or locality, when known. */
+  city?: string;
 }
 
 const LAST_VERIFIED = '2026-10-19';
@@ -427,8 +442,40 @@ function buildNationalDirectories(zip: string): NationalDirectory[] {
  * and the UI must show the honest fallback notice (never silent substitution).
  */
 export function resolveResources(zip: string): ResourceResult {
-  const clean = String(zip || '').trim();
-  const prefix = clean.substring(0, 3);
+  return resolveResourcesForLocation({ country: 'US', postalCode: zip });
+}
+
+/**
+ * Country-aware layered resolution (directive §3.3):
+ * local → regional/statewide → national → broader/international fallback.
+ *
+ * - U.S. users: the verified ZIP-prefix matching below (unchanged behavior).
+ * - Users with no postal code: national directories only, honest fallback.
+ *   Federal readiness is NEVER blocked by a missing location.
+ * - Non-U.S. users: NO U.S. organization is represented as local to them.
+ *   They receive the U.S. national directories (relevant to U.S.
+ *   immigration help) with `isInternational: true` so the UI labels them
+ *   honestly as U.S.-based national resources, plus fallback = true.
+ *   IRU does not invent providers in other countries.
+ */
+export function resolveResourcesForLocation(loc: LocationInput): ResourceResult {
+  const country = String(loc?.country || 'US').trim().toUpperCase() || 'US';
+  const postal = String(loc?.postalCode || '').trim();
+
+  if (country !== 'US') {
+    return {
+      local: [],
+      statewide: [],
+      national: buildNationalDirectories(''),
+      fallback: true,
+      isNycCoverage: false,
+      prefix: '',
+      country,
+      isInternational: true,
+    };
+  }
+
+  const prefix = postal.substring(0, 3);
   const isNycCoverage = NYC_PREFIXES.includes(prefix);
 
   const matched = prefix
@@ -440,10 +487,12 @@ export function resolveResources(zip: string): ResourceResult {
   return {
     local,
     statewide,
-    national: buildNationalDirectories(clean),
+    national: buildNationalDirectories(postal),
     fallback: matched.length === 0,
     isNycCoverage,
     prefix,
+    country: 'US',
+    isInternational: false,
   };
 }
 
