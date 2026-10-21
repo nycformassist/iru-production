@@ -16,6 +16,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { PDFDocument, PDFName, StandardFonts, rgb } from 'pdf-lib';
 import { createLimiter, clientIp } from './lib/ratelimit.js';
+import { entitlementStore } from './lib/entitlement.js';
 import { sanitizeFactRecord } from './lib/facts.js';
 import { getFormEntry, SIGNATURE_FIELD_PATTERN } from './lib/forms/registry.js';
 import { buildFillPlan, buildCompletionSummary } from './lib/formmap.js';
@@ -123,11 +124,36 @@ export default async function handler(req, res) {
   const body = typeof rawBody === 'string' ? safeParse(rawBody) : (rawBody || {});
   if (!body) return res.status(400).json({ error: 'Invalid submission.' });
 
+  // Entitlement gate (directive §11): active ONLY when PAYWALL_ENABLED=true.
+  // Default off — the free readiness flow is unchanged. When on, a paid,
+  // unconsumed entitlement token is required; it is consumed exactly once,
+  // only after a successful generation (a failed generation leaves the
+  // entitlement intact for recovery/retry).
+  const paywallOn = process.env.PAYWALL_ENABLED === 'true';
+  let entitlementToken = '';
+  if (paywallOn) {
+    entitlementToken = (req.headers && req.headers['x-entitlement-token']) || body.entitlementToken || '';
+    const peek = entitlementStore.peekByToken(entitlementToken);
+    if (!peek.ok) {
+      return res.status(402).json({
+        error: 'A paid entitlement is required to generate this form draft, or it has already been used.',
+        reason: peek.reason,
+      });
+    }
+  }
+
   try {
     const { pdfBytes, summary } = await generateFormDraft({
       formId: body.formId,
       factRecord: body.factRecord,
     });
+    if (paywallOn) {
+      const consumed = entitlementStore.consumeByToken(entitlementToken);
+      if (!consumed.ok) {
+        console.error(`[iru] entitlement consume failed after generation: ${consumed.reason}`);
+        return res.status(409).json({ error: 'This entitlement could not be completed. Please contact support with your entitlement reference.' });
+      }
+    }
     // Audit log: form id + counts only. Never fact values.
     console.log(`[iru] form draft generated: form=${summary.formId} populated=${summary.populated.length} missing=${summary.missingRequired.length} conflicts=${summary.conflicts.length}`);
     return res.status(200).json({
