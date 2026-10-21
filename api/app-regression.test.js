@@ -81,3 +81,32 @@ describe('App.tsx narrative stage guards (successive directive §4)', () => {
     assert.ok(app.includes('narrativeForPacket(factRecord.narrative, factRecord)'), 'packet must carry the honest narrative status label');
   });
 });
+
+describe('App.tsx B2C guards (2026-10-21 directive)', () => {
+  it('the offer shows both options from the shared pricing module, before payment', () => {
+    assert.ok(app.includes('buildOffer()'), 'offer must be built from api/lib/pricing.js');
+    assert.ok(app.includes('SKUS.EVALUATION'), 'evaluation purchase must use the server SKU');
+    assert.ok(app.includes('SKUS.ONE_FORM') && app.includes('SKUS.BUNDLE') && app.includes('SKUS.SECOND_FORM_ADDON'), 'all B2C SKUs must be purchasable from the offer');
+    assert.ok(app.includes("import { PRICING, SKUS, buildOffer, formatCents } from '../api/lib/pricing.js'"), 'client and server share one pricing source');
+  });
+
+  it('every packet carries the mandated next-steps section', () => {
+    assert.ok(app.includes('YOUR NEXT STEPS — HOW TO USE THIS REPORT'), 'exact next-steps title must be in the client');
+    assert.ok(app.includes('buildPacketNextSteps()'), 'packet builder must exist');
+    assert.ok(app.includes('nextStepsHtml'), 'printable packet must render the section');
+    assert.ok(app.includes("from '../api/lib/nextsteps.js'"), 'next-steps content must come from the shared module');
+  });
+
+  it('the form review experience carries both document labels and the checklist gate', () => {
+    assert.ok(app.includes('IRU Pre-filled Draft — Review and Correct'), 'draft label must appear');
+    assert.ok(app.includes('Official Blank Form — Reference Copy'), 'blank-form label must appear');
+    assert.ok(app.includes('/api/blank-form?form='), 'blank download must use the verified-template endpoint');
+    assert.ok(app.includes('finalReviewChecklist'), 'final review checklist must render from the summary');
+    assert.ok(app.includes('setFormDraftMeta'), 'draft versions must be identified');
+  });
+
+  it('generation sends the token that covers the selected form', () => {
+    assert.ok(app.includes('formTokens[selectedFormId]'), 'scoped form tokens must be selected per form');
+    assert.ok(app.includes("sessionStorage.getItem('iru_evaluation_token')"), 'evaluation token must be kept for upgrades');
+  });
+});

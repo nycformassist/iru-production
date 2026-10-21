@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Shield, Globe, Printer, ArrowRight, ArrowLeft, CheckCircle2, Copy, Info } from 'lucide-react';
 import { motion } from 'framer-motion';
 
@@ -20,6 +20,30 @@ import { buildFillPlan, splitFullName } from '../api/lib/formmap.js';
 // Personal Narrative as a first-class stage (successive directive §4):
 // chronology + issue analysis + applicant approval gate for form use.
 import { createNarrative, addNarrativeEvent, analyzeNarrative, approveNarrative, correctNarrativeEvent, confirmNarrativeEvent, narrativeForPacket } from '../api/lib/narrative.js';
+
+// B2C pricing + next steps (2026-10-21 directive): the SAME modules the
+// server enforces with, so what the consumer is shown is what the
+// server charges and what every output must contain.
+import { PRICING, SKUS, buildOffer, formatCents } from '../api/lib/pricing.js';
+import { NEXT_STEPS_TITLE, PROFESSIONAL_HELP_POINTS, RESOURCE_SEARCH_PATHS } from '../api/lib/nextsteps.js';
+
+const PAYWALL_UI_ON = () => {
+  try { return (import.meta as any).env && (import.meta as any).env.VITE_PAYWALL_ENABLED === 'true'; }
+  catch { return false; }
+};
+
+/** Form-entitlement tokens by form id (test-mode purchases, this browser only). */
+function loadFormTokens(): Record<string, string> {
+  try { return JSON.parse(sessionStorage.getItem('iru_form_tokens') || '{}'); } catch { return {}; }
+}
+function saveFormToken(formId: string, token: string) {
+  try {
+    const map = loadFormTokens();
+    map[formId] = token;
+    sessionStorage.setItem('iru_form_tokens', JSON.stringify(map));
+    sessionStorage.setItem('iru_entitlement_token', token);
+  } catch { /* storage unavailable — generation will ask again */ }
+}
 
 // Evidence intelligence (server-side source of truth, pure module — no
 // secrets, no I/O). Imported read-only for honest packet rendering.
@@ -106,6 +130,20 @@ export default function App() {
   const [formBusy, setFormBusy] = useState(false);
   const [formError, setFormError] = useState('');
   const [formAnswers, setFormAnswers] = useState<Record<string, string>>({});
+  // Form review (B2C §5): version identification + final-review checklist.
+  const [formDraftMeta, setFormDraftMeta] = useState<{ draftId: string; generatedAt: string; version: number; formId: string } | null>(null);
+  const [reviewChecks, setReviewChecks] = useState<Record<number, boolean>>({});
+  // Purchase state for the offer panel (B2C §3), refreshed from the
+  // server-side entitlement status of the tokens this browser holds.
+  const [purchaseState, setPurchaseState] = useState<{ hasEvaluation: boolean; ownedForms: string[] }>({ hasEvaluation: false, ownedForms: [] });
+  const [checkoutBusy, setCheckoutBusy] = useState(false);
+
+  // Purchase state is refreshed from the server whenever the packet
+  // (and its offer/form panels) is shown.
+  useEffect(() => {
+    if (stage === 'PACKET') { refreshPurchaseState(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stage]);
 
   /** Plain-text rendering of the structured assessment for the packet. */
   const renderAssessmentText = (a: any): string => {
@@ -315,6 +353,9 @@ export default function App() {
     setConsulate(null);
     setResources([]);
     setCopied(false);
+    setFormDraftMeta(null);
+    setReviewChecks({});
+    setPurchaseState({ hasEvaluation: false, ownedForms: [] });
   };
 
   // ── Facts: consumer confirmation / conflict resolution / correction (§8).
@@ -325,9 +366,12 @@ export default function App() {
     const next = JSON.parse(JSON.stringify(factRecord));
     mutate(next);
     setFactRecord(next);
-    // A previously generated form draft no longer matches the record.
+    // A previously generated form draft no longer matches the record:
+    // it is stale, so it is withdrawn and the review state resets.
     setFormSummary(null);
     setFormPdfBase64('');
+    setFormDraftMeta(null);
+    setReviewChecks({});
   };
 
   const handleConfirmFact = (factId: string) => {
@@ -397,7 +441,10 @@ export default function App() {
     setFormPdfBase64('');
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      const savedToken = sessionStorage.getItem('iru_entitlement_token');
+      // The entitlement that covers THIS form (B2C scoped grants), with
+      // the legacy single-token key as fallback.
+      const formTokens = loadFormTokens();
+      const savedToken = formTokens[selectedFormId] || sessionStorage.getItem('iru_entitlement_token');
       if (savedToken) headers['x-entitlement-token'] = savedToken;
       const resp = await fetch('/api/generate-form', {
         method: 'POST',
@@ -410,6 +457,15 @@ export default function App() {
       }
       setFormSummary(data.summary);
       setFormPdfBase64(data.pdfBase64);
+      // Version identification (B2C §5.C): every generation is a new,
+      // distinguishable draft; only the latest is current.
+      setFormDraftMeta((prev) => ({
+        draftId: data.draftId || '',
+        generatedAt: data.generatedAt || new Date().toISOString(),
+        version: (prev && prev.formId === selectedFormId ? prev.version : 0) + 1,
+        formId: selectedFormId,
+      }));
+      setReviewChecks({});
     } catch (e: any) {
       setFormError(e && e.message ? e.message : 'Form generation unavailable.');
     } finally {
@@ -417,18 +473,70 @@ export default function App() {
     }
   };
 
-  const handleCheckout = async () => {
-    // Test-mode checkout (only rendered when the build flag enables it).
+  /**
+   * Test-mode checkout for a B2C SKU (B2C §3). The server computes every
+   * amount from its pricing table — the client names only the product
+   * and, for upgrades, presents the token of the purchase it builds on.
+   */
+  const handleCheckout = async (sku?: string, opts?: { formId?: string; prerequisiteToken?: string }) => {
+    if (checkoutBusy) return;
+    setCheckoutBusy(true);
+    setFormError('');
     try {
-      const resp = await fetch('/api/checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const body: any = {};
+      if (sku) body.sku = sku;
+      if (opts && opts.formId) body.formId = opts.formId;
+      if (opts && opts.prerequisiteToken) body.entitlementToken = opts.prerequisiteToken;
+      const resp = await fetch('/api/checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const data = await resp.json().catch(() => null);
       if (!resp.ok || !data || !data.checkoutUrl) throw new Error((data && data.error) || 'Checkout unavailable.');
-      sessionStorage.setItem('iru_entitlement_token', data.entitlementToken);
-      sessionStorage.setItem('iru_entitlement_id', data.entitlementId);
+      // Keep the buyer's credential(s) for the return + later delivery.
+      if (data.sku === SKUS.EVALUATION) {
+        sessionStorage.setItem('iru_evaluation_token', data.entitlementToken);
+      } else if (data.scope && data.scope.kind === 'forms' && Array.isArray(data.scope.forms)) {
+        for (const f of data.scope.forms) saveFormToken(f, data.entitlementToken);
+      } else {
+        sessionStorage.setItem('iru_entitlement_token', data.entitlementToken);
+        sessionStorage.setItem('iru_entitlement_id', data.entitlementId);
+      }
       window.location.href = data.checkoutUrl;
     } catch (e: any) {
       setFormError(e && e.message ? e.message : 'Checkout unavailable.');
+      setCheckoutBusy(false);
     }
+  };
+
+  /** Refresh what this browser owns, from server-side entitlement status. */
+  const refreshPurchaseState = async () => {
+    if (!PAYWALL_UI_ON()) return;
+    try {
+      const ownedForms: string[] = [];
+      let hasEvaluation = false;
+      const check = async (token: string | null) => {
+        if (!token) return null;
+        const resp = await fetch('/api/entitlement-status', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token }),
+        });
+        const data = await resp.json().catch(() => null);
+        return resp.ok && data && data.entitlement ? data.entitlement : null;
+      };
+      const ev = await check(sessionStorage.getItem('iru_evaluation_token'));
+      if (ev && ev.paid && ev.scope && ev.scope.kind === 'evaluation') hasEvaluation = true;
+      const map = loadFormTokens();
+      for (const formId of Object.keys(map)) {
+        const ent = await check(map[formId]);
+        if (ent && ent.paid && ent.scope && ent.scope.kind === 'forms') {
+          for (const f of (ent.scope.forms || [])) if (!ownedForms.includes(f)) ownedForms.push(f);
+        }
+      }
+      setPurchaseState({ hasEvaluation, ownedForms });
+    } catch { /* best-effort: the offer panel simply shows the entry state */ }
+  };
+
+  const downloadBlankForm = () => {
+    if (!selectedFormId) return;
+    window.open(`/api/blank-form?form=${encodeURIComponent(selectedFormId)}`, '_blank');
   };
 
   const downloadFormPdf = () => {
@@ -577,6 +685,58 @@ export default function App() {
     if (stage === 'PHOTO') return 95;
     if (stage === 'PACKET') return 100;
     return 0;
+  };
+
+  /**
+   * "YOUR NEXT STEPS — HOW TO USE THIS REPORT" for the readiness packet
+   * (B2C directive §6). Tailored to this session's actual findings;
+   * ZIP-independent; verified resources are distinguished from general
+   * search paths; no eligibility determination, no guarantee. English
+   * body text, following the packet's established pattern for guidance
+   * content (the evidence-gap knowledge base is likewise English with
+   * a note); UI chrome strings go through t().
+   */
+  const buildPacketNextSteps = () => {
+    const conflicts = factRecord ? Object.values(factRecord.facts).filter((f: any) => f.status === 'conflicted').length : 0;
+    const unconfirmed = factRecord ? Object.values(factRecord.facts).filter((f: any) => f.status === 'reported-unconfirmed').length : 0;
+    const pct = assessment && typeof assessment.readinessPercent === 'number' ? assessment.readinessPercent : null;
+    const understand: string[] = [
+      `This report organizes the information you provided for your ${(assessment && assessment.caseType) || answers.case_type || 'immigration'} preparation and identifies what still needs attention. It is based only on your answers and documents — nothing was independently verified.`,
+      ...(pct !== null
+        ? [`Your readiness estimate is ${pct}%. It is an approximate document-completeness heuristic — not a probability, a score of your chances, or a prediction of any outcome.`]
+        : []),
+      `The evidence review identified ${Object.keys(EVIDENCE_KB).filter((k) => answers[k] && answers[k] !== 'yes').length} item(s) to address, listed above in priority order.`,
+      ...(conflicts > 0 ? [`${conflicts} item(s) in your information are in conflict between sources and are listed above — resolve them before relying on any output.`] : []),
+      ...(unconfirmed > 0 ? [`${unconfirmed} value(s) came from your documents and still need your confirmation.`] : []),
+      'This report does not decide whether you are eligible for any immigration benefit, and it does not predict or guarantee any outcome.',
+      'Preparation assistance is not legal advice, and IRU is not a law firm. Nothing has been signed, filed, or submitted on your behalf.',
+    ];
+    const review: string[] = formSummary
+      ? [
+          `Your latest form output is the ${formSummary.formId} draft (Edition ${formSummary.editionDate}), labeled "IRU Pre-filled Draft — Review and Correct". Earlier downloads of the same form are stale once your information changes — use only the latest version.`,
+          `Compare the draft with the "Official Blank Form — Reference Copy" (${formSummary.formId}, Edition ${formSummary.editionDate}${formSummary.blankForm ? `, ${formSummary.blankForm.sourceUrl}` : ''}) and with your own records before any use.`,
+          'Confirm the current edition, instructions, fee, and filing address on the official form page before you use the form — official requirements change.',
+        ]
+      : [
+          'No form draft was generated in this session. If you prepare a form, compare the pre-filled draft with the official blank form and your own records before any use, and confirm the current edition, instructions, fee, and filing address on the official USCIS form page.',
+        ];
+    const verifiedOrgs = resourceResult && !resourceResult.isInternational ? (resourceResult.local || []) : [];
+    const resourcesIntro = verifiedOrgs.length > 0
+      ? 'The organizations under "Local Resources" above were matched by IRU to the location you provided. IRU does not guarantee their availability, cost, capacity, or acceptance of your case. The directories below are additional general starting points.'
+      : resourceResult && resourceResult.isInternational
+        ? 'You are located outside IRU\u2019s U.S. resource coverage area, so no U.S. organization is presented as local to you. Use the general directories below to find qualified help that serves your situation, and confirm any deadline or filing question with an official source or a qualified professional.'
+        : 'No verified local organization was matched for this report. The directories below are general starting points for finding qualified help — inclusion is not a recommendation, and availability is not guaranteed.';
+    const checklist: string[] = [
+      ...(conflicts > 0 ? [`Resolve the ${conflicts} conflicting item(s) in your information, then regenerate any affected outputs.`] : []),
+      ...(unconfirmed > 0 ? [`Confirm the ${unconfirmed} document-provided value(s) marked as needing confirmation.`] : []),
+      'Work through the evidence gaps above in priority order; for each one, use the listed primary evidence or an accepted alternative.',
+      ...(formSummary
+        ? [`Review your ${formSummary.formId} draft field by field against the official blank form and your records; correct mistakes in your information and regenerate so you hold only the latest version.`]
+        : ['If you prepare a form draft, review it field by field before any use.']),
+      'Confirm the current form editions, instructions, fees, and any deadline that may apply to you with an official source (uscis.gov) or a qualified professional.',
+      'If you consult an attorney or accredited representative, bring this report and your latest draft version.',
+    ];
+    return { title: NEXT_STEPS_TITLE, understand, review, professionalHelp: PROFESSIONAL_HELP_POINTS as string[], resourcesIntro, searchPaths: RESOURCE_SEARCH_PATHS, checklist };
   };
 
   const generateHtml = () => {
@@ -756,6 +916,27 @@ export default function App() {
           <p style="font-size:0.8rem;color:#64748b;font-style:italic;">Document-extracted values show what a document contains; they are not proof of authenticity. Correct anything that is wrong before relying on it.</p>
         </div>` : '';
 
+    // Next steps (B2C §6) — part of THIS report, not a separate document.
+    const ns = buildPacketNextSteps();
+    const li = (items: string[]) => items.map(s => `<li style="margin-bottom:0.35rem;">${escapeHtml(s)}</li>`).join('');
+    const nextStepsHtml = `
+        <div class="section">
+          <h3 class="section-title font-serif">${escapeHtml(ns.title)}</h3>
+          <h4 style="font-size:1rem;font-weight:700;margin:0 0 0.5rem;">A. What this report does — and does not — establish</h4>
+          <ul style="margin:0 0 1rem;padding-left:1.25rem;font-size:0.875rem;color:#334155;">${li(ns.understand)}</ul>
+          <h4 style="font-size:1rem;font-weight:700;margin:0 0 0.5rem;">B. How to review your information and any form output</h4>
+          <ul style="margin:0 0 1rem;padding-left:1.25rem;font-size:0.875rem;color:#334155;">${li(ns.review)}</ul>
+          <h4 style="font-size:1rem;font-weight:700;margin:0 0 0.5rem;">C. Preparing for professional help</h4>
+          <ul style="margin:0 0 1rem;padding-left:1.25rem;font-size:0.875rem;color:#334155;">${li(ns.professionalHelp)}</ul>
+          <h4 style="font-size:1rem;font-weight:700;margin:0 0 0.5rem;">D. Finding additional help</h4>
+          <p style="margin:0 0 0.5rem;font-size:0.875rem;color:#334155;">${escapeHtml(ns.resourcesIntro)}</p>
+          <ul style="margin:0 0 1rem;padding-left:1.25rem;font-size:0.875rem;color:#334155;">
+            ${ns.searchPaths.map(p => `<li style="margin-bottom:0.35rem;"><strong>${escapeHtml(p.name)}</strong> — ${escapeHtml(p.description)}<br/><span style="color:#64748b;">${escapeHtml(p.url)}</span></li>`).join('')}
+          </ul>
+          <h4 style="font-size:1rem;font-weight:700;margin:0 0 0.5rem;">E. Your ordered checklist</h4>
+          <ol style="margin:0;padding-left:1.25rem;font-size:0.875rem;color:#334155;">${li(ns.checklist)}</ol>
+        </div>`;
+
     const selectedStarters = NARRATIVE_STARTERS.filter(s => answers[s.id] === 'yes').map(s => s.labels[lang as keyof typeof s.labels]);
     const narrativeText = answers.narrative_text || '';
     const hasNarrative = selectedStarters.length > 0 || narrativeText.trim().length > 0;
@@ -860,6 +1041,7 @@ export default function App() {
           ${resourcesHtml || '<p style="color: #64748b; font-style: italic;">No specific resources found.</p>'}
           ${nationalDirsHtml ? `<h4 style="font-size: 1rem; font-weight: 700; color: #0f172a; margin: 1.5rem 0 0.75rem 0;">National Directories</h4>${nationalDirsHtml}` : ''}
         </div>
+        ${nextStepsHtml}
         <div class="footer">
           ${hasAlternatives ? `<p style="font-size: 0.875rem; font-weight: 600; color: #92400e; background-color: #fef3c7; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem; text-align: left;">${ui.noteForLegalCounsel}</p>` : ''}
           <p>${ui.privacyShield}</p>
@@ -1468,6 +1650,54 @@ export default function App() {
               );
             })()}
 
+            {/* ── B2C offer (directive §3): both options + exact totals BEFORE
+                payment. Only when the paywall build flag is on; amounts come
+                from the same pricing module the server enforces with. ── */}
+            {PAYWALL_UI_ON() && (() => {
+              const offer = buildOffer();
+              const evalToken = (() => { try { return sessionStorage.getItem('iru_evaluation_token'); } catch { return null; } })();
+              const formTokens = loadFormTokens();
+              const owned = purchaseState.ownedForms;
+              const oneOwned = owned.length === 1 ? owned[0] : null;
+              const otherForm = oneOwned ? (oneOwned === 'I-589' ? 'I-765' : 'I-589') : null;
+              return (
+                <div className="mt-8 mb-2 text-left border-2 border-amber-300 bg-amber-50 rounded-xl p-4">
+                  <h3 className="text-base font-serif font-bold text-slate-900 mb-2">{t('offerTitle', 'Complete preparation — pricing')}</h3>
+                  <p className="text-xs text-slate-600 mb-3">{t('offerIntro', 'Begin with the $1.00 limited evaluation — a concise summary of the broad areas that need attention. Your $1.00 is credited in full toward complete preparation. One-time charges in USD. No subscription. IRU prepares drafts for your review; it is not a law firm, provides no legal advice, and files nothing.')}</p>
+                  <ul className="text-sm text-slate-700 list-disc pl-5 mb-3">
+                    {offer.options.map((o: any) => (
+                      <li key={o.sku}><strong>{o.name} — {formatCents(o.totalCents)} {t('offerTotalWord', 'total')}</strong> ({o.scope}){o.savingsNote ? ` — ${o.savingsNote}` : ''}</li>
+                    ))}
+                    <li><strong>{t('offerAddon', 'Second form later')}</strong> — {formatCents(PRICING.secondForm.chargeCents)} ({t('offerTotalWord', 'total')} {formatCents(PRICING.secondForm.totalCents)})</li>
+                  </ul>
+                  <div className="flex flex-wrap gap-3">
+                    {!purchaseState.hasEvaluation && owned.length === 0 && (
+                      <button onClick={() => handleCheckout(SKUS.EVALUATION)} disabled={checkoutBusy} className="px-5 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-50">
+                        {t('offerStart', 'Start: $1.00 limited evaluation (test mode)')}
+                      </button>
+                    )}
+                    {purchaseState.hasEvaluation && owned.length === 0 && (
+                      <>
+                        <button onClick={() => { if (selectedFormId) handleCheckout(SKUS.ONE_FORM, { formId: selectedFormId, prerequisiteToken: evalToken || undefined }); }} disabled={checkoutBusy || !selectedFormId} className="px-5 py-2.5 border-2 border-indigo-600 text-indigo-700 text-sm font-semibold rounded-xl hover:bg-indigo-50 disabled:opacity-50">
+                          {t('offerOneForm', 'Complete ONE form')} ({selectedFormId || '…'}) — {formatCents(PRICING.oneForm.upgradeChargeCents)} {t('offerMore', 'more')}
+                        </button>
+                        <button onClick={() => handleCheckout(SKUS.BUNDLE, { prerequisiteToken: evalToken || undefined })} disabled={checkoutBusy} className="px-5 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-50">
+                          {t('offerBundle', 'Complete BOTH forms')} — {formatCents(PRICING.bundle.upgradeChargeCents)} {t('offerMore', 'more')}
+                        </button>
+                        {!selectedFormId && <span className="text-xs text-slate-500 self-center">{t('offerPickForm', 'Select a form below to enable the one-form option.')}</span>}
+                      </>
+                    )}
+                    {oneOwned && otherForm && (
+                      <button onClick={() => handleCheckout(SKUS.SECOND_FORM_ADDON, { prerequisiteToken: formTokens[oneOwned] })} disabled={checkoutBusy} className="px-5 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-50">
+                        {t('offerAddSecond', 'Add')} {otherForm} — {formatCents(PRICING.secondForm.chargeCents)} ({formatCents(PRICING.secondForm.totalCents)} {t('offerTotalWord', 'total')})
+                      </button>
+                    )}
+                    {owned.length >= 2 && <span className="text-sm text-slate-700">{t('offerBothOwned', 'You have preparation for both forms. Generate each draft below.')}</span>}
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* ── Form preparation (§7): select, review mapping, generate DRAFT ── */}
             {factRecord && (
               <div className="mt-8 mb-8 text-left">
@@ -1475,7 +1705,7 @@ export default function App() {
                 <p className="text-xs text-slate-500 mb-4">{t('formPrepIntro', 'IRU can fill a draft of an official USCIS form from your information on record. You choose the form — IRU does not decide what you should file. Drafts are never signed or submitted by IRU.')}</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
                   {FORM_REGISTRY.map((entry: any) => (
-                    <button key={entry.id} onClick={() => { setSelectedFormId(entry.id); setFormSummary(null); setFormPdfBase64(''); setFormError(''); }}
+                    <button key={entry.id} onClick={() => { setSelectedFormId(entry.id); setFormSummary(null); setFormPdfBase64(''); setFormError(''); setFormDraftMeta(null); setReviewChecks({}); }}
                       className={`p-4 rounded-xl border-2 text-left ${selectedFormId === entry.id ? 'border-indigo-600 bg-indigo-50' : 'border-slate-200 hover:border-indigo-300'}`}>
                       <span className="block font-bold text-slate-900">{entry.id}</span>
                       <span className="block text-xs text-slate-500 mt-1">{entry.name}</span>
@@ -1521,17 +1751,56 @@ export default function App() {
                         <button onClick={handleGenerateForm} disabled={formBusy} className="px-6 py-3 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-50">
                           {formBusy ? t('generatingDraft', 'Generating…') : t('generateDraft', 'Generate DRAFT PDF')}
                         </button>
-                        {(import.meta as any).env && (import.meta as any).env.VITE_PAYWALL_ENABLED === 'true' && (
-                          <button onClick={handleCheckout} className="px-6 py-3 border-2 border-slate-300 text-slate-700 font-semibold rounded-xl hover:bg-slate-50">Checkout (test mode)</button>
-                        )}
-                        {formPdfBase64 && (
-                          <button onClick={downloadFormPdf} className="px-6 py-3 bg-green-600 text-white font-semibold rounded-xl hover:bg-green-700">{t('downloadDraft', 'Download draft PDF')}</button>
-                        )}
+                        {/* The official blank form is a public reference copy —
+                            labeled as such; it grants no preparation. */}
+                        <button onClick={downloadBlankForm} className="px-6 py-3 border-2 border-slate-300 text-slate-700 font-semibold rounded-xl hover:bg-slate-50">
+                          {t('blankFormBtn', 'Official Blank Form — Reference Copy')} (PDF)
+                        </button>
+                        {formPdfBase64 && (() => {
+                          const checklist = (formSummary && formSummary.finalReviewChecklist) || [];
+                          const allChecked = checklist.length > 0 && checklist.every((_: any, i: number) => reviewChecks[i]);
+                          return (
+                            <button onClick={downloadFormPdf} disabled={checklist.length > 0 && !allChecked}
+                              title={checklist.length > 0 && !allChecked ? t('checklistGate', 'Complete the final review checklist below before downloading.') : ''}
+                              className="px-6 py-3 bg-green-600 text-white font-semibold rounded-xl hover:bg-green-700 disabled:opacity-50">
+                              {t('downloadDraft', 'Download draft PDF')}
+                            </button>
+                          );
+                        })()}
                       </div>
+                      {formPdfBase64 && formSummary && formSummary.finalReviewChecklist && !(formSummary.finalReviewChecklist.every((_: any, i: number) => reviewChecks[i])) && (
+                        <p className="text-xs text-amber-800">{t('checklistGate', 'Complete the final review checklist below before downloading.')}</p>
+                      )}
                       {formSummary && (
                         <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-sm text-slate-700 space-y-3">
                           <p className="font-bold text-slate-900">{formSummary.formId} — {t('formEdition', 'Edition')} {formSummary.editionDate}</p>
                           <p className="text-xs font-semibold text-red-700 uppercase tracking-wide">{formSummary.draftLabel}</p>
+                          {/* Version identification (B2C §5.C): the latest
+                              generation is the only current draft. */}
+                          {formDraftMeta && formDraftMeta.formId === formSummary.formId && (
+                            <p className="text-xs text-slate-600">
+                              <strong>{formSummary.draftDocumentLabel || 'IRU Pre-filled Draft — Review and Correct'}</strong>
+                              {' · '}{t('draftVersion', 'Draft version')} {formDraftMeta.version} ({formDraftMeta.draftId})
+                              {' · '}{new Date(formDraftMeta.generatedAt).toLocaleString()}
+                              {' · '}<span className="font-semibold text-green-700">{t('draftLatest', 'This is the latest version — use only this one.')}</span>
+                            </p>
+                          )}
+                          {formSummary.staleVersionNote && <p className="text-xs text-amber-800">{formSummary.staleVersionNote}</p>}
+                          {/* Pre-download review instructions (B2C §5.A) */}
+                          {formSummary.reviewInstructions && (
+                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                              <p className="font-semibold text-amber-900">{t('reviewBeforeDownload', 'Before you download — review this draft')}</p>
+                              <ul className="list-disc pl-5 text-amber-900">
+                                {formSummary.reviewInstructions.map((r: string, i: number) => <li key={i}>{r}</li>)}
+                              </ul>
+                              {formSummary.blankForm && (
+                                <p className="mt-2 text-amber-900">
+                                  {t('compareBlank', 'Compare it with the')} <button onClick={downloadBlankForm} className="underline font-semibold">{formSummary.blankForm.label}</button>
+                                  {' '}({formSummary.blankForm.formId}, {t('formEdition', 'Edition')} {formSummary.blankForm.editionDate}) — {t('officialSource', 'official source')}: <a href={formSummary.blankForm.sourceUrl} target="_blank" rel="noreferrer" className="underline">{formSummary.blankForm.sourceUrl}</a>
+                                </p>
+                              )}
+                            </div>
+                          )}
                           <div>
                             <p className="font-semibold">{t('formPopulated', 'Filled in from your information')} ({formSummary.populated.length}):</p>
                             <ul className="list-disc pl-5">{formSummary.populated.map((p: any, i: number) => <li key={i}>{p.label}: {p.value}</li>)}</ul>
@@ -1545,6 +1814,36 @@ export default function App() {
                             <ul className="list-disc pl-5">{formSummary.consumerCompletedSections.map((c: string, i: number) => <li key={i}>{c}</li>)}</ul>
                           </div>
                           <p className="text-xs text-slate-500">{t('formSignatureNote', 'No signature was added and nothing was submitted. Signing and filing are your responsibility, after your review.')}</p>
+                          {/* Final review checklist (B2C §5.D) — the draft
+                              is not presented as ready until every item
+                              is confirmed. It is a review aid, not a
+                              legal certification. */}
+                          {formSummary.finalReviewChecklist && (
+                            <div className="border border-slate-300 rounded-lg p-3">
+                              <p className="font-semibold text-slate-900">{t('finalChecklistTitle', 'Final review checklist')}</p>
+                              {formSummary.finalReviewChecklist.map((item: string, i: number) => (
+                                <label key={i} className="flex items-start gap-2 mt-1.5 cursor-pointer">
+                                  <input type="checkbox" checked={!!reviewChecks[i]} onChange={(e) => setReviewChecks({ ...reviewChecks, [i]: e.target.checked })} className="mt-0.5" />
+                                  <span>{item}</span>
+                                </label>
+                              ))}
+                            </div>
+                          )}
+                          {/* Next steps, tailored to this form + findings (B2C §6) */}
+                          {formSummary.nextSteps && (
+                            <div className="border border-indigo-200 bg-indigo-50 rounded-lg p-3 space-y-2">
+                              <p className="font-bold text-slate-900">{formSummary.nextSteps.title}</p>
+                              <div>
+                                <p className="font-semibold">{t('nsUnderstand', 'What this prepares — and what it does not')}</p>
+                                <ul className="list-disc pl-5">{formSummary.nextSteps.understand.map((s: string, i: number) => <li key={i}>{s}</li>)}</ul>
+                              </div>
+                              <div>
+                                <p className="font-semibold">{t('nsChecklist', 'Your checklist')}</p>
+                                <ol className="list-decimal pl-5">{formSummary.nextSteps.checklist.map((s: string, i: number) => <li key={i}>{s}</li>)}</ol>
+                              </div>
+                              <p className="text-xs text-slate-600">{t('nsFullInPacket', 'The complete guidance — including preparing for professional help and finding verified resources — is in your printable packet below.')}</p>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -1552,6 +1851,28 @@ export default function App() {
                 })()}
               </div>
             )}
+
+            {/* ── Next steps (B2C §6) — the same section the printable
+                packet carries, shown on screen. ── */}
+            {(() => {
+              const ns = buildPacketNextSteps();
+              return (
+                <div className="mt-8 mb-8 text-left border border-indigo-200 bg-indigo-50 rounded-xl p-5">
+                  <h3 className="text-base font-serif font-bold text-slate-900 mb-3">{ns.title}</h3>
+                  <p className="text-sm font-semibold text-slate-800 mb-1">{t('nsChecklist', 'Your ordered checklist')}</p>
+                  <ol className="list-decimal pl-5 text-sm text-slate-700 space-y-1 mb-3">
+                    {ns.checklist.map((s: string, i: number) => <li key={i}>{s}</li>)}
+                  </ol>
+                  <p className="text-sm text-slate-700 mb-2">{ns.resourcesIntro}</p>
+                  <ul className="text-sm text-slate-700 space-y-1">
+                    {ns.searchPaths.map((p: any) => (
+                      <li key={p.name}><a href={p.url} target="_blank" rel="noreferrer" className="text-indigo-700 underline font-medium">{p.name}</a> — {p.description}</li>
+                    ))}
+                  </ul>
+                  <p className="text-xs text-slate-500 mt-3">{t('nsFullNote', 'The full guidance — what this report does and does not establish, how to review your outputs, and preparing for professional help — is section-by-section in your printable packet.')}</p>
+                </div>
+              );
+            })()}
 
             <div className="flex flex-col sm:flex-row justify-center items-center gap-4">
               <button
