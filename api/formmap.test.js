@@ -149,6 +149,19 @@ describe('PDF draft generation (§7.5)', () => {
     assert.equal(summary.editionDate, '07/28/26');
   });
 
+  it('regeneration after correction: the regenerated PDF itself carries the corrected value', async () => {
+    const rec = syntheticRecord();
+    const first = await generateFormDraft({ formId: 'I-765', factRecord: rec });
+    const doc1 = await PDFDocument.load(first.pdfBytes);
+    assert.equal(doc1.getForm().getTextField('form1[0].Page1[0].Line1a_FamilyName[0]').getText(), 'Testfamily');
+    // Consumer corrects the fact; the record marks outputs stale.
+    upsertFact(rec, { id: 'family_name', value: 'Correctedname', source: 'correction' }, T);
+    assert.equal(rec.outputsStale, true);
+    const second = await generateFormDraft({ formId: 'I-765', factRecord: rec });
+    const doc2 = await PDFDocument.load(second.pdfBytes);
+    assert.equal(doc2.getForm().getTextField('form1[0].Page1[0].Line1a_FamilyName[0]').getText(), 'Correctedname');
+  });
+
   it('rejects unknown forms and invalid records', async () => {
     await assert.rejects(() => generateFormDraft({ formId: 'I-999', factRecord: syntheticRecord() }), /unknown form/);
     await assert.rejects(() => generateFormDraft({ formId: 'I-765', factRecord: null }), /invalid fact record/);
