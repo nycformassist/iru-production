@@ -13,6 +13,7 @@
 // - Every page is stamped "DRAFT — FOR REVIEW ONLY".
 
 import { readFile } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { PDFDocument, PDFName, StandardFonts, rgb } from 'pdf-lib';
 import { createLimiter, clientIp } from './lib/ratelimit.js';
@@ -124,19 +125,23 @@ export default async function handler(req, res) {
   const body = typeof rawBody === 'string' ? safeParse(rawBody) : (rawBody || {});
   if (!body) return res.status(400).json({ error: 'Invalid submission.' });
 
-  // Entitlement gate (directive §11): active ONLY when PAYWALL_ENABLED=true.
-  // Default off — the free readiness flow is unchanged. When on, a paid,
-  // unconsumed entitlement token is required; it is consumed exactly once,
-  // only after a successful generation (a failed generation leaves the
-  // entitlement intact for recovery/retry).
+  // Entitlement gate (directive §11; B2C §3/§4 scope enforcement):
+  // active ONLY when PAYWALL_ENABLED=true. Default off — the readiness
+  // flow is unchanged. When on, authorization is checked HERE, on the
+  // server, independently of any client state: the token must be paid,
+  // its scope must cover THIS form (an evaluation token never qualifies;
+  // a one-form token never covers the other form), and that form must
+  // not already have been delivered under it. Consumption is per-form
+  // and happens exactly once, only after a successful generation (a
+  // failed generation leaves the entitlement intact for recovery/retry).
   const paywallOn = process.env.PAYWALL_ENABLED === 'true';
   let entitlementToken = '';
   if (paywallOn) {
     entitlementToken = (req.headers && req.headers['x-entitlement-token']) || body.entitlementToken || '';
-    const peek = entitlementStore.peekByToken(entitlementToken);
+    const peek = entitlementStore.peekForForm(entitlementToken, body.formId);
     if (!peek.ok) {
       return res.status(402).json({
-        error: 'A paid entitlement is required to generate this form draft, or it has already been used.',
+        error: 'A paid entitlement covering this form is required to generate its draft, or that form has already been delivered.',
         reason: peek.reason,
       });
     }
@@ -148,7 +153,7 @@ export default async function handler(req, res) {
       factRecord: body.factRecord,
     });
     if (paywallOn) {
-      const consumed = entitlementStore.consumeByToken(entitlementToken);
+      const consumed = entitlementStore.consumeForForm(entitlementToken, body.formId);
       if (!consumed.ok) {
         console.error(`[iru] entitlement consume failed after generation: ${consumed.reason}`);
         return res.status(409).json({ error: 'This entitlement could not be completed. Please contact support with your entitlement reference.' });
@@ -158,6 +163,12 @@ export default async function handler(req, res) {
     console.log(`[iru] form draft generated: form=${summary.formId} populated=${summary.populated.length} missing=${summary.missingRequired.length} conflicts=${summary.conflicts.length}`);
     return res.status(200).json({
       ok: true,
+      // Version identification: every generation is a distinct draft.
+      // Only the most recent draft for a form is current; drafts made
+      // before a correction are stale and must not be used.
+      draftId: `draft_${randomBytes(6).toString('hex')}`,
+      generatedAt: new Date().toISOString(),
+      documentLabel: 'IRU Pre-filled Draft — Review and Correct',
       pdfBase64: Buffer.from(pdfBytes).toString('base64'),
       summary,
     });

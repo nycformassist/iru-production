@@ -20,8 +20,14 @@ import { buildGapRecords } from "./lib/evidence.js";
 import { validateImageReviews } from "./lib/vision.js";
 import { sanitizeFactRecord } from "./lib/facts.js";
 import { createLimiter, clientIp } from "./lib/ratelimit.js";
+import { buildLimitedEvaluation } from "./lib/evaluation.js";
+import { entitlementStore } from "./lib/entitlement.js";
 
 const limiter = createLimiter({ capacity: 10, windowMs: 10 * 60 * 1000 });
+// The limited evaluation is a paid, one-shot deliverable: a stricter
+// quota applies on top of the general limiter, whether or not the
+// paywall is enabled, so the endpoint cannot be strip-mined.
+const evaluationLimiter = createLimiter({ capacity: 3, windowMs: 10 * 60 * 1000 });
 
 /**
  * Test hook: globalThis.__IRU_AI_CLIENT__ may provide { generateContentStream(prompt) }
@@ -61,13 +67,16 @@ export default async function handler(req, res) {
     return res.status(429).json({ error: "Too many requests. Please try again later." });
   }
 
+  // Body-size cap before parsing trust.
+  const rawBody = req.body;
+  // The limited evaluation (mode: 'limited') is deterministic — it makes
+  // no model call — so it does not require the AI service to be configured.
+  const wantsLimited = !!(rawBody && typeof rawBody === 'object' && rawBody.mode === 'limited');
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey && !globalThis.__IRU_AI_CLIENT__) {
+  if (!apiKey && !globalThis.__IRU_AI_CLIENT__ && !wantsLimited) {
     return res.status(500).json({ error: "Analysis service is not configured." });
   }
 
-  // Body-size cap before parsing trust.
-  const rawBody = req.body;
   const bodySize = typeof rawBody === 'string' ? Buffer.byteLength(rawBody) : JSON.stringify(rawBody || {}).length;
   if (bodySize > MAX_BODY_BYTES) {
     return res.status(413).json({ error: "Request too large." });
@@ -112,6 +121,43 @@ export default async function handler(req, res) {
   // Evidence-gap engine: server-side KB records for every missing/unknown
   // item. The model tailors these; it never invents alternatives.
   const gaps = buildGapRecords(min, validatedReviews.reviews);
+
+  // ── Limited evaluation (B2C §3/§4): the $1 deliverable. Deterministic
+  // category-level result ONLY — it never reaches the model, the prompt,
+  // or any paid deliverable. When the paywall is enabled, a paid
+  // evaluation-scoped entitlement is required and is consumed exactly
+  // once on delivery; the authorization check lives here on the server,
+  // independent of anything the client shows or hides.
+  if (wantsLimited) {
+    const eq = evaluationLimiter.check(clientIp(req));
+    if (!eq.allowed) {
+      res.setHeader("Retry-After", Math.ceil(eq.retryAfterMs / 1000));
+      return res.status(429).json({ error: "Too many requests. Please try again later." });
+    }
+    const paywallOn = process.env.PAYWALL_ENABLED === 'true';
+    let entitlementToken = '';
+    if (paywallOn) {
+      entitlementToken = (req.headers && req.headers['x-entitlement-token']) || rawBody.entitlementToken || '';
+      const peek = entitlementStore.peekForEvaluation(entitlementToken);
+      if (!peek.ok) {
+        return res.status(402).json({
+          error: 'A paid limited-evaluation entitlement is required, or it has already been used.',
+          reason: peek.reason,
+        });
+      }
+    }
+    const evaluation = buildLimitedEvaluation(min);
+    if (paywallOn) {
+      const consumed = entitlementStore.consumeByToken(entitlementToken);
+      if (!consumed.ok) {
+        console.error(`[iru] evaluation entitlement consume failed: ${consumed.reason}`);
+        return res.status(409).json({ error: 'This entitlement could not be completed. Please contact support with your entitlement reference.' });
+      }
+    }
+    console.log(`[iru] limited evaluation delivered (paywall=${paywallOn})`);
+    return res.status(200).json({ ok: true, mode: 'limited', evaluation });
+  }
+
   const prompt = buildPrompt(min, lang, gaps, validatedReviews.reviews, documentFacts);
 
   res.setHeader("Content-Type", "text/event-stream");

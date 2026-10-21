@@ -4,11 +4,14 @@
  * Serverless instances do not share memory, so this is per-instance
  * protection against casual abuse and cost amplification — not a
  * distributed rate limiter. Documented limitation, not a claim.
+ *
+ * Each limiter owns its bucket map: endpoints with different capacities
+ * and quotas (general traffic vs. the paid evaluation quota vs.
+ * checkout) must never drain one another's allowance for the same IP.
  */
 
-const buckets = new Map();
-
 export function createLimiter({ capacity = 10, windowMs = 10 * 60 * 1000 } = {}) {
+  const buckets = new Map();
   return {
     capacity,
     windowMs,
