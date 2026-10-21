@@ -68,6 +68,18 @@ describe('entitlement state machine', () => {
     assert.equal(store2.consumeByToken(b.token).ok, false);
   });
 
+  it('an event for an unknown session is NOT burned — redelivery after attach still fulfills', () => {
+    const store = createEntitlementStore(() => 7_000);
+    const { entitlement } = store.create({ sku: 'x', amountCents: 100 });
+    const early = store.markPaidBySession('sess_late', 'evt_late');
+    assert.equal(early.applied, false);
+    assert.equal(early.reason, 'unknown-session');
+    assert.equal(store.hasProcessedEvent('evt_late'), false);
+    store.attachSession(entitlement.id, 'sess_late');
+    const redelivered = store.markPaidBySession('sess_late', 'evt_late');
+    assert.equal(redelivered.applied, true);
+  });
+
   it('unknown/forged tokens never resolve', () => {
     const store = createEntitlementStore();
     assert.equal(store.getByToken('forged-token'), null);
@@ -157,6 +169,30 @@ describe('checkout → webhook → status → delivery flow (handlers, injected 
     assert.equal(peek.ok, true);
     assert.equal(entitlementStore.consumeByToken(entitlementToken).ok, true);
     assert.equal(entitlementStore.consumeByToken(entitlementToken).ok, false);
+  });
+
+  it('an UNPAID session completion never marks paid; the async success event does', async () => {
+    const coRes = mockRes();
+    await checkoutHandler(mockReq(), coRes);
+    assert.equal(coRes.statusCode, 200);
+    const { entitlementToken, entitlementId } = coRes.body;
+    const sendEvent = async (evt) => {
+      const payload = JSON.stringify(evt);
+      const ts = Math.floor(Date.now() / 1000);
+      const res = mockRes();
+      await webhookHandler(mockReq({
+        rawBody: payload,
+        headers: { 'x-forwarded-for': '10.9.9.2', 'stripe-signature': signStripePayload(payload, process.env.STRIPE_WEBHOOK_SECRET, ts) },
+      }), res);
+      return res;
+    };
+    const unpaid = await sendEvent({ id: 'evt_unpaid', type: 'checkout.session.completed', data: { object: { id: `sess_${entitlementId}`, payment_status: 'unpaid' } } });
+    assert.equal(unpaid.statusCode, 200);
+    assert.equal(unpaid.body.applied, false);
+    assert.equal(entitlementStore.peekByToken(entitlementToken).ok, false);
+    const succeeded = await sendEvent({ id: 'evt_async_ok', type: 'checkout.session.async_payment_succeeded', data: { object: { id: `sess_${entitlementId}`, payment_status: 'paid' } } });
+    assert.equal(succeeded.body.applied, true);
+    assert.equal(entitlementStore.peekByToken(entitlementToken).ok, true);
   });
 
   it('an unsigned webhook is rejected and changes nothing', async () => {

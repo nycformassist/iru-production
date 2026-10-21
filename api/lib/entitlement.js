@@ -94,14 +94,19 @@ export function createEntitlementStore(now = () => Date.now()) {
      * returns { applied: false, duplicate: true } for replays.
      */
     markPaidBySession(sessionId, eventId) {
-      if (eventId) {
-        if (processedEvents.has(eventId)) return { applied: false, duplicate: true };
-        processedEvents.add(eventId);
-      }
+      if (eventId && processedEvents.has(eventId)) return { applied: false, duplicate: true };
       const ent = this.getBySessionId(sessionId);
+      // The event id is burned ONLY once the event has been applied (or
+      // is a genuine duplicate of an applied one). An event that arrives
+      // before its session is attached — or for an unknown session —
+      // must remain deliverable: Stripe redelivery can still fulfill.
       if (!ent) return { applied: false, duplicate: false, reason: 'unknown-session' };
       if (ent.state !== 'RESERVED') return { applied: false, duplicate: false, reason: `state-${ent.state}` };
-      if (ent.paidAt) return { applied: false, duplicate: true };
+      if (ent.paidAt) {
+        if (eventId) processedEvents.add(eventId);
+        return { applied: false, duplicate: true };
+      }
+      if (eventId) processedEvents.add(eventId);
       ent.paidAt = now();
       ent.lastEventId = eventId || null;
       return { applied: true, duplicate: false, entitlement: ent };
