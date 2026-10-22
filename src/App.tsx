@@ -20,6 +20,7 @@ import { buildFillPlan, splitFullName } from '../api/_lib/formmap.js';
 // Personal Narrative as a first-class stage (successive directive §4):
 // chronology + issue analysis + applicant approval gate for form use.
 import { createNarrative, addNarrativeEvent, analyzeNarrative, approveNarrative, correctNarrativeEvent, confirmNarrativeEvent, narrativeForPacket } from '../api/_lib/narrative.js';
+import { readAnalyzeStream } from '../api/_lib/sse.js';
 
 // B2C pricing + next steps (2026-10-21 directive): the SAME modules the
 // server enforces with, so what the consumer is shown is what the
@@ -605,28 +606,16 @@ export default function App() {
 
       if (!response.ok) throw new Error(`Server error: ${response.status}`);
 
-      // SSE streaming reader — defeats Vercel 10s kill-switch
-      const reader = response.body!.getReader();
-      const decoder = new TextDecoder();
-      let finalAssessment: any = null;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const lines = decoder.decode(value).split('\n');
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          try {
-            const event = JSON.parse(line.slice(6));
-            if (event.type === 'done' || event.type === 'error') {
-              if (event.assessment) finalAssessment = event.assessment;
-              if (event.status === 'ai_unavailable') {
-                // AI failed; fallback assessment provided but marked as unavailable
-                setAiUnavailable(true);
-              }
-            }
-          } catch { /* skip malformed lines */ }
-        }
+      // SSE streaming reader — defeats Vercel 10s kill-switch. The
+      // consumer (api/_lib/sse.js) buffers partial lines across network
+      // chunks: the terminal event carries the whole assessment on one
+      // long line, and a chunk boundary inside it previously discarded
+      // it whole — the analysis silently vanished in real browsers (D2).
+      const { assessment: finalAssessment, aiUnavailable: streamAiUnavailable } =
+        await readAnalyzeStream(response.body!.getReader());
+      if (streamAiUnavailable) {
+        // AI failed; fallback assessment provided but marked as unavailable
+        setAiUnavailable(true);
       }
       setAssessment(finalAssessment);
     } catch (error) {
