@@ -24,6 +24,16 @@ const limiter = createLimiter({ capacity: 10, windowMs: 10 * 60 * 1000 });
 
 export const BLANK_FORM_LABEL = 'Official Blank Form — Reference Copy';
 
+/**
+ * The label as an HTTP header value. Header values must be Latin-1-safe;
+ * the canonical label's em dash (U+2014) makes a real Node response throw
+ * ERR_INVALID_CHAR before a single byte is sent (D3: in deployment the
+ * endpoint could only ever answer ERR_INVALID_RESPONSE / 500). The
+ * display label (JSON summaries, UI) keeps the em dash; the wire header
+ * uses an ASCII hyphen.
+ */
+export const BLANK_FORM_HEADER_LABEL = BLANK_FORM_LABEL.replace(/[^\x20-\x7E]/g, '-');
+
 function templateDir() {
   if (process.env.IRU_TEMPLATES_DIR) return process.env.IRU_TEMPLATES_DIR;
   return path.join(process.cwd(), 'forms', 'templates');
@@ -47,7 +57,8 @@ export default async function handler(req, res) {
     const bytes = await readFile(path.join(templateDir(), entry.templateFile));
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${entry.id}-official-blank-form.pdf"`);
-    res.setHeader('X-Iru-Document-Label', BLANK_FORM_LABEL);
+    res.setHeader('Content-Length', bytes.length);
+    res.setHeader('X-Iru-Document-Label', BLANK_FORM_HEADER_LABEL);
     res.setHeader('X-Iru-Form-Edition', entry.editionDate);
     res.status(200);
     return res.send(bytes);

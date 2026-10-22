@@ -79,7 +79,11 @@ describe('form review experience (B2C §5)', () => {
       const res = mockRes();
       await blankFormHandler(mockReq({ method: 'GET', query: { form: formId } }), res);
       assert.equal(res.statusCode, 200);
-      assert.equal(res.headers['X-Iru-Document-Label'], 'Official Blank Form — Reference Copy');
+      // Wire header must be header-safe ASCII (D3): the display label's
+      // em dash can never cross a real HTTP response. The human-facing
+      // label (summary below) keeps the em dash.
+      assert.equal(res.headers['X-Iru-Document-Label'], 'Official Blank Form - Reference Copy');
+      assert.ok([...res.headers['X-Iru-Document-Label']].every((c) => c.charCodeAt(0) < 128));
       assert.equal(res.headers['X-Iru-Form-Edition'], entry.editionDate);
       const template = await readFile(new URL(`../forms/templates/${entry.templateFile}`, import.meta.url));
       const servedHash = createHash('sha256').update(res.sent).digest('hex');
