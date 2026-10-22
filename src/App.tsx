@@ -890,6 +890,13 @@ export default function App() {
       gender: 'Sex', marital_status: 'Marital status', date_of_birth: 'Date of birth', entry_date: 'Entry date',
       residence_country: 'Country of residence', residence_city: 'City of residence', residence_region: 'State/region of residence',
       residence_postal_code: 'Postal code', residence_street: 'Street address',
+      // Mailing facts (parity with the on-screen FACT_LABELS map): the
+      // printed record previously omitted them entirely, so the packet
+      // showed no mailing city/state even when a generated draft used
+      // them (display-state inconsistency).
+      mailing_street: 'Mailing street', mailing_city: 'Mailing city', mailing_region: 'Mailing state/region',
+      mailing_postal_code: 'Mailing postal code',
+      city_of_birth: 'City of birth',
       passport_number: 'Passport number (from document)', a_number: 'A-Number (from document)',
     };
     const factStatusLabel = (f: any) => f.status === 'conflicting' ? 'Sources disagree — needs your decision'
@@ -1023,7 +1030,9 @@ export default function App() {
             </p>
           </div>` : resourceResult?.fallback ? `<div style="background-color: #fef3c7; border: 1px solid #f59e0b; border-radius: 0.5rem; padding: 1rem; margin-bottom: 1rem;">
             <p style="font-size: 0.875rem; color: #92400e; margin: 0; font-weight: 600;">
-              No verified local providers found for ZIP ${escapeHtml(answers.zip_code || '')} in IRU's curated directory yet.
+              ${answers.zip_code
+                ? `No verified local providers found for ZIP ${escapeHtml(answers.zip_code)} in IRU's curated directory yet.`
+                : 'No verified local providers found for your area in IRU\'s curated directory yet.'}
               The national directories below can help you find immigration legal aid in your area.
             </p>
           </div>` : ''}

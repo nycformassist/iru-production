@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 // Local → Statewide → National → Fallback
 // These run against the TypeScript source via the project's test setup.
 
-const { resolveResources, getAllOrgs } = await import('../src/resources.ts');
+const { resolveResources, resolveResourcesForLocation, getAllOrgs } = await import('../src/resources.ts');
 
 describe('Resource resolution — layered model', () => {
   it('Bronx ZIP (10451) returns Bronx Defenders + Bronx Legal Services as local', () => {
@@ -162,5 +162,61 @@ describe('Resource resolution — layered model', () => {
     const result = resolveResources('10451');
     const bd = result.local.find(o => o.id === 'nyc-bronx-defenders');
     assert.ok(bd.transit && bd.exit, 'Bronx Defenders must preserve transit/exit');
+  });
+});
+
+describe('D7: city/state fallback when no ZIP is given', () => {
+  // Browser E2E (2026-10-22): a Brooklyn persona who gave city + state but
+  // no ZIP (ZIP is optional by design) got "No verified local organization
+  // was matched" — resolution consulted ONLY the ZIP prefix and ignored
+  // the city/state the interview collected.
+  it('Brooklyn + New York, no ZIP → the verified Brooklyn org is local', () => {
+    const r = resolveResourcesForLocation({ country: 'US', postalCode: '', city: 'Brooklyn', region: 'New York' });
+    assert.equal(r.fallback, false);
+    assert.ok(r.local.some((o) => o.id === 'nyc-brooklyn-legal'), 'Brooklyn Legal Services must match by city');
+    assert.equal(r.matchedBy, 'city');
+    assert.equal(r.isNycCoverage, true);
+  });
+
+  it('region as a state code ("NY") resolves the same', () => {
+    const r = resolveResourcesForLocation({ country: 'US', postalCode: '', city: 'Brooklyn', region: 'NY' });
+    assert.ok(r.local.some((o) => o.id === 'nyc-brooklyn-legal'));
+    assert.equal(r.fallback, false);
+  });
+
+  it('Atlanta + Georgia, no ZIP → Atlanta local org + GAIN statewide', () => {
+    const r = resolveResourcesForLocation({ country: 'US', postalCode: '', city: 'Atlanta', region: 'Georgia' });
+    assert.ok(r.local.some((o) => o.id === 'ga-laa'), 'Latin American Association (Atlanta area) is local');
+    assert.ok(r.statewide.some((o) => o.id === 'ga-gain'), 'GAIN serves Georgia statewide');
+    assert.equal(r.fallback, false);
+  });
+
+  it('state-only match: Georgia city with no listed local org still surfaces the statewide org', () => {
+    const r = resolveResourcesForLocation({ country: 'US', postalCode: '', city: 'Savannah', region: 'Georgia' });
+    assert.equal(r.local.length, 0, 'no Savannah org exists — none may be invented');
+    assert.ok(r.statewide.some((o) => o.id === 'ga-gain'));
+    assert.equal(r.matchedBy, 'state');
+    assert.equal(r.fallback, false);
+  });
+
+  it('no verified coverage → honest fallback, never an invented org', () => {
+    const r = resolveResourcesForLocation({ country: 'US', postalCode: '', city: 'Albany', region: 'New York' });
+    assert.equal(r.local.length, 0);
+    assert.equal(r.statewide.length, 0);
+    assert.equal(r.fallback, true);
+    assert.equal(r.matchedBy, 'none');
+  });
+
+  it('state guard: a Brooklyn city name does not match when the state disagrees', () => {
+    const r = resolveResourcesForLocation({ country: 'US', postalCode: '', city: 'Brooklyn', region: 'California' });
+    assert.ok(!r.local.some((o) => o.id === 'nyc-brooklyn-legal'),
+      'the Brooklyn (NY) org must not be presented as local to a California resident');
+    assert.equal(r.fallback, true);
+  });
+
+  it('ZIP behavior is unchanged when a ZIP is given', () => {
+    const r = resolveResourcesForLocation({ country: 'US', postalCode: '11201', city: '', region: '' });
+    assert.equal(r.matchedBy, 'zip');
+    assert.ok(r.local.some((o) => o.id === 'nyc-brooklyn-legal'));
   });
 });

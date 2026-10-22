@@ -69,6 +69,10 @@ export interface ResourceResult {
   country: string;
   /** True when the user is outside the U.S. — no U.S. org is "local" to them. */
   isInternational: boolean;
+  /** How the local/statewide match was established: ZIP prefix, the
+   *  user's stated city, their state (statewide layer), or none. Lets the
+   *  UI describe the match honestly instead of blaming a missing ZIP. */
+  matchedBy: 'zip' | 'city' | 'state' | 'none';
 }
 
 export interface LocationInput {
@@ -449,8 +453,11 @@ export function resolveResources(zip: string): ResourceResult {
  * Country-aware layered resolution (directive §3.3):
  * local → regional/statewide → national → broader/international fallback.
  *
- * - U.S. users: the verified ZIP-prefix matching below (unchanged behavior).
- * - Users with no postal code: national directories only, honest fallback.
+ * - U.S. users: verified ZIP-prefix matching first (unchanged behavior).
+ * - U.S. users with no (or an unmatched) ZIP but a known city/state:
+ *   city/state matching against the orgs' verified locality data (D7) —
+ *   an org is local only when its verified service area names the city.
+ * - Otherwise: national directories only, honest fallback.
  *   Federal readiness is NEVER blocked by a missing location.
  * - Non-U.S. users: NO U.S. organization is represented as local to them.
  *   They receive the U.S. national directories (relevant to U.S.
@@ -472,15 +479,41 @@ export function resolveResourcesForLocation(loc: LocationInput): ResourceResult 
       prefix: '',
       country,
       isInternational: true,
+      matchedBy: 'none',
     };
   }
 
   const prefix = postal.substring(0, 3);
-  const isNycCoverage = NYC_PREFIXES.includes(prefix);
+  let isNycCoverage = NYC_PREFIXES.includes(prefix);
 
-  const matched = prefix
+  let matched = prefix
     ? ALL_ORGS.filter((org) => org.zipPrefixes.includes(prefix))
     : [];
+  let matchedBy: ResourceResult['matchedBy'] = matched.length > 0 ? 'zip' : 'none';
+
+  if (matched.length === 0) {
+    // City/state fallback (D7): the interview collects city + state even
+    // when the user gives no ZIP — ZIP is optional by design, so a blank
+    // ZIP must not zero out a known city/state. Matching uses ONLY each
+    // org's own verified locality data (borough, serviceArea, state) and
+    // never invents coverage: an org is "local" only when its verified
+    // service area names the user's city, and "statewide" only for orgs
+    // whose verified layer is statewide in the user's state.
+    const stateCode = normalizeUsState(loc?.region || '');
+    const cityLower = String(loc?.city || '').trim().toLowerCase();
+    const cityMatched = cityLower
+      ? ALL_ORGS.filter((org) => org.layer === 'local' && cityMatchesOrg(org, cityLower, stateCode))
+      : [];
+    const stateMatched = stateCode
+      ? ALL_ORGS.filter((org) => org.layer === 'statewide' && org.state === stateCode
+          && !cityMatched.some((o) => o.id === org.id))
+      : [];
+    matched = [...cityMatched, ...stateMatched];
+    if (cityMatched.length > 0) matchedBy = 'city';
+    else if (stateMatched.length > 0) matchedBy = 'state';
+    if (cityMatched.some((org) => org.borough)) isNycCoverage = true;
+  }
+
   const local = matched.filter((org) => org.layer === 'local');
   const statewide = matched.filter((org) => org.layer === 'statewide');
 
@@ -493,7 +526,50 @@ export function resolveResourcesForLocation(loc: LocationInput): ResourceResult 
     prefix,
     country: 'US',
     isInternational: false,
+    matchedBy,
   };
+}
+
+/** US state name (any case) or 2-letter code → 2-letter code, else ''. */
+const US_STATE_CODES: Record<string, string> = {
+  alabama: 'AL', alaska: 'AK', arizona: 'AZ', arkansas: 'AR', california: 'CA',
+  colorado: 'CO', connecticut: 'CT', delaware: 'DE', 'district of columbia': 'DC',
+  florida: 'FL', georgia: 'GA', hawaii: 'HI', idaho: 'ID', illinois: 'IL',
+  indiana: 'IN', iowa: 'IA', kansas: 'KS', kentucky: 'KY', louisiana: 'LA',
+  maine: 'ME', maryland: 'MD', massachusetts: 'MA', michigan: 'MI',
+  minnesota: 'MN', mississippi: 'MS', missouri: 'MO', montana: 'MT',
+  nebraska: 'NE', nevada: 'NV', 'new hampshire': 'NH', 'new jersey': 'NJ',
+  'new mexico': 'NM', 'new york': 'NY', 'north carolina': 'NC',
+  'north dakota': 'ND', ohio: 'OH', oklahoma: 'OK', oregon: 'OR',
+  pennsylvania: 'PA', 'rhode island': 'RI', 'south carolina': 'SC',
+  'south dakota': 'SD', tennessee: 'TN', texas: 'TX', utah: 'UT',
+  vermont: 'VT', virginia: 'VA', washington: 'WA', 'west virginia': 'WV',
+  wisconsin: 'WI', wyoming: 'WY',
+};
+
+export function normalizeUsState(region: string): string {
+  const r = String(region || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  if (!r) return '';
+  if (/^[a-z]{2}$/.test(r)) return r.toUpperCase();
+  return US_STATE_CODES[r] || '';
+}
+
+/**
+ * Does this org's OWN verified locality data place it in the user's city?
+ * - NYC orgs carry an explicit borough — exact match.
+ * - Others: the verified serviceArea text must begin with the city name
+ *   at a word boundary ("Brooklyn, New York City", "Houston area",
+ *   "Atlanta area").
+ * When the user's state is known, the org must also be in that state —
+ * a same-named city in another state never matches.
+ */
+function cityMatchesOrg(org: ResourceOrg, cityLower: string, stateCode: string): boolean {
+  if (stateCode && org.state !== stateCode) return false;
+  if (org.borough && org.borough.trim().toLowerCase() === cityLower) return true;
+  const area = (org.serviceArea || '').trim().toLowerCase();
+  if (!area.startsWith(cityLower)) return false;
+  const next = area.charAt(cityLower.length);
+  return next === '' || next === ',' || next === ' ' || next === '(' || next === '/';
 }
 
 /** All organizations in the dataset (for tests and auditing). */
