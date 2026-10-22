@@ -16,8 +16,8 @@ h1, h2, h3, h4, h5, h6, .font-serif {
   font-family: var(--font-serif);
 }
 
-/* ── ANUBIS SEAL WATERMARK ────────────────────────────────────────────────────
-   anubis_seal.png repeats diagonally behind the legal analysis packet.
+/* ── ANUK AUSAR SEAL WATERMARK ────────────────────────────────────────────────────
+   anuk_ausar_seal.png repeats diagonally behind the legal analysis packet.
    ::before pseudo-element keeps it non-interactive and below all content.
    @media print forces it into the PDF stream on all browsers.
    ─────────────────────────────────────────────────────────────────────────── */
@@ -29,7 +29,7 @@ h1, h2, h3, h4, h5, h6, .font-serif {
   position: relative;
 }
 
-/* ── SOVEREIGN WATERMARK: anubis_seal.png burned into every render surface ──
+/* ── SOVEREIGN WATERMARK: anuk_ausar_seal.png burned into every render surface ──
    All properties carry !important. No browser, printer, or PDF engine can
    strip this seal without removing the ::before pseudo-element entirely.
    ─────────────────────────────────────────────────────────────────────────── */
@@ -40,7 +40,7 @@ h1, h2, h3, h4, h5, h6, .font-serif {
   left: 0 !important;
   width: 100% !important;
   height: 100% !important;
-  background-image: url('/anubis_seal.png') !important;
+  background-image: url('/anuk_ausar_seal.png') !important;
   background-repeat: repeat !important;
   background-size: 160px !important;
   opacity: 0.06 !important;
@@ -63,7 +63,7 @@ h1, h2, h3, h4, h5, h6, .font-serif {
 
   .analysis-packet::before {
     display: block !important;
-    background-image: url('/anubis_seal.png') !important;
+    background-image: url('/anuk_ausar_seal.png') !important;
     background-repeat: repeat !important;
     background-size: 160px !important;
     opacity: 0.06 !important;
