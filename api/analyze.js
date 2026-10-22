@@ -14,14 +14,14 @@
 export const maxDuration = 60;
 
 import { GoogleGenAI } from "@google/genai";
-import { sanitizeAnswers, minimizeForModel, droppedFieldNames, MAX_BODY_BYTES } from "./lib/privacy.js";
-import { buildPrompt, validateModelOutput, fallbackAssessment } from "./lib/prompt.js";
-import { buildGapRecords } from "./lib/evidence.js";
-import { validateImageReviews } from "./lib/vision.js";
-import { sanitizeFactRecord } from "./lib/facts.js";
-import { createLimiter, clientIp } from "./lib/ratelimit.js";
-import { buildLimitedEvaluation } from "./lib/evaluation.js";
-import { entitlementStore } from "./lib/entitlement.js";
+import { sanitizeAnswers, minimizeForModel, droppedFieldNames, MAX_BODY_BYTES } from "./_lib/privacy.js";
+import { buildPrompt, validateModelOutput, fallbackAssessment } from "./_lib/prompt.js";
+import { buildGapRecords } from "./_lib/evidence.js";
+import { validateImageReviews } from "./_lib/vision.js";
+import { sanitizeFactRecord } from "./_lib/facts.js";
+import { createLimiter, clientIp } from "./_lib/ratelimit.js";
+import { buildLimitedEvaluation } from "./_lib/evaluation.js";
+import { entitlementStore } from "./_lib/entitlement.js";
 
 const limiter = createLimiter({ capacity: 10, windowMs: 10 * 60 * 1000 });
 // The limited evaluation is a paid, one-shot deliverable: a stricter

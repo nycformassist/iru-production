@@ -9,8 +9,8 @@
 // re-serialized fallback below may fail verification — the endpoint then
 // rejects with 400 rather than trusting an unverifiable event.
 
-import { entitlementStore } from './lib/entitlement.js';
-import { verifyStripeSignature } from './lib/stripewebhook.js';
+import { entitlementStore } from './_lib/entitlement.js';
+import { verifyStripeSignature } from './_lib/stripewebhook.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {

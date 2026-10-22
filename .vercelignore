@@ -1,2 +1,3 @@
 api/*.test.js
-api/lib/*.test.js
+api/_lib/*.test.js
+api/lib/**

@@ -5,9 +5,9 @@ import checkoutHandler from './checkout.js';
 import webhookHandler from './webhook.js';
 import statusHandler from './entitlement-status.js';
 import generateHandler from './generate-form.js';
-import { signStripePayload } from './lib/stripewebhook.js';
-import { SKUS } from './lib/pricing.js';
-import { createFactRecord, upsertFact } from './lib/facts.js';
+import { signStripePayload } from './_lib/stripewebhook.js';
+import { SKUS } from './_lib/pricing.js';
+import { createFactRecord, upsertFact } from './_lib/facts.js';
 
 // B2C directive §4 — evaluation protection & endpoint authorization.
 // Tests 1, 2, 7, 8, 9, 10, 11. All local with an injected gateway.

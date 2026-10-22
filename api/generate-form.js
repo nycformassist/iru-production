@@ -16,11 +16,11 @@ import { readFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { PDFDocument, PDFName, StandardFonts, rgb } from 'pdf-lib';
-import { createLimiter, clientIp } from './lib/ratelimit.js';
-import { entitlementStore } from './lib/entitlement.js';
-import { sanitizeFactRecord } from './lib/facts.js';
-import { getFormEntry, SIGNATURE_FIELD_PATTERN } from './lib/forms/registry.js';
-import { buildFillPlan, buildCompletionSummary } from './lib/formmap.js';
+import { createLimiter, clientIp } from './_lib/ratelimit.js';
+import { entitlementStore } from './_lib/entitlement.js';
+import { sanitizeFactRecord } from './_lib/facts.js';
+import { getFormEntry, SIGNATURE_FIELD_PATTERN } from './_lib/forms/registry.js';
+import { buildFillPlan, buildCompletionSummary } from './_lib/formmap.js';
 
 const limiter = createLimiter({ capacity: 5, windowMs: 10 * 60 * 1000 });
 const MAX_BODY_BYTES = 256 * 1024;

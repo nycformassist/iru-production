@@ -12,20 +12,20 @@ import { COUNTRIES, isUsCountry } from './location';
 
 // Canonical fact record (directive §4) — one shared model for answers,
 // document extraction, corrections, the packet, and form preparation.
-import { createFactRecord, upsertFact, confirmFact, resolveConflict } from '../api/lib/facts.js';
+import { createFactRecord, upsertFact, confirmFact, resolveConflict } from '../api/_lib/facts.js';
 // Form engine (directive §7): registry + mapper run client-side for the
 // review UI; the PDF itself is generated server-side from the same record.
-import { FORM_REGISTRY, getFormEntry } from '../api/lib/forms/registry.js';
-import { buildFillPlan, splitFullName } from '../api/lib/formmap.js';
+import { FORM_REGISTRY, getFormEntry } from '../api/_lib/forms/registry.js';
+import { buildFillPlan, splitFullName } from '../api/_lib/formmap.js';
 // Personal Narrative as a first-class stage (successive directive §4):
 // chronology + issue analysis + applicant approval gate for form use.
-import { createNarrative, addNarrativeEvent, analyzeNarrative, approveNarrative, correctNarrativeEvent, confirmNarrativeEvent, narrativeForPacket } from '../api/lib/narrative.js';
+import { createNarrative, addNarrativeEvent, analyzeNarrative, approveNarrative, correctNarrativeEvent, confirmNarrativeEvent, narrativeForPacket } from '../api/_lib/narrative.js';
 
 // B2C pricing + next steps (2026-10-21 directive): the SAME modules the
 // server enforces with, so what the consumer is shown is what the
 // server charges and what every output must contain.
-import { PRICING, SKUS, buildOffer, formatCents } from '../api/lib/pricing.js';
-import { NEXT_STEPS_TITLE, PROFESSIONAL_HELP_POINTS, RESOURCE_SEARCH_PATHS } from '../api/lib/nextsteps.js';
+import { PRICING, SKUS, buildOffer, formatCents } from '../api/_lib/pricing.js';
+import { NEXT_STEPS_TITLE, PROFESSIONAL_HELP_POINTS, RESOURCE_SEARCH_PATHS } from '../api/_lib/nextsteps.js';
 
 const PAYWALL_UI_ON = () => {
   try { return (import.meta as any).env && (import.meta as any).env.VITE_PAYWALL_ENABLED === 'true'; }
@@ -47,7 +47,7 @@ function saveFormToken(formId: string, token: string) {
 
 // Evidence intelligence (server-side source of truth, pure module — no
 // secrets, no I/O). Imported read-only for honest packet rendering.
-import { EVIDENCE_KB, requiresLegalReview, legalReviewReason, nextActionFor } from '../api/lib/evidence.js';
+import { EVIDENCE_KB, requiresLegalReview, legalReviewReason, nextActionFor } from '../api/_lib/evidence.js';
 
 /** Display names for the 9 evidence checklist keys (packet rendering). */
 const EVIDENCE_ITEM_NAMES: Record<string, string> = {
@@ -84,7 +84,7 @@ function escapeHtml(s: string): string {
 /**
  * Fields the analysis endpoint is allowed to receive. Direct identifiers
  * (name, zip) stay on the device for the local packet; the server allowlists
- * again as defense in depth (see api/lib/privacy.js).
+ * again as defense in depth (see api/_lib/privacy.js).
  */
 const SERVER_FIELD_ALLOWLIST = new Set([
   'country_of_origin', 'residence_country', 'country_of_birth', 'citizenship',
@@ -173,7 +173,7 @@ export default function App() {
    * Build the canonical fact record from the interview answers and any
    * document extraction. Answers are consumer-reported; extracted values
    * stay 'extracted-unconfirmed' until the consumer confirms them;
-   * disagreements become traceable conflicts (see api/lib/facts.js).
+   * disagreements become traceable conflicts (see api/_lib/facts.js).
    */
   const buildFactRecord = (ans: Record<string, string>, review: any) => {
     const now = new Date().toISOString();
@@ -799,7 +799,7 @@ export default function App() {
       return `<span class="status-green" style="${styles[kind]}">${escapeHtml(text)}</span>`;
     };
     /**
-     * Honest evidence states (mirrors api/lib/evidence.js resolveState):
+     * Honest evidence states (mirrors api/_lib/evidence.js resolveState):
      * - "yes" → reported, NOT verified (amber — never green "ready")
      * - "no" → action required; self-reported alternatives listed as
      *   alternatives, never as verification

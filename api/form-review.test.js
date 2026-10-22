@@ -3,13 +3,13 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { PDFDocument } from 'pdf-lib';
-import { createFactRecord, upsertFact } from './lib/facts.js';
-import { getFormEntry } from './lib/forms/registry.js';
-import { buildFillPlan, buildCompletionSummary } from './lib/formmap.js';
+import { createFactRecord, upsertFact } from './_lib/facts.js';
+import { getFormEntry } from './_lib/forms/registry.js';
+import { buildFillPlan, buildCompletionSummary } from './_lib/formmap.js';
 import { generateFormDraft, default as generateHandler } from './generate-form.js';
 import blankFormHandler from './blank-form.js';
-import { entitlementStore } from './lib/entitlement.js';
-import { createNarrative, addNarrativeEvent } from './lib/narrative.js';
+import { entitlementStore } from './_lib/entitlement.js';
+import { createNarrative, addNarrativeEvent } from './_lib/narrative.js';
 
 // B2C directive §5 — form review, blank official form, corrections,
 // regeneration, version identification, and preserved approval gates.

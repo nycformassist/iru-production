@@ -1,9 +1,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { PDFDocument } from 'pdf-lib';
-import { createFactRecord, upsertFact } from './lib/facts.js';
-import { getFormEntry, FORM_REGISTRY } from './lib/forms/registry.js';
-import { buildFillPlan, buildCompletionSummary, splitFullName, TRANSFORMS } from './lib/formmap.js';
+import { createFactRecord, upsertFact } from './_lib/facts.js';
+import { getFormEntry, FORM_REGISTRY } from './_lib/forms/registry.js';
+import { buildFillPlan, buildCompletionSummary, splitFullName, TRANSFORMS } from './_lib/formmap.js';
 import { generateFormDraft } from './generate-form.js';
 
 const T = '2026-10-21T00:00:00.000Z';

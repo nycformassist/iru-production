@@ -26,10 +26,10 @@
 // - Live Stripe keys are REFUSED. This build is test-mode only.
 // - Without configuration the endpoint reports itself unavailable.
 
-import { entitlementStore } from './lib/entitlement.js';
-import { createLimiter, clientIp } from './lib/ratelimit.js';
-import { PRICING, SKUS, FORM_IDS } from './lib/pricing.js';
-import { getFormEntry } from './lib/forms/registry.js';
+import { entitlementStore } from './_lib/entitlement.js';
+import { createLimiter, clientIp } from './_lib/ratelimit.js';
+import { PRICING, SKUS, FORM_IDS } from './_lib/pricing.js';
+import { getFormEntry } from './_lib/forms/registry.js';
 
 const limiter = createLimiter({ capacity: 5, windowMs: 10 * 60 * 1000 });
 

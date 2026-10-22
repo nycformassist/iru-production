@@ -10,14 +10,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createFactRecord, upsertFact, sanitizeFactRecord,
-} from './lib/facts.js';
+} from './_lib/facts.js';
 import {
   createNarrative, addNarrativeEvent, confirmNarrativeEvent,
   correctNarrativeEvent, analyzeNarrative, approveNarrative,
   isNarrativeApproved, narrativeForPacket, parseEventDate, sanitizeNarrative,
-} from './lib/narrative.js';
-import { buildFillPlan } from './lib/formmap.js';
-import { getFormEntry } from './lib/forms/registry.js';
+} from './_lib/narrative.js';
+import { buildFillPlan } from './_lib/formmap.js';
+import { getFormEntry } from './_lib/forms/registry.js';
 
 const NOW = '2026-10-21T12:00:00.000Z';
 
