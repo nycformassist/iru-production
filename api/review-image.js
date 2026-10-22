@@ -17,9 +17,9 @@
 export const maxDuration = 60;
 
 import { GoogleGenAI } from "@google/genai";
-import { createLimiter, clientIp } from "./lib/ratelimit.js";
-import { EVIDENCE_KEYS } from "./lib/evidence.js";
-import { sanitizeVisionReview } from "./lib/vision.js";
+import { createLimiter, clientIp } from "./_lib/ratelimit.js";
+import { EVIDENCE_KEYS } from "./_lib/evidence.js";
+import { sanitizeVisionReview } from "./_lib/vision.js";
 
 // Re-exported for tests and for /api/analyze (shared validation contract).
 export { sanitizeVisionReview };

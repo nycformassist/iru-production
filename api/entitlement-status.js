@@ -7,8 +7,8 @@
 // throttled per source (the tokens themselves are 192-bit random and
 // stored only as SHA-256 hashes).
 
-import { entitlementStore } from './lib/entitlement.js';
-import { createLimiter, clientIp } from './lib/ratelimit.js';
+import { entitlementStore } from './_lib/entitlement.js';
+import { createLimiter, clientIp } from './_lib/ratelimit.js';
 
 const limiter = createLimiter({ capacity: 10, windowMs: 10 * 60 * 1000 });
 

@@ -21,9 +21,9 @@ import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 
 import handler from './analyze.js';
-import { buildGapRecords, EVIDENCE_STATES } from './lib/evidence.js';
-import { buildPrompt, validateModelOutput, fallbackAssessment } from './lib/prompt.js';
-import { validateImageReviews, sanitizeVisionReview, MAX_IMAGE_REVIEWS_PER_REQUEST } from './lib/vision.js';
+import { buildGapRecords, EVIDENCE_STATES } from './_lib/evidence.js';
+import { buildPrompt, validateModelOutput, fallbackAssessment } from './_lib/prompt.js';
+import { validateImageReviews, sanitizeVisionReview, MAX_IMAGE_REVIEWS_PER_REQUEST } from './_lib/vision.js';
 
 // ---------------------------------------------------------------------------
 // Helpers

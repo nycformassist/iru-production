@@ -21,9 +21,9 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { buildGapRecords, resolveState, resolveProxyState, EVIDENCE_STATES } from './lib/evidence.js';
-import { buildPrompt, validateModelOutput } from './lib/prompt.js';
-import { minimizeForModel, sanitizeAnswers } from './lib/privacy.js';
+import { buildGapRecords, resolveState, resolveProxyState, EVIDENCE_STATES } from './_lib/evidence.js';
+import { buildPrompt, validateModelOutput } from './_lib/prompt.js';
+import { minimizeForModel, sanitizeAnswers } from './_lib/privacy.js';
 
 // Synthetic fixture. Every value is invented for testing.
 const CUBAN_ANSWERS = {

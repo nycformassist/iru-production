@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import checkoutHandler from './checkout.js';
 import webhookHandler from './webhook.js';
 import statusHandler from './entitlement-status.js';
-import { signStripePayload } from './lib/stripewebhook.js';
-import { entitlementStore, createEntitlementStore } from './lib/entitlement.js';
-import { PRICING, SKUS, buildOffer, formatCents } from './lib/pricing.js';
+import { signStripePayload } from './_lib/stripewebhook.js';
+import { entitlementStore, createEntitlementStore } from './_lib/entitlement.js';
+import { PRICING, SKUS, buildOffer, formatCents } from './_lib/pricing.js';
 
 // B2C pricing directive (2026-10-21) — tests 3, 4, 5, 6 and the scoped
 // entitlement semantics beneath them. All local, injected gateway, no

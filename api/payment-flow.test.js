@@ -1,12 +1,12 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { createEntitlementStore } from './lib/entitlement.js';
-import { verifyStripeSignature, signStripePayload } from './lib/stripewebhook.js';
+import { createEntitlementStore } from './_lib/entitlement.js';
+import { verifyStripeSignature, signStripePayload } from './_lib/stripewebhook.js';
 import checkoutHandler from './checkout.js';
 import webhookHandler from './webhook.js';
 import statusHandler from './entitlement-status.js';
-import { entitlementStore } from './lib/entitlement.js';
-import { createFactRecord, upsertFact } from './lib/facts.js';
+import { entitlementStore } from './_lib/entitlement.js';
+import { createFactRecord, upsertFact } from './_lib/facts.js';
 
 // Directive §15 payment tests — all local, test-mode semantics only.
 // The Stripe gateway is injected; no network, no real keys, no money.

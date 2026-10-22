@@ -1,11 +1,11 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { createFactRecord, upsertFact } from './lib/facts.js';
-import { getFormEntry } from './lib/forms/registry.js';
-import { buildFillPlan, buildCompletionSummary } from './lib/formmap.js';
+import { createFactRecord, upsertFact } from './_lib/facts.js';
+import { getFormEntry } from './_lib/forms/registry.js';
+import { buildFillPlan, buildCompletionSummary } from './_lib/formmap.js';
 import { generateFormDraft } from './generate-form.js';
-import { NEXT_STEPS_TITLE, buildFormNextSteps } from './lib/nextsteps.js';
+import { NEXT_STEPS_TITLE, buildFormNextSteps } from './_lib/nextsteps.js';
 import { resolveResourcesForLocation } from '../src/resources.ts';
 
 // B2C directive §6/§7 — "YOUR NEXT STEPS — HOW TO USE THIS REPORT" in

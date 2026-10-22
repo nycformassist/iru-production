@@ -17,8 +17,8 @@
 
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { createLimiter, clientIp } from './lib/ratelimit.js';
-import { getFormEntry } from './lib/forms/registry.js';
+import { createLimiter, clientIp } from './_lib/ratelimit.js';
+import { getFormEntry } from './_lib/forms/registry.js';
 
 const limiter = createLimiter({ capacity: 10, windowMs: 10 * 60 * 1000 });
 
