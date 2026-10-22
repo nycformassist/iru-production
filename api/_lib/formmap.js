@@ -65,10 +65,20 @@ export const TRANSFORMS = {
   },
   /** I-589 Item 13 is one field: "City and Country of Birth". */
   cityCountryOfBirth(value, record) {
-    const country = record?.facts?.country_of_birth?.value;
+    const country = String(record?.facts?.country_of_birth?.value || '').trim();
     const city = String(value || '').trim();
-    if (city && country) return `${city}, ${country}`;
-    return city || (country ? String(country) : '');
+    if (city && country) {
+      // The city value often already carries the country — applicants
+      // answer the combined question ("Port-au-Prince, Haiti") and
+      // document extraction produces the same shape. Never print the
+      // country twice ("Port-au-Prince, Haiti, Haiti"). The applicant's
+      // own casing is preserved. (The I-765 needs no such guard: it maps
+      // city and country to separate fields, 18.a and 18.c.)
+      const cityTail = city.replace(/[\s.,;]+$/, '').toLowerCase();
+      if (cityTail.endsWith(country.toLowerCase())) return city;
+      return `${city}, ${country}`;
+    }
+    return city || country;
   },
 };
 
