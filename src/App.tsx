@@ -21,6 +21,7 @@ import { buildFillPlan, splitFullName } from '../api/_lib/formmap.js';
 // chronology + issue analysis + applicant approval gate for form use.
 import { createNarrative, addNarrativeEvent, analyzeNarrative, approveNarrative, correctNarrativeEvent, confirmNarrativeEvent, narrativeForPacket } from '../api/_lib/narrative.js';
 import { readAnalyzeStream } from '../api/_lib/sse.js';
+import { selectForm, summaryForSelection } from '../api/_lib/formSelection.js';
 
 // B2C pricing + next steps (2026-10-21 directive): the SAME modules the
 // server enforces with, so what the consumer is shown is what the
@@ -1420,11 +1421,20 @@ export default function App() {
               </div>
 
               <div className="space-y-4">
-                <label className="block w-full p-6 rounded-xl border-2 border-dashed border-slate-300 hover:border-indigo-400 transition-colors cursor-pointer text-center">
+                {/* D5: the file input must stay ACTIVATABLE. A display:none
+                    input (Tailwind "hidden") is not keyboard-focusable and
+                    label-activation against it is unreliable in real
+                    browsers — the dropzone appeared dead. sr-only keeps
+                    the control focusable and operable (mouse, touch,
+                    keyboard) while visually hidden; htmlFor binds the
+                    label explicitly; focus-within shows keyboard users
+                    where they are. */}
+                <label htmlFor="iru-photo-input" className="block w-full p-6 rounded-xl border-2 border-dashed border-slate-300 hover:border-indigo-400 focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-300 transition-colors cursor-pointer text-center">
                   <input
+                    id="iru-photo-input"
                     type="file"
                     accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,.pdf"
-                    className="hidden"
+                    className="sr-only"
                     onChange={(e) => { setPhotoFile(e.target.files && e.target.files[0] ? e.target.files[0] : null); setImageReview(null); setReviewError(''); }}
                   />
                   <span className="text-slate-600 font-medium">
@@ -1703,7 +1713,7 @@ export default function App() {
                 <p className="text-xs text-slate-500 mb-4">{t('formPrepIntro', 'IRU can fill a draft of an official USCIS form from your information on record. You choose the form — IRU does not decide what you should file. Drafts are never signed or submitted by IRU.')}</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
                   {FORM_REGISTRY.map((entry: any) => (
-                    <button key={entry.id} onClick={() => { setSelectedFormId(entry.id); setFormSummary(null); setFormPdfBase64(''); setFormError(''); setFormDraftMeta(null); setReviewChecks({}); }}
+                    <button key={entry.id} onClick={() => { const s = selectForm(entry.id); setSelectedFormId(s.selectedFormId); setFormSummary(s.formSummary); setFormPdfBase64(s.formPdfBase64); setFormError(s.formError); setFormDraftMeta(s.formDraftMeta); setReviewChecks(s.reviewChecks); }}
                       className={`p-4 rounded-xl border-2 text-left ${selectedFormId === entry.id ? 'border-indigo-600 bg-indigo-50' : 'border-slate-200 hover:border-indigo-300'}`}>
                       <span className="block font-bold text-slate-900">{entry.id}</span>
                       <span className="block text-xs text-slate-500 mt-1">{entry.name}</span>
@@ -1714,6 +1724,11 @@ export default function App() {
                 {selectedFormId && (() => {
                   const entry: any = getFormEntry(selectedFormId);
                   const plan: any = buildFillPlan(factRecord, entry);
+                  // D4 guard: the generated-draft panel below renders ONLY
+                  // the summary generated for the currently selected form
+                  // (summaryForSelection) — never a previous form's draft
+                  // under a new selection.
+                  const currentSummary: any = summaryForSelection(formSummary, selectedFormId);
                   return (
                     <div className="border border-slate-200 rounded-xl p-4 space-y-4">
                       <p className="text-xs text-slate-500">{entry.applicability}</p>
@@ -1754,8 +1769,8 @@ export default function App() {
                         <button onClick={downloadBlankForm} className="px-6 py-3 border-2 border-slate-300 text-slate-700 font-semibold rounded-xl hover:bg-slate-50">
                           {t('blankFormBtn', 'Official Blank Form — Reference Copy')} (PDF)
                         </button>
-                        {formPdfBase64 && (() => {
-                          const checklist = (formSummary && formSummary.finalReviewChecklist) || [];
+                        {formPdfBase64 && currentSummary && (() => {
+                          const checklist = (currentSummary && currentSummary.finalReviewChecklist) || [];
                           const allChecked = checklist.length > 0 && checklist.every((_: any, i: number) => reviewChecks[i]);
                           return (
                             <button onClick={downloadFormPdf} disabled={checklist.length > 0 && !allChecked}
@@ -1766,60 +1781,60 @@ export default function App() {
                           );
                         })()}
                       </div>
-                      {formPdfBase64 && formSummary && formSummary.finalReviewChecklist && !(formSummary.finalReviewChecklist.every((_: any, i: number) => reviewChecks[i])) && (
+                      {formPdfBase64 && currentSummary && currentSummary.finalReviewChecklist && !(currentSummary.finalReviewChecklist.every((_: any, i: number) => reviewChecks[i])) && (
                         <p className="text-xs text-amber-800">{t('checklistGate', 'Complete the final review checklist below before downloading.')}</p>
                       )}
-                      {formSummary && (
+                      {currentSummary && (
                         <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-sm text-slate-700 space-y-3">
-                          <p className="font-bold text-slate-900">{formSummary.formId} — {t('formEdition', 'Edition')} {formSummary.editionDate}</p>
-                          <p className="text-xs font-semibold text-red-700 uppercase tracking-wide">{formSummary.draftLabel}</p>
+                          <p className="font-bold text-slate-900">{currentSummary.formId} — {t('formEdition', 'Edition')} {currentSummary.editionDate}</p>
+                          <p className="text-xs font-semibold text-red-700 uppercase tracking-wide">{currentSummary.draftLabel}</p>
                           {/* Version identification (B2C §5.C): the latest
                               generation is the only current draft. */}
-                          {formDraftMeta && formDraftMeta.formId === formSummary.formId && (
+                          {formDraftMeta && formDraftMeta.formId === currentSummary.formId && (
                             <p className="text-xs text-slate-600">
-                              <strong>{formSummary.draftDocumentLabel || 'IRU Pre-filled Draft — Review and Correct'}</strong>
+                              <strong>{currentSummary.draftDocumentLabel || 'IRU Pre-filled Draft — Review and Correct'}</strong>
                               {' · '}{t('draftVersion', 'Draft version')} {formDraftMeta.version} ({formDraftMeta.draftId})
                               {' · '}{new Date(formDraftMeta.generatedAt).toLocaleString()}
                               {' · '}<span className="font-semibold text-green-700">{t('draftLatest', 'This is the latest version — use only this one.')}</span>
                             </p>
                           )}
-                          {formSummary.staleVersionNote && <p className="text-xs text-amber-800">{formSummary.staleVersionNote}</p>}
+                          {currentSummary.staleVersionNote && <p className="text-xs text-amber-800">{currentSummary.staleVersionNote}</p>}
                           {/* Pre-download review instructions (B2C §5.A) */}
-                          {formSummary.reviewInstructions && (
+                          {currentSummary.reviewInstructions && (
                             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
                               <p className="font-semibold text-amber-900">{t('reviewBeforeDownload', 'Before you download — review this draft')}</p>
                               <ul className="list-disc pl-5 text-amber-900">
-                                {formSummary.reviewInstructions.map((r: string, i: number) => <li key={i}>{r}</li>)}
+                                {currentSummary.reviewInstructions.map((r: string, i: number) => <li key={i}>{r}</li>)}
                               </ul>
-                              {formSummary.blankForm && (
+                              {currentSummary.blankForm && (
                                 <p className="mt-2 text-amber-900">
-                                  {t('compareBlank', 'Compare it with the')} <button onClick={downloadBlankForm} className="underline font-semibold">{formSummary.blankForm.label}</button>
-                                  {' '}({formSummary.blankForm.formId}, {t('formEdition', 'Edition')} {formSummary.blankForm.editionDate}) — {t('officialSource', 'official source')}: <a href={formSummary.blankForm.sourceUrl} target="_blank" rel="noreferrer" className="underline">{formSummary.blankForm.sourceUrl}</a>
+                                  {t('compareBlank', 'Compare it with the')} <button onClick={downloadBlankForm} className="underline font-semibold">{currentSummary.blankForm.label}</button>
+                                  {' '}({currentSummary.blankForm.formId}, {t('formEdition', 'Edition')} {currentSummary.blankForm.editionDate}) — {t('officialSource', 'official source')}: <a href={currentSummary.blankForm.sourceUrl} target="_blank" rel="noreferrer" className="underline">{currentSummary.blankForm.sourceUrl}</a>
                                 </p>
                               )}
                             </div>
                           )}
                           <div>
-                            <p className="font-semibold">{t('formPopulated', 'Filled in from your information')} ({formSummary.populated.length}):</p>
-                            <ul className="list-disc pl-5">{formSummary.populated.map((p: any, i: number) => <li key={i}>{p.label}: {p.value}</li>)}</ul>
+                            <p className="font-semibold">{t('formPopulated', 'Filled in from your information')} ({currentSummary.populated.length}):</p>
+                            <ul className="list-disc pl-5">{currentSummary.populated.map((p: any, i: number) => <li key={i}>{p.label}: {p.value}</li>)}</ul>
                           </div>
-                          {formSummary.missingRequired.length > 0 && (
+                          {currentSummary.missingRequired.length > 0 && (
                             <div><p className="font-semibold">{t('formMissing', 'Still needed for this form')}:</p>
-                            <ul className="list-disc pl-5">{formSummary.missingRequired.map((m: any, i: number) => <li key={i}>{m.label}</li>)}</ul></div>
+                            <ul className="list-disc pl-5">{currentSummary.missingRequired.map((m: any, i: number) => <li key={i}>{m.label}</li>)}</ul></div>
                           )}
                           <div>
                             <p className="font-semibold">{t('formConsumerSections', 'You complete these parts yourself')}:</p>
-                            <ul className="list-disc pl-5">{formSummary.consumerCompletedSections.map((c: string, i: number) => <li key={i}>{c}</li>)}</ul>
+                            <ul className="list-disc pl-5">{currentSummary.consumerCompletedSections.map((c: string, i: number) => <li key={i}>{c}</li>)}</ul>
                           </div>
                           <p className="text-xs text-slate-500">{t('formSignatureNote', 'No signature was added and nothing was submitted. Signing and filing are your responsibility, after your review.')}</p>
                           {/* Final review checklist (B2C §5.D) — the draft
                               is not presented as ready until every item
                               is confirmed. It is a review aid, not a
                               legal certification. */}
-                          {formSummary.finalReviewChecklist && (
+                          {currentSummary.finalReviewChecklist && (
                             <div className="border border-slate-300 rounded-lg p-3">
                               <p className="font-semibold text-slate-900">{t('finalChecklistTitle', 'Final review checklist')}</p>
-                              {formSummary.finalReviewChecklist.map((item: string, i: number) => (
+                              {currentSummary.finalReviewChecklist.map((item: string, i: number) => (
                                 <label key={i} className="flex items-start gap-2 mt-1.5 cursor-pointer">
                                   <input type="checkbox" checked={!!reviewChecks[i]} onChange={(e) => setReviewChecks({ ...reviewChecks, [i]: e.target.checked })} className="mt-0.5" />
                                   <span>{item}</span>
@@ -1828,16 +1843,16 @@ export default function App() {
                             </div>
                           )}
                           {/* Next steps, tailored to this form + findings (B2C §6) */}
-                          {formSummary.nextSteps && (
+                          {currentSummary.nextSteps && (
                             <div className="border border-indigo-200 bg-indigo-50 rounded-lg p-3 space-y-2">
-                              <p className="font-bold text-slate-900">{formSummary.nextSteps.title}</p>
+                              <p className="font-bold text-slate-900">{currentSummary.nextSteps.title}</p>
                               <div>
                                 <p className="font-semibold">{t('nsUnderstand', 'What this prepares — and what it does not')}</p>
-                                <ul className="list-disc pl-5">{formSummary.nextSteps.understand.map((s: string, i: number) => <li key={i}>{s}</li>)}</ul>
+                                <ul className="list-disc pl-5">{currentSummary.nextSteps.understand.map((s: string, i: number) => <li key={i}>{s}</li>)}</ul>
                               </div>
                               <div>
                                 <p className="font-semibold">{t('nsChecklist', 'Your checklist')}</p>
-                                <ol className="list-decimal pl-5">{formSummary.nextSteps.checklist.map((s: string, i: number) => <li key={i}>{s}</li>)}</ol>
+                                <ol className="list-decimal pl-5">{currentSummary.nextSteps.checklist.map((s: string, i: number) => <li key={i}>{s}</li>)}</ol>
                               </div>
                               <p className="text-xs text-slate-600">{t('nsFullInPacket', 'The complete guidance — including preparing for professional help and finding verified resources — is in your printable packet below.')}</p>
                             </div>
