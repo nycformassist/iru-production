@@ -77,6 +77,73 @@ export const COUNTRIES: Country[] = [
   { code: 'OTHER', name: 'Other / not listed' },
 ];
 
+/** Localized country names (G14): standard exonyms per language.
+ * EN remains COUNTRIES[].name; these tables only override display. */
+export const COUNTRY_NAMES_I18N: Record<string, Partial<Record<'ES' | 'ZH' | 'HT' | 'AR', string>>> = {
+  US: { ES: 'Estados Unidos', ZH: '美国', HT: 'Etazini', AR: 'الولايات المتحدة' },
+  CA: { ES: 'Canadá', ZH: '加拿大', HT: 'Kanada', AR: 'كندا' },
+  MX: { ES: 'México', ZH: '墨西哥', HT: 'Meksik', AR: 'المكسيك' },
+  GT: { ES: 'Guatemala', ZH: '危地马拉', HT: 'Gwatemala', AR: 'غواتيمالا' },
+  HN: { ES: 'Honduras', ZH: '洪都拉斯', HT: 'Ondiras', AR: 'هندوراس' },
+  SV: { ES: 'El Salvador', ZH: '萨尔瓦多', HT: 'Salvadò', AR: 'السلفادور' },
+  CU: { ES: 'Cuba', ZH: '古巴', HT: 'Kiba', AR: 'كوبا' },
+  HT: { ES: 'Haití', ZH: '海地', HT: 'Ayiti', AR: 'هايتي' },
+  DO: { ES: 'República Dominicana', ZH: '多米尼加共和国', HT: 'Repiblik Dominikèn', AR: 'جمهورية الدومينيكان' },
+  CO: { ES: 'Colombia', ZH: '哥伦比亚', HT: 'Kolonbi', AR: 'كولومبيا' },
+  VE: { ES: 'Venezuela', ZH: '委内瑞拉', HT: 'Venezyela', AR: 'فنزويلا' },
+  PE: { ES: 'Perú', ZH: '秘鲁', HT: 'Perou', AR: 'بيرو' },
+  EC: { ES: 'Ecuador', ZH: '厄瓜多尔', HT: 'Ekwatè', AR: 'الإكوادور' },
+  BR: { ES: 'Brasil', ZH: '巴西', HT: 'Brezil', AR: 'البرازيل' },
+  AR: { ES: 'Argentina', ZH: '阿根廷', HT: 'Ajantin', AR: 'الأرجنتين' },
+  CL: { ES: 'Chile', ZH: '智利', HT: 'Chili', AR: 'تشيلي' },
+  UA: { ES: 'Ucrania', ZH: '乌克兰', HT: 'Ikrèn', AR: 'أوكرانيا' },
+  RU: { ES: 'Rusia', ZH: '俄罗斯', HT: 'Risi', AR: 'روسيا' },
+  PL: { ES: 'Polonia', ZH: '波兰', HT: 'Polòy', AR: 'بولندا' },
+  RO: { ES: 'Rumania', ZH: '罗马尼亚', HT: 'Woumani', AR: 'رومانيا' },
+  DE: { ES: 'Alemania', ZH: '德国', HT: 'Almay', AR: 'ألمانيا' },
+  FR: { ES: 'Francia', ZH: '法国', HT: 'Frans', AR: 'فرنسا' },
+  GB: { ES: 'Reino Unido', ZH: '英国', HT: 'Wayòm Ini', AR: 'المملكة المتحدة' },
+  ES: { ES: 'España', ZH: '西班牙', HT: 'Espay', AR: 'إسبانيا' },
+  IT: { ES: 'Italia', ZH: '意大利', HT: 'Itali', AR: 'إيطاليا' },
+  PT: { ES: 'Portugal', ZH: '葡萄牙', HT: 'Pòtigal', AR: 'البرتغال' },
+  IN: { ES: 'India', ZH: '印度', HT: 'End', AR: 'الهند' },
+  CN: { ES: 'China', ZH: '中国', HT: 'Chin', AR: 'الصين' },
+  PH: { ES: 'Filipinas', ZH: '菲律宾', HT: 'Filipin', AR: 'الفلبين' },
+  VN: { ES: 'Vietnam', ZH: '越南', HT: 'Vyètnam', AR: 'فيتنام' },
+  KR: { ES: 'Corea del Sur', ZH: '韩国', HT: 'Kore di Sid', AR: 'كوريا الجنوبية' },
+  BD: { ES: 'Bangladés', ZH: '孟加拉国', HT: 'Bangladèch', AR: 'بنغلاديش' },
+  PK: { ES: 'Pakistán', ZH: '巴基斯坦', HT: 'Pakistan', AR: 'باكستان' },
+  AF: { ES: 'Afganistán', ZH: '阿富汗', HT: 'Afganistan', AR: 'أفغانستان' },
+  IR: { ES: 'Irán', ZH: '伊朗', HT: 'Iran', AR: 'إيران' },
+  IQ: { ES: 'Irak', ZH: '伊拉克', HT: 'Irak', AR: 'العراق' },
+  SY: { ES: 'Siria', ZH: '叙利亚', HT: 'Siri', AR: 'سوريا' },
+  YE: { ES: 'Yemen', ZH: '也门', HT: 'Yemèn', AR: 'اليمن' },
+  SO: { ES: 'Somalia', ZH: '索马里', HT: 'Somali', AR: 'الصومال' },
+  ET: { ES: 'Etiopía', ZH: '埃塞俄比亚', HT: 'Etyopi', AR: 'إثيوبيا' },
+  NG: { ES: 'Nigeria', ZH: '尼日利亚', HT: 'Nijerya', AR: 'نيجيريا' },
+  CD: { ES: 'RD Congo', ZH: '刚果民主共和国', HT: 'RD Kongo', AR: 'جمهورية الكونغو الديمقراطية' },
+  SD: { ES: 'Sudán', ZH: '苏丹', HT: 'Soudan', AR: 'السودان' },
+  MM: { ES: 'Birmania (Myanmar)', ZH: '缅甸', HT: 'Myanma', AR: 'ميانمار' },
+  NP: { ES: 'Nepal', ZH: '尼泊尔', HT: 'Nepal', AR: 'نيبال' },
+  LK: { ES: 'Sri Lanka', ZH: '斯里兰卡', HT: 'Sri Lanka', AR: 'سريلانكا' },
+  JM: { ES: 'Jamaica', ZH: '牙买加', HT: 'Jamayik', AR: 'جامايكا' },
+  TT: { ES: 'Trinidad y Tobago', ZH: '特立尼达和多巴哥', HT: 'Trinidad ak Tobago', AR: 'ترينيداد وتوباغو' },
+  GY: { ES: 'Guyana', ZH: '圭亚那', HT: 'Giyana', AR: 'غيانا' },
+  BZ: { ES: 'Belice', ZH: '伯利兹', HT: 'Beliz', AR: 'بليز' },
+  NI: { ES: 'Nicaragua', ZH: '尼加拉瓜', HT: 'Nikaragwa', AR: 'نيكاراغوا' },
+  CR: { ES: 'Costa Rica', ZH: '哥斯达黎加', HT: 'Kosta Rika', AR: 'كوستاريكا' },
+  PA: { ES: 'Panamá', ZH: '巴拿马', HT: 'Panama', AR: 'بنما' },
+  BS: { ES: 'Bahamas', ZH: '巴哈马', HT: 'Bahamas', AR: 'جزر البهاما' },
+  OTHER: { ES: 'Otro / no listado', ZH: '其他 / 未列出', HT: 'Lòt / pa liste', AR: 'أخرى / غير مدرجة' },
+};
+
+/** Country display name in `lang` (EN fallback: the COUNTRIES name). */
+export function localizedCountryName(country: Country, lang: string): string {
+  if (!country) return '';
+  if (!lang || lang === 'EN') return country.name;
+  return COUNTRY_NAMES_I18N[country.code]?.[lang as 'ES' | 'ZH' | 'HT' | 'AR'] || country.name;
+}
+
 export function isUsCountry(code: string | undefined | null): boolean {
   return !code || code === 'US';
 }

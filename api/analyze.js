@@ -120,7 +120,15 @@ export default async function handler(req, res) {
     : [];
   // Evidence-gap engine: server-side KB records for every missing/unknown
   // item. The model tailors these; it never invents alternatives.
+  // The LIVE path keeps the EN records: the prompt instructs the model to
+  // answer in the target language, so it localizes KB-derived content
+  // itself. The DETERMINISTIC fallback paths consume localized records
+  // (buildGapRecords with lang) so a non-EN fallback never mixes English
+  // KB text into a localized summary.
   const gaps = buildGapRecords(min, validatedReviews.reviews);
+  const gapsForFallback = (lang && lang !== 'EN')
+    ? buildGapRecords(min, validatedReviews.reviews, lang)
+    : gaps;
 
   // ── Limited evaluation (B2C §3/§4): the $1 deliverable. Deterministic
   // category-level result ONLY — it never reaches the model, the prompt,
@@ -188,7 +196,7 @@ export default async function handler(req, res) {
     await Promise.race([streamPromise, timeoutPromise]);
 
     const validated = validateModelOutput(fullText);
-    const assessment = validated.ok ? validated.data : fallbackAssessment(min, gaps, validatedReviews.reviews, lang);
+    const assessment = validated.ok ? validated.data : fallbackAssessment(min, gapsForFallback, validatedReviews.reviews, lang);
     if (!validated.ok) {
       const durationMs = Date.now() - startTime;
       console.error(JSON.stringify({
@@ -232,7 +240,7 @@ export default async function handler(req, res) {
     send({ 
       type: "error", 
       status: "ai_unavailable",
-      assessment: fallbackAssessment(min, gaps, validatedReviews.reviews, lang) 
+      assessment: fallbackAssessment(min, gapsForFallback, validatedReviews.reviews, lang) 
     });
     res.end();
   }

@@ -5,10 +5,10 @@ import { motion } from 'framer-motion';
 import { LANGUAGES, UI_LABELS, PHASE_1_QUESTIONS, TRIAGE_QUESTION, PHASE_2_QUESTIONS, PHASE_3_QUESTIONS, NYC_RESOURCES, CONSULATES, PROXIES, NARRATIVE_STARTERS, USCIS_FORMS, FEE_SCHEDULE_AS_OF, buildExecutiveSummary } from './constants';
 
 // Nationwide layered resource model (local → statewide → national → fallback).
-import { resolveResources, resolveResourcesForLocation, ResourceResult, ResourceOrg } from './resources';
+import { resolveResources, resolveResourcesForLocation, ResourceResult, ResourceOrg, localizedResourceText, localizedNationalDescription } from './resources';
 
 // Country-aware location model (directive §3).
-import { COUNTRIES, isUsCountry } from './location';
+import { COUNTRIES, isUsCountry, localizedCountryName } from './location';
 
 // Canonical fact record (directive §4) — one shared model for answers,
 // document extraction, corrections, the packet, and form preparation.
@@ -49,7 +49,7 @@ function saveFormToken(formId: string, token: string) {
 
 // Evidence intelligence (server-side source of truth, pure module — no
 // secrets, no I/O). Imported read-only for honest packet rendering.
-import { EVIDENCE_KB, requiresLegalReview, legalReviewReason, nextActionFor } from '../api/_lib/evidence.js';
+import { EVIDENCE_KB, requiresLegalReview, legalReviewReason, nextActionFor, localizedKb } from '../api/_lib/evidence.js';
 
 /** Display names for the 9 evidence checklist keys (packet rendering). */
 const EVIDENCE_ITEM_NAMES: Record<string, string> = {
@@ -104,8 +104,30 @@ function stripForServer(answers: Record<string, string>): Record<string, string>
   return out;
 }
 
+export const SUPPORTED_LANGS = ['EN', 'ES', 'ZH', 'HT', 'AR'];
+export const LANG_STORAGE_KEY = 'iru_lang';
+
+/** Read the persisted language code (WS2). ONLY the language code is ever
+ * stored — never applicant data. Invalid/absent values fall back to EN. */
+export function loadPersistedLang(): string {
+  try {
+    const v = localStorage.getItem(LANG_STORAGE_KEY);
+    return v && SUPPORTED_LANGS.includes(v) ? v : 'EN';
+  } catch { return 'EN'; }
+}
+
+/** Persist ONLY the language code so a full reload (e.g. returning from
+ * checkout) restores the applicant's language. */
+export function persistLang(code: string) {
+  try { localStorage.setItem(LANG_STORAGE_KEY, code); } catch { /* storage unavailable */ }
+}
+
 export default function App() {
-  const [lang, setLang] = useState('EN');
+  const [lang, setLang] = useState(() => loadPersistedLang());
+
+  // Write on every language change (WS2). A failed analyze/checkout request
+  // never touches lang, so it cannot reset the persisted choice.
+  useEffect(() => { persistLang(lang); }, [lang]);
   const [stage, setStage] = useState<'LANG' | 'PHASE1' | 'TRIAGE' | 'PHASE2' | 'PHASE3' | 'PHASE4' | 'PHOTO' | 'ANALYZING' | 'PACKET'>('LANG');
   const [currentQ, setCurrentQ] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string>>({});
@@ -710,8 +732,8 @@ export default function App() {
    * text is rendered in the applicant's selected language by
    * api/_lib/nextsteps.js — the same builder the form completion
    * summary uses, so screen, packet, and form guidance never diverge.
-   * (The evidence-gap knowledge base content itself remains English,
-   * with a localized note in the packet saying so.)
+   * (The evidence-gap knowledge base content is localized via
+   * localizedKb() in the packet gap section — see generateHtml.)
    */
   const buildPacketNextSteps = () => {
     const conflicts = factRecord ? Object.values(factRecord.facts).filter((f: any) => f.status === 'conflicted').length : 0;
@@ -740,17 +762,22 @@ export default function App() {
     const readinessPercent = Math.round((score / total) * 100);
 
     const resourcesHtml = resources.map((res: ResourceOrg) => {
-      const layerLabel = res.layer === 'statewide' ? 'Statewide' : (res.borough || 'Local');
-      const eligibilityHtml = res.eligibility
-        ? `<p style="font-size: 0.875rem; color: #92400e; background-color: #fef3c7; padding: 0.5rem 0.75rem; border-radius: 0.375rem; margin: 0 0 0.75rem 0;"><strong>${escapeHtml(t('pktEligibility', 'Eligibility'))}:</strong> ${escapeHtml(res.eligibility)}</p>`
+      const layerLabel = res.layer === 'statewide' ? t('pktLayerStatewide', 'Statewide') : (res.borough || t('pktLayerLocal', 'Local'));
+      const eligibilityText = localizedResourceText(res, 'eligibility', lang);
+      const servicesText = localizedResourceText(res, 'servicesOffered', lang);
+      const serviceAreaText = localizedResourceText(res, 'serviceArea', lang);
+      const transitText = localizedResourceText(res, 'transit', lang);
+      const exitText = localizedResourceText(res, 'exit', lang);
+      const eligibilityHtml = eligibilityText
+        ? `<p style="font-size: 0.875rem; color: #92400e; background-color: #fef3c7; padding: 0.5rem 0.75rem; border-radius: 0.375rem; margin: 0 0 0.75rem 0;"><strong>${escapeHtml(t('pktEligibility', 'Eligibility'))}:</strong> ${escapeHtml(eligibilityText)}</p>`
         : '';
-      const servicesHtml = res.servicesOffered
-        ? `<p style="font-size: 0.875rem; color: #334155; margin: 0 0 0.75rem 0;"><strong>${escapeHtml(t('pktServices', 'Services'))}:</strong> ${escapeHtml(res.servicesOffered)}</p>`
+      const servicesHtml = servicesText
+        ? `<p style="font-size: 0.875rem; color: #334155; margin: 0 0 0.75rem 0;"><strong>${escapeHtml(t('pktServices', 'Services'))}:</strong> ${escapeHtml(servicesText)}</p>`
         : '';
-      const transitHtml = (res.transit || res.exit)
+      const transitHtml = (transitText || exitText)
         ? `<div style="background-color: white; padding: 1rem; border-radius: 0.5rem; border: 1px solid #c7d2fe; margin-bottom: 1rem;">
-          ${res.transit ? `<p style="font-size: 0.875rem; font-weight: 600; color: #312e81; margin: 0 0 0.5rem 0;">🚇 ${escapeHtml(res.transit)}</p>` : ''}
-          ${res.exit ? `<p style="font-size: 0.875rem; font-weight: 500; color: #475569; margin: 0;">🚶 ${escapeHtml(ui.subwayExit)}: ${escapeHtml(res.exit)}</p>` : ''}
+          ${transitText ? `<p style="font-size: 0.875rem; font-weight: 600; color: #312e81; margin: 0 0 0.5rem 0;">🚇 ${escapeHtml(transitText)}</p>` : ''}
+          ${exitText ? `<p style="font-size: 0.875rem; font-weight: 500; color: #475569; margin: 0;">🚶 ${escapeHtml(ui.subwayExit)}: ${escapeHtml(exitText)}</p>` : ''}
         </div>`
         : '';
       const websiteHtml = res.website
@@ -763,11 +790,11 @@ export default function App() {
         </div>
         <h4 style="font-size: 1.25rem; font-weight: 700; color: #0f172a; margin: 0 0 0.5rem 0;">${escapeHtml(res.name)}</h4>
         <p style="color: #334155; margin: 0 0 0.25rem 0; font-weight: 500;">${escapeHtml(res.address)}</p>
-        <p style="color: #334155; margin: 0 0 0.75rem 0; font-weight: 500;">${escapeHtml(res.phone)}</p>
+        <p style="color: #334155; margin: 0 0 0.75rem 0; font-weight: 500;"><span dir="ltr">${escapeHtml(res.phone)}</span></p>
         ${websiteHtml}
         ${servicesHtml}
         ${eligibilityHtml}
-        <p style="font-size: 0.8rem; color: #64748b; margin: 0 0 0.75rem 0; font-style: italic;">${escapeHtml(t('pktServiceArea', 'Service area'))}: ${escapeHtml(res.serviceArea)}${res.legalRepresentation ? ' · ' + escapeHtml(t('pktLegalRep', 'Provides legal representation')) : ''}</p>
+        <p style="font-size: 0.8rem; color: #64748b; margin: 0 0 0.75rem 0; font-style: italic;">${escapeHtml(t('pktServiceArea', 'Service area'))}: ${escapeHtml(serviceAreaText)}${res.legalRepresentation ? ' · ' + escapeHtml(t('pktLegalRep', 'Provides legal representation')) : ''}</p>
         ${transitHtml}
       </div>
     `;
@@ -779,7 +806,7 @@ export default function App() {
         <p style="margin: 0 0 0.25rem 0; font-weight: 700; color: #0f172a; font-size: 0.95rem;">
           <a href="${escapeHtml(dir.url)}" style="color: #1d4ed8; text-decoration: underline;">${escapeHtml(dir.name)}</a>
         </p>
-        <p style="margin: 0; font-size: 0.85rem; color: #475569;">${escapeHtml(dir.description)}</p>
+        <p style="margin: 0; font-size: 0.85rem; color: #475569;">${escapeHtml(localizedNationalDescription(dir, lang))}</p>
       </div>
     `).join('');
 
@@ -855,11 +882,11 @@ export default function App() {
         <div class="section">
           <h3 class="section-title font-serif">${escapeHtml(ui.gapSectionTitle || 'Evidence Gaps & Alternatives')}</h3>
           ${gapKeys.map(k => {
-            const kb: any = (EVIDENCE_KB as any)[k];
+            const kb: any = localizedKb(k, lang);
             if (!kb) return '';
-            const na = nextActionFor(k, answers[k]);
+            const na = nextActionFor(k, answers[k], lang);
             const legalFlag = requiresLegalReview(k)
-              ? `<p style="font-size:0.875rem;color:#92400e;font-weight:600;">⚖️ ${escapeHtml(legalReviewReason(k) || '')}</p>`
+              ? `<p style="font-size:0.875rem;color:#92400e;font-weight:600;">⚖️ ${escapeHtml(legalReviewReason(k, lang) || '')}</p>`
               : '';
             // Cross-reference the standalone Document Photo Review section when
             // the uploaded photo was reviewed for this gap — avoids duplicating
@@ -885,7 +912,7 @@ export default function App() {
               ${legalFlag}
             </div>`;
           }).join('')}
-          <p style="font-size: 0.8rem; color: #64748b; font-style: italic;">${escapeHtml(t('pktKbNote', 'Alternative descriptions are in English. Ask your legal representative to explain any item you do not understand.'))}</p>
+          <p style="font-size: 0.8rem; color: #64748b; font-style: italic;">${escapeHtml(lang === 'EN' ? t('pktKbNote', 'Alternative descriptions are in English. Ask your legal representative to explain any item you do not understand.') : t('pktKbNoteLocalized', 'Alternative descriptions are shown in your selected language. Ask your legal representative to explain any item you do not understand.'))}</p>
         </div>` : '';
 
     // Information on Record (§6): the consumer can see exactly which facts
@@ -1080,6 +1107,8 @@ export default function App() {
 
   return (
     <div
+      dir={lang === 'AR' && stage !== 'LANG' ? 'rtl' : undefined}
+      lang={lang === 'AR' ? 'ar' : undefined}
       className="min-h-screen flex flex-col items-center py-12 px-4 sm:px-6 lg:px-8 relative"
       style={stage === 'LANG' ? { background: 'radial-gradient(ellipse 85% 60% at 50% 32%, #ffffff 0%, rgba(255,255,255,0) 55%), linear-gradient(165deg, #e2f0fd 0%, #f6fbff 42%, #e7f3fd 72%, #cfe8fc 100%)' } : undefined}
     >
@@ -1187,7 +1216,7 @@ export default function App() {
                         onChange={(e) => setAnswers({ ...answers, residence_country: e.target.value })}
                         className="w-full p-4 rounded-xl border-2 border-slate-200 text-lg"
                       >
-                        {COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
+                        {COUNTRIES.map(c => <option key={c.code} value={c.code}>{localizedCountryName(c, lang)}</option>)}
                       </select>
                     </label>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1210,7 +1239,7 @@ export default function App() {
                     </div>
                     {isUsCountry(answers.residence_country || 'US') ? (
                       <label className="block">
-                        <span className="block text-sm font-semibold text-slate-600 mb-1">ZIP Code (optional — for local resources)</span>
+                        <span className="block text-sm font-semibold text-slate-600 mb-1">{t('locationZip', 'ZIP Code (optional — for local resources)')}</span>
                         <input
                           type="text" inputMode="numeric" value={answers.zip_code || ''}
                           onChange={(e) => setAnswers({ ...answers, zip_code: e.target.value })}
@@ -1229,7 +1258,7 @@ export default function App() {
                       </label>
                     )}
                     <label className="block">
-                      <span className="block text-sm font-semibold text-slate-600 mb-1">Street address (optional — used only if you prepare a form)</span>
+                      <span className="block text-sm font-semibold text-slate-600 mb-1">{t('locationStreet', 'Street address (optional — used only if you prepare a form)')}</span>
                       <input
                         type="text" value={answers.residence_street || ''}
                         onChange={(e) => setAnswers({ ...answers, residence_street: e.target.value })}
@@ -1724,10 +1753,10 @@ export default function App() {
                     {purchaseState.hasEvaluation && owned.length === 0 && (
                       <>
                         <button onClick={() => { if (selectedFormId) handleCheckout(SKUS.ONE_FORM, { formId: selectedFormId, prerequisiteToken: evalToken || undefined }); }} disabled={checkoutBusy || !selectedFormId} className="px-5 py-2.5 border-2 border-indigo-600 text-indigo-700 text-sm font-semibold rounded-xl hover:bg-indigo-50 disabled:opacity-50">
-                          {t('offerOneForm', 'Complete ONE form')} ({selectedFormId || '…'}) — {formatCents(PRICING.oneForm.upgradeChargeCents)} {t('offerMore', 'more')}
+                          {t('offerOneForm', 'Complete ONE form')} ({selectedFormId || '…'}) — {formatCents(PRICING.oneForm.chargeCents)} {t('offerMore', 'more')}
                         </button>
                         <button onClick={() => handleCheckout(SKUS.BUNDLE, { prerequisiteToken: evalToken || undefined })} disabled={checkoutBusy} className="px-5 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-50">
-                          {t('offerBundle', 'Complete BOTH forms')} — {formatCents(PRICING.bundle.upgradeChargeCents)} {t('offerMore', 'more')}
+                          {t('offerBundle', 'Complete BOTH forms')} — {formatCents(PRICING.bundle.chargeCents)} {t('offerMore', 'more')}
                         </button>
                         {!selectedFormId && <span className="text-xs text-slate-500 self-center">{t('offerPickForm', 'Select a form below to enable the one-form option.')}</span>}
                       </>

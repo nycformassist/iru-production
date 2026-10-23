@@ -32,6 +32,7 @@ import { PRICING, SKUS, FORM_IDS } from './_lib/pricing.js';
 import { getFormEntry } from './_lib/forms/registry.js';
 
 const limiter = createLimiter({ capacity: 5, windowMs: 10 * 60 * 1000 });
+const MAX_BODY_BYTES = 256 * 1024;
 
 export const SKU = SKUS.LEGACY;
 
@@ -112,6 +113,15 @@ export default async function handler(req, res) {
   if (!rl.allowed) {
     res.setHeader('Retry-After', Math.ceil(rl.retryAfterMs / 1000));
     return res.status(429).json({ error: 'Too many requests. Please try again later.' });
+  }
+
+  // Body-size cap before parsing trust (same 256KB guard as
+  // generate-form.js — WS5 anti-abuse audit: this endpoint previously
+  // parsed unbounded bodies).
+  const rawBody = req.body;
+  const bodySize = typeof rawBody === 'string' ? Buffer.byteLength(rawBody) : JSON.stringify(rawBody || {}).length;
+  if (bodySize > MAX_BODY_BYTES) {
+    return res.status(413).json({ error: 'Request too large.' });
   }
 
   const secretKey = process.env.STRIPE_SECRET_KEY || '';

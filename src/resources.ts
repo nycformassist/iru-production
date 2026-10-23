@@ -572,6 +572,135 @@ function cityMatchesOrg(org: ResourceOrg, cityLower: string, stateCode: string):
   return next === '' || next === ',' || next === ' ' || next === '(' || next === '/';
 }
 
+export type I18nLang = 'ES' | 'ZH' | 'HT' | 'AR';
+export interface ResourceTextI18n { servicesOffered?: string; eligibility?: string; serviceArea?: string; transit?: string; exit?: string }
+
+/** Localized IRU explanatory prose for resources (G13). Translates ONLY the
+ * verified EN text on each org; names/addresses/phones stay verbatim. */
+export const RESOURCE_I18N: Record<string, Partial<Record<I18nLang, ResourceTextI18n>>> = {
+'nyc-legal-aid-society': {
+ES: { servicesOffered: 'Servicios legales civiles gratuitos, incluida asistencia en inmigración.', serviceArea: 'Manhattan, Ciudad de Nueva York', transit: 'Tome el 2/3 hasta Wall St.', exit: 'Use la salida de Wall St y camine hacia el sur.' },
+ZH: { servicesOffered: '免费民事法律服务，包括移民援助。', serviceArea: '纽约市曼哈顿', transit: '乘坐 2/3 线到 Wall St.。', exit: '使用 Wall St 出口并向南步行。' },
+HT: { servicesOffered: 'Sèvis legal sivil gratis, enkli asistans imigrasyon.', serviceArea: 'Manhattan, Vil New York', transit: 'Pran 2/3 a rive Wall St.', exit: 'Itilize sòti Wall St la epi mache ale sid.' },
+AR: { servicesOffered: 'خدمات قانونية مدنية مجانية تشمل مساعدة الهجرة.', serviceArea: 'مانهاتن، مدينة نيويورك', transit: 'خذ القطار 2/3 إلى Wall St.', exit: 'استخدم مخرج Wall St وامشِ جنوبًا.' } },
+'nyc-bronx-defenders': {
+ES: { servicesOffered: 'Práctica de Defensa de Inmigración: combate la detención y la deportación; proveedor de representación universal de NYIFUP.', eligibility: 'Residentes del Bronx de bajos ingresos; atiende sin importar el estatus migratorio.', serviceArea: 'El Bronx, Ciudad de Nueva York', transit: 'Tome el 4/B/D hasta 161st-Yankee Stadium.', exit: 'Salida del frente del tren hacia Grand Concourse.' },
+ZH: { servicesOffered: '移民辩护业务：抗争拘留和驱逐；NYIFUP 全民代理提供者。', eligibility: '布朗克斯低收入居民；无论移民身份均提供服务。', serviceArea: '纽约市布朗克斯', transit: '乘坐 4/B/D 线到 161st-Yankee Stadium。', exit: '从列车前部出口前往 Grand Concourse。' },
+HT: { servicesOffered: 'Pratik Defans Imigrasyon: li goumen kont detansyon ak depòtasyon; founisè reprezantasyon inivèsèl NYIFUP.', eligibility: 'Rezidan Bronx ki gen revni ba; li sèvi kèlkeswa estati imigrasyon.', serviceArea: 'Bronx, Vil New York', transit: 'Pran 4/B/D a rive 161st-Yankee Stadium.', exit: 'Sòti devan tren an pou Grand Concourse.' },
+AR: { servicesOffered: 'ممارسة الدفاع عن الهجرة: تحارب الاحتجاز والترحيل؛ مقدم تمثيل شامل تابع لـ NYIFUP.', eligibility: 'سكان برونكس ذوو الدخل المنخفض؛ يخدم بغض النظر عن وضع الهجرة.', serviceArea: 'برونكس، مدينة نيويورك', transit: 'خذ القطار 4/B/D إلى 161st-Yankee Stadium.', exit: 'مخرج مقدمة القطار إلى Grand Concourse.' } },
+'nyc-minkwon': {
+ES: { servicesOffered: 'Servicios legales de inmigración y defensa comunitaria.', serviceArea: 'Queens, Ciudad de Nueva York', transit: 'Tome el tren 7 hasta Flushing-Main St.', exit: 'Salga en Main St y camine hacia el sur.' },
+ZH: { servicesOffered: '移民法律服务和社区倡导。', serviceArea: '纽约市皇后区', transit: '乘坐 7 线到 Flushing-Main St.。', exit: '在 Main St 出口下车并向南步行。' },
+HT: { servicesOffered: 'Sèvis legal imigrasyon ak defans kominote.', serviceArea: 'Queens, Vil New York', transit: 'Pran tren 7 la rive Flushing-Main St.', exit: 'Sòti nan Main St epi mache ale sid.' },
+AR: { servicesOffered: 'خدمات قانونية للهجرة ومناصرة مجتمعية.', serviceArea: 'كوينز، مدينة نيويورك', transit: 'خذ القطار 7 إلى Flushing-Main St.', exit: 'اخرج عند Main St وامشِ جنوبًا.' } },
+'nyc-brooklyn-legal': {
+ES: { servicesOffered: 'Servicios legales civiles gratuitos, incluida asistencia en inmigración.', serviceArea: 'Brooklyn, Ciudad de Nueva York', transit: 'Tome el 2/3/4/5 o la R hasta Borough Hall/Court St.', exit: 'Salga en Court St.' },
+ZH: { servicesOffered: '免费民事法律服务，包括移民援助。', serviceArea: '纽约市布鲁克林', transit: '乘坐 2/3/4/5 或 R 线到 Borough Hall/Court St.。', exit: '在 Court St. 出口下车。' },
+HT: { servicesOffered: 'Sèvis legal sivil gratis, enkli asistans imigrasyon.', serviceArea: 'Brooklyn, Vil New York', transit: 'Pran 2/3/4/5 oswa R a rive Borough Hall/Court St.', exit: 'Sòti nan Court St.' },
+AR: { servicesOffered: 'خدمات قانونية مدنية مجانية تشمل مساعدة الهجرة.', serviceArea: 'بروكلين، مدينة نيويورك', transit: 'خذ القطار 2/3/4/5 أو R إلى Borough Hall/Court St.', exit: 'اخرج عند Court St.' } },
+'nyc-project-hospitality': {
+ES: { servicesOffered: 'Servicios comunitarios, incluida asistencia en inmigración.', serviceArea: 'Staten Island, Ciudad de Nueva York', transit: 'Tome el autobús S48/S98 hasta Richmond Terrace/Park Ave.', exit: 'Salga en Park Ave.' },
+ZH: { servicesOffered: '社区服务，包括移民援助。', serviceArea: '纽约市斯塔滕岛', transit: '乘坐 S48/S98 巴士到 Richmond Terrace/Park Ave.。', exit: '在 Park Ave. 下车。' },
+HT: { servicesOffered: 'Sèvis kominotè, enkli asistans imigrasyon.', serviceArea: 'Staten Island, Vil New York', transit: 'Pran bis S48/S98 a rive Richmond Terrace/Park Ave.', exit: 'Sòti nan Park Ave.' },
+AR: { servicesOffered: 'خدمات مجتمعية تشمل مساعدة الهجرة.', serviceArea: 'جزيرة ستاتن، مدينة نيويورك', transit: 'خذ الحافلة S48/S98 إلى Richmond Terrace/Park Ave.', exit: 'اخرج عند Park Ave.' } },
+'la-lafla': {
+ES: { servicesOffered: 'Servicios legales de inmigración completos, incluida representación ante el Tribunal de Inmigración y la BIA.', eligibility: 'Residentes de bajos ingresos.', serviceArea: 'Condados de Los Ángeles y Orange' },
+ZH: { servicesOffered: '全面的移民法律服务，包括在移民法院和 BIA 的代理。', eligibility: '低收入居民。', serviceArea: '洛杉矶县和橙县' },
+HT: { servicesOffered: 'Sèvis legal imigrasyon konplè, enkli reprezantasyon devan Tribinal Imigrasyon ak BIA.', eligibility: 'Rezidan ki gen revni ba.', serviceArea: 'Konte Los Angeles ak Orange' },
+AR: { servicesOffered: 'خدمات قانونية كاملة للهجرة تشمل التمثيل أمام محكمة الهجرة وBIA.', eligibility: 'السكان ذوو الدخل المنخفض.', serviceArea: 'مقاطعتا لوس أنجلوس وأورانج' } },
+'la-advancing-justice': {
+ES: { servicesOffered: 'Servicios de inmigración, incluida representación judicial: ajuste, DACA, peticiones familiares, naturalización, defensa contra deportación, T/U/VAWA.', serviceArea: 'Área de Los Ángeles' },
+ZH: { servicesOffered: '移民服务，包括法院代理：调整身份、DACA、家庭申请、入籍、驱逐辩护、T/U/VAWA。', serviceArea: '洛杉矶地区' },
+HT: { servicesOffered: 'Sèvis imigrasyon, enkli reprezantasyon nan tribinal: ajisteman, DACA, petisyon fanmi, natiralizasyon, defans depòtasyon, T/U/VAWA.', serviceArea: 'Zòn Los Angeles' },
+AR: { servicesOffered: 'خدمات هجرة تشمل التمثيل أمام المحكمة: تعديل الوضع، DACA، التماسات الأسرة، التجنس، الدفاع ضد الترحيل، T/U/VAWA.', serviceArea: 'منطقة لوس أنجلوس' } },
+'oh-cris': {
+ES: { servicesOffered: 'Servicios legales de inmigración, incluida representación: asilo, peticiones familiares, naturalización, DACA, TPS, U/VAWA. Nota: CRIS actualmente no maneja casos ante el tribunal de inmigración.', serviceArea: 'Ohio central' },
+ZH: { servicesOffered: '移民法律服务，包括代理：庇护、家庭申请、入籍、DACA、TPS、U/VAWA。注意：CRIS 目前不处理移民法院案件。', serviceArea: '俄亥俄州中部' },
+HT: { servicesOffered: 'Sèvis legal imigrasyon, enkli reprezantasyon: azil, petisyon fanmi, natiralizasyon, DACA, TPS, U/VAWA. Nòt: CRIS pa trete ka tribinal imigrasyon kounye a.', serviceArea: 'Ohio santral' },
+AR: { servicesOffered: 'خدمات قانونية للهجرة تشمل التمثيل: اللجوء، التماسات الأسرة، التجنس، DACA، TPS، U/VAWA. ملاحظة: لا تتعامل CRIS حاليًا مع قضايا محكمة الهجرة.', serviceArea: 'وسط أوهايو' } },
+'oh-lasco': {
+ES: { servicesOffered: 'Ayuda legal civil gratuita, incluidos asuntos relacionados con inmigración.', eligibility: 'Residentes de bajos ingresos y adultos mayores.', serviceArea: 'Condados de Franklin y Madison (oficina de Columbus)' },
+ZH: { servicesOffered: '免费民事法律帮助，包括与移民相关的事务。', eligibility: '低收入居民和老年人。', serviceArea: '富兰克林县和麦迪逊县（哥伦布办公室）' },
+HT: { servicesOffered: 'Èd legal sivil gratis, enkli zafè ki gen rapò ak imigrasyon.', eligibility: 'Rezidan ki gen revni ba ak granmoun aje.', serviceArea: 'Konte Franklin ak Madison (biwo Columbus)' },
+AR: { servicesOffered: 'مساعدة قانونية مدنية مجانية تشمل مسائل متعلقة بالهجرة.', eligibility: 'السكان ذوو الدخل المنخفض وكبار السن.', serviceArea: 'مقاطعتا فرانكلين وماديسون (مكتب كولومبوس)' } },
+'tx-catholic-charities-houston': {
+ES: { servicesOffered: 'Servicios legales de inmigración completos, incluida representación ante el Tribunal de Inmigración.', serviceArea: 'Gran Houston / arquidiócesis de Galveston-Houston' },
+ZH: { servicesOffered: '全面的移民法律服务，包括在移民法院的代理。', serviceArea: '大休斯顿地区 / 加尔维斯顿-休斯顿总教区' },
+HT: { servicesOffered: 'Sèvis legal imigrasyon konplè, enkli reprezantasyon devan Tribinal Imigrasyon.', serviceArea: 'Gran Houston / achidyosèz Galveston-Houston' },
+AR: { servicesOffered: 'خدمات قانونية كاملة للهجرة تشمل التمثيل أمام محكمة الهجرة.', serviceArea: 'هيوستن الكبرى / أبرشية غالفستون-هيوستن' } },
+'tx-tahirih-houston': {
+ES: { servicesOffered: 'Representación legal gratuita: asilo, VAWA, visas T/U, SIJS; además de servicios sociales.', eligibility: 'Sobrevivientes inmigrantes de violencia de género (principalmente mujeres y niñas). No son servicios generales de inmigración.', serviceArea: 'Área de Houston' },
+ZH: { servicesOffered: '免费法律代理：庇护、VAWA、T/U 签证、SIJS；另有社会服务。', eligibility: '基于性别的暴力移民幸存者（主要是妇女和女孩）。不是一般移民服务。', serviceArea: '休斯顿地区' },
+HT: { servicesOffered: 'Reprezantasyon legal gratis: azil, VAWA, viza T/U, SIJS; plis sèvis sosyal.', eligibility: 'Sivivan imigran vyolans ki baze sou sèks (pwensipalman fanm ak tifi). Se pa sèvis imigrasyon jeneral.', serviceArea: 'Zòn Houston' },
+AR: { servicesOffered: 'تمثيل قانوني مجاني: اللجوء، VAWA، تأشيرات T/U، SIJS؛ بالإضافة إلى خدمات اجتماعية.', eligibility: 'الناجيات المهاجرات من العنف القائم على النوع الاجتماعي (بشكل أساسي النساء والفتيات). ليست خدمات هجرة عامة.', serviceArea: 'منطقة هيوستن' } },
+'fl-ai-justice': {
+ES: { servicesOffered: 'Servicios legales directos gratuitos: asilo, menores no acompañados, sobrevivientes de trata/violencia doméstica, detención.', eligibility: 'Inmigrantes de bajos ingresos.', serviceArea: 'Condados de Miami-Dade y Broward' },
+ZH: { servicesOffered: '免费直接法律服务：庇护、无人陪伴儿童、贩运/家庭暴力幸存者、拘留。', eligibility: '低收入移民。', serviceArea: '迈阿密-戴德县和布劳沃德县' },
+HT: { servicesOffered: 'Sèvis legal dirèk gratis: azil, timoun ki pa akonpaye, sivivan trafik/vyolans domestik, detansyon.', eligibility: 'Imigran ki gen revni ba.', serviceArea: 'Konte Miami-Dade ak Broward' },
+AR: { servicesOffered: 'خدمات قانونية مباشرة مجانية: اللجوء، الأطفال غير المصحوبين، الناجون من الاتجار/العنف الأسري، الاحتجاز.', eligibility: 'المهاجرون ذوو الدخل المنخفض.', serviceArea: 'مقاطعتا ميامي-ديد وبراورد' } },
+'fl-ccls-miami': {
+ES: { servicesOffered: 'Servicios de inmigración pro bono/de bajo costo, incluida representación ante USCIS, tribunales de inmigración y la BIA.', serviceArea: 'Condados de Broward, Miami-Dade y Monroe' },
+ZH: { servicesOffered: '无偿/低费用移民服务，包括在 USCIS、移民法院和 BIA 的代理。', serviceArea: '布劳沃德县、迈阿密-戴德县和门罗县' },
+HT: { servicesOffered: 'Sèvis imigrasyon pro bono/ti pri, enkli reprezantasyon devan USCIS, Tribinal Imigrasyon, ak BIA.', serviceArea: 'Konte Broward, Miami-Dade, ak Monroe' },
+AR: { servicesOffered: 'خدمات هجرة مجانية/منخفضة التكلفة تشمل التمثيل أمام USCIS ومحاكم الهجرة وBIA.', serviceArea: 'مقاطعات براورد وميامي-ديد ومونرو' } },
+'il-nijc': {
+ES: { servicesOffered: 'Servicios legales de inmigración de bajo costo/gratuitos, incluida representación completa: asilo, SIJS, defensa contra deportación, VAWA/U/T, DACA, peticiones familiares, TPS, naturalización; mesa de ayuda gratuita del Tribunal de Inmigración.', eligibility: 'Inmigrantes de bajos ingresos; los residentes de Chicago pueden recibir servicios gratuitos a través del Fondo de Protección Legal de la Ciudad.', serviceArea: 'Illinois e Indiana' },
+ZH: { servicesOffered: '低费用/免费移民法律服务，包括全面代理：庇护、SIJS、驱逐辩护、VAWA/U/T、DACA、家庭申请、TPS、入籍；免费移民法院帮助台。', eligibility: '低收入移民；芝加哥居民可通过城市法律保护基金获得免费服务。', serviceArea: '伊利诺伊州和印第安纳州' },
+HT: { servicesOffered: 'Sèvis legal imigrasyon ti pri/gratis, enkli reprezantasyon konplè: azil, SIJS, defans depòtasyon, VAWA/U/T, DACA, petisyon fanmi, TPS, natiralizasyon; Biwo Èd Tribinal Imigrasyon gratis.', eligibility: 'Imigran ki gen revni ba; rezidan Chicago ka jwenn sèvis gratis atravè Fon Pwoteksyon Legal Vil la.', serviceArea: 'Illinois ak Indiana' },
+AR: { servicesOffered: 'خدمات قانونية للهجرة منخفضة التكلفة/مجانية تشمل تمثيلًا كاملًا: اللجوء، SIJS، الدفاع ضد الترحيل، VAWA/U/T، DACA، التماسات الأسرة، TPS، التجنس؛ مكتب مساعدة مجاني لمحكمة الهجرة.', eligibility: 'المهاجرون ذوو الدخل المنخفض؛ يمكن لسكان شيكاغو الحصول على خدمات مجانية عبر صندوق الحماية القانونية للمدينة.', serviceArea: 'إلينوي وإنديانا' } },
+'il-resurrection-project': {
+ES: { servicesOffered: 'Servicios legales de inmigración, incluida representación judicial: familiares, DACA, TPS, naturalización, defensa contra deportación, U/T/VAWA/SIJS/asilo.', serviceArea: 'Área de Chicago' },
+ZH: { servicesOffered: '移民法律服务，包括法院代理：家庭类、DACA、TPS、入籍、驱逐辩护、U/T/VAWA/SIJS/庇护。', serviceArea: '芝加哥地区' },
+HT: { servicesOffered: 'Sèvis legal imigrasyon, enkli reprezantasyon nan tribinal: fanmi, DACA, TPS, natiralizasyon, defans depòtasyon, U/T/VAWA/SIJS/azil.', serviceArea: 'Zòn Chicago' },
+AR: { servicesOffered: 'خدمات قانونية للهجرة تشمل التمثيل أمام المحكمة: الأسرة، DACA، TPS، التجنس، الدفاع ضد الترحيل، U/T/VAWA/SIJS/اللجوء.', serviceArea: 'منطقة شيكاغو' } },
+'ga-gain': {
+ES: { servicesOffered: 'Servicios legales de inmigración gratuitos, incluida representación directa: asilo, visas U/T, VAWA; reclutamiento y capacitación de abogados pro bono.', eligibility: 'SOLO solicitantes de asilo y sobrevivientes inmigrantes de delitos/persecución. No son servicios generales de inmigración.', serviceArea: 'Georgia (todo el estado)' },
+ZH: { servicesOffered: '免费移民法律服务，包括直接代理：庇护、U/T 签证、VAWA；无偿律师招募和培训。', eligibility: '仅限庇护申请者和犯罪/迫害的移民幸存者。不是一般移民服务。', serviceArea: '佐治亚州（全州）' },
+HT: { servicesOffered: 'Sèvis legal imigrasyon gratis, enkli reprezantasyon dirèk: azil, viza U/T, VAWA; rekritman ak fòmasyon avoka pro bono.', eligibility: 'SÈLMAN moun k ap chèche azil ak sivivan imigran krim/pèsekisyon. Se pa sèvis imigrasyon jeneral.', serviceArea: 'Georgia (tout eta a)' },
+AR: { servicesOffered: 'خدمات قانونية مجانية للهجرة تشمل تمثيلًا مباشرًا: اللجوء، تأشيرات U/T، VAWA؛ تجنيد وتدريب المحامين المتطوعين.', eligibility: 'طالبو اللجوء والناجون المهاجرون من الجريمة/الاضطهاد فقط. ليست خدمات هجرة عامة.', serviceArea: 'جورجيا (على مستوى الولاية)' } },
+'ga-laa': {
+ES: { servicesOffered: 'Servicios legales de inmigración asequibles: familiares, ajuste, proceso consular, DACA, TPS, naturalización, permisos de trabajo, VAWA, defensa contra deportación de no detenidos.', eligibility: 'Excluye visas de empleo/estudiante/turista y casos de detenidos.', serviceArea: 'Área de Atlanta' },
+ZH: { servicesOffered: '价格合理的移民法律服务：家庭类、调整身份、领事处理、DACA、TPS、入籍、工作许可、VAWA、未拘留驱逐辩护。', eligibility: '不包括就业/学生/旅游签证和被拘留案件。', serviceArea: '亚特兰大地区' },
+HT: { servicesOffered: 'Sèvis legal imigrasyon abòdab: fanmi, ajisteman, pwosesis konsila, DACA, TPS, natiralizasyon, pèmi travay, VAWA, defans depòtasyon pou moun ki pa nan detansyon.', eligibility: 'Li pa enkli viza travay/etidyan/touris ak ka detansyon.', serviceArea: 'Zòn Atlanta' },
+AR: { servicesOffered: 'خدمات قانونية للهجرة بأسعار معقولة: الأسرة، تعديل الوضع، المعالجة القنصلية، DACA، TPS، التجنس، تصاريح العمل، VAWA، الدفاع ضد ترحيل غير المحتجزين.', eligibility: 'يستثني تأشيرات العمل/الدراسة/السياحة وقضايا المحتجزين.', serviceArea: 'منطقة أتلانتا' } },
+'nyc-bronx-legal-services': {
+ES: { servicesOffered: 'Servicios legales civiles gratuitos; Unidad de Familia e Inmigración: visas U/T, VAWA, SIJS, asilo, defensa contra deportación, peticiones familiares, naturalización.', eligibility: 'Residentes del condado del Bronx de bajos ingresos.', serviceArea: 'Condado del Bronx' },
+ZH: { servicesOffered: '免费民事法律服务；家庭与移民部门：U/T 签证、VAWA、SIJS、庇护、驱逐辩护、家庭申请、入籍。', eligibility: '布朗克斯县低收入居民。', serviceArea: '布朗克斯县' },
+HT: { servicesOffered: 'Sèvis legal sivil gratis; Inite Fanmi ak Imigrasyon: viza U/T, VAWA, SIJS, azil, defans depòtasyon, petisyon fanmi, natiralizasyon.', eligibility: 'Rezidan Konte Bronx ki gen revni ba.', serviceArea: 'Konte Bronx' },
+AR: { servicesOffered: 'خدمات قانونية مدنية مجانية؛ وحدة الأسرة والهجرة: تأشيرات U/T، VAWA، SIJS، اللجوء، الدفاع ضد الترحيل، التماسات الأسرة، التجنس.', eligibility: 'سكان مقاطعة برونكس ذوو الدخل المنخفض.', serviceArea: 'مقاطعة برونكس' } },
+};
+
+export const NATIONAL_I18N: Record<string, Partial<Record<I18nLang, string>>> = {
+'ImmigrationLawHelp.org': {
+ES: 'Directorio Nacional de Servicios Legales de Inmigración — busque más de 1,000 proveedores sin fines de lucro de servicios legales de inmigración por código postal.',
+ZH: '全国移民法律服务目录——按邮政编码搜索 1,000 多家非营利移民法律服务提供者。',
+HT: 'Anyè Nasyonal Sèvis Legal Imigrasyon — chèche plis pase 1,000 founisè sèvis legal imigrasyon san bi likratif pa kòd postal.',
+AR: 'الدليل الوطني لخدمات الهجرة القانونية — ابحث في أكثر من 1,000 مقدم خدمات قانونية غير ربحي للهجرة حسب الرمز البريدي.' },
+'DOJ Recognized Organizations & Accredited Representatives': {
+ES: 'Lista del Departamento de Justicia de EE. UU. de organizaciones reconocidas y representantes acreditados (dominio público). EOIR no respalda a las organizaciones listadas.',
+ZH: '美国司法部认可组织和认可代表名单（公共领域）。EOIR 不对所列组织作背书。',
+HT: 'Lis Depatman Jistis Etazini òganizasyon rekonèt ak reprezantan akredite (domèn piblik). EOIR pa andose òganizasyon ki liste yo.',
+AR: 'قائمة وزارة العدل الأمريكية للمنظمات المعترف بها والممثلين المعتمدين (المجال العام). لا تؤيد EOIR المنظمات المدرجة.' },
+'LawHelp.org': {
+ES: 'Directorio estado por estado de proveedores gratuitos de ayuda legal.',
+ZH: '按州列出的免费法律援助提供者目录。',
+HT: 'Anyè eta pa eta founisè èd legal gratis.',
+AR: 'دليل حسب الولاية لمقدمي المساعدة القانونية المجانية.' },
+};
+
+/** The org's IRU explanatory prose in `lang` (EN original when absent). */
+export function localizedResourceText(org: ResourceOrg, field: 'servicesOffered' | 'eligibility' | 'serviceArea' | 'transit' | 'exit', lang: string): string {
+  const en = (org as any)[field] as string | undefined;
+  if (!lang || lang === 'EN') return en || '';
+  const tr = RESOURCE_I18N[org.id]?.[lang as I18nLang];
+  return (tr && tr[field]) || en || '';
+}
+
+export function localizedNationalDescription(dir: NationalDirectory, lang: string): string {
+  if (!lang || lang === 'EN') return dir.description;
+  return NATIONAL_I18N[dir.name]?.[lang as I18nLang] || dir.description;
+}
+
 /** All organizations in the dataset (for tests and auditing). */
 export function getAllOrgs(): ResourceOrg[] {
   return [...ALL_ORGS];

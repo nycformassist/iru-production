@@ -290,11 +290,15 @@ export function validateModelOutput(text) {
 
 /**
  * Localized framing for the fallback assessment (language-continuity
- * directive 2026-10-22). The framing prose is localized; the evidence
- * KB content it carries (target facts, alternatives, next actions from
- * lib/evidence.js) remains the KB's English text, exactly as the live
- * path's packet does — the model localizes KB-derived content in the
- * live path, the deterministic fallback cannot.
+ * directive 2026-10-22; KB localization completed in the G12 follow-up).
+ * The framing prose is localized here, and the evidence KB content it
+ * carries (target facts, alternatives, next actions from
+ * lib/evidence.js) arrives already localized: callers build gap records
+ * with buildGapRecords(min, reviews, lang), whose localizedKb() accessor
+ * returns the KB text in the applicant's language (EN originals for EN
+ * or any missing entry). In the live path the model still receives the
+ * EN gap records and localizes in its response; only the deterministic
+ * paths (this fallback and the packet) consume the localized records.
  */
 const FALLBACK_I18N = {
   EN: {
