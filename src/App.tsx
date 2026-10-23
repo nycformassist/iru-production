@@ -1,33 +1,38 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Globe, Printer, ArrowRight, ArrowLeft, CheckCircle2, Copy, Info } from 'lucide-react';
+import { Shield, Globe, Printer, ArrowRight, ArrowLeft, CheckCircle2, Copy, Info, ChevronRight } from 'lucide-react';
 import { motion } from 'framer-motion';
 
-import { LANGUAGES, UI_LABELS, PHASE_1_QUESTIONS, TRIAGE_QUESTION, PHASE_2_QUESTIONS, PHASE_3_QUESTIONS, NYC_RESOURCES, CONSULATES, PROXIES, NARRATIVE_STARTERS, USCIS_FORMS, FEE_SCHEDULE_AS_OF } from './constants';
+import { LANGUAGES, UI_LABELS, PHASE_1_QUESTIONS, TRIAGE_QUESTION, PHASE_2_QUESTIONS, PHASE_3_QUESTIONS, NYC_RESOURCES, CONSULATES, PROXIES, NARRATIVE_STARTERS, USCIS_FORMS, FEE_SCHEDULE_AS_OF, buildExecutiveSummary } from './constants';
 
 // Nationwide layered resource model (local → statewide → national → fallback).
-import { resolveResources, resolveResourcesForLocation, ResourceResult, ResourceOrg } from './resources';
+import { resolveResources, resolveResourcesForLocation, ResourceResult, ResourceOrg, localizedResourceText, localizedNationalDescription } from './resources';
 
 // Country-aware location model (directive §3).
-import { COUNTRIES, isUsCountry } from './location';
+import { COUNTRIES, isUsCountry, localizedCountryName } from './location';
 
 // Canonical fact record (directive §4) — one shared model for answers,
 // document extraction, corrections, the packet, and form preparation.
-import { createFactRecord, upsertFact, confirmFact, resolveConflict } from '../api/_lib/facts.js';
+import { createFactRecord, upsertFact, confirmFact, resolveConflict, overlayConsumerState, markOutputsFresh } from '../api/_lib/facts.js';
 // Form engine (directive §7): registry + mapper run client-side for the
 // review UI; the PDF itself is generated server-side from the same record.
-import { FORM_REGISTRY, getFormEntry } from '../api/_lib/forms/registry.js';
+import { FORM_REGISTRY, getFormEntry, localizedApplicability } from '../api/_lib/forms/registry.js';
 import { buildFillPlan, splitFullName } from '../api/_lib/formmap.js';
 // Personal Narrative as a first-class stage (successive directive §4):
 // chronology + issue analysis + applicant approval gate for form use.
 import { createNarrative, addNarrativeEvent, analyzeNarrative, approveNarrative, correctNarrativeEvent, confirmNarrativeEvent, narrativeForPacket } from '../api/_lib/narrative.js';
 import { readAnalyzeStream } from '../api/_lib/sse.js';
-import { selectForm, summaryForSelection } from '../api/_lib/formSelection.js';
+import { selectForm, summaryForSelection, emptyFormDraftStore, recordDraft, draftForForm, removeDraft, invalidateDrafts, invalidateDraftsForForms, withReviewChecks } from '../api/_lib/formSelection.js';
+// Draft↔fact-snapshot binding (defect-closure directive 2026-10-23,
+// Priority 1): the same module the server uses, so the hash computed
+// here over the current record is the hash the server bound the draft
+// to at generation.
+import { computeDraftSnapshotHash, draftFreshness, affectedFormsForMutation } from '../api/_lib/draftIntegrity.js';
 
 // B2C pricing + next steps (2026-10-21 directive): the SAME modules the
 // server enforces with, so what the consumer is shown is what the
 // server charges and what every output must contain.
 import { PRICING, SKUS, buildOffer, formatCents } from '../api/_lib/pricing.js';
-import { NEXT_STEPS_TITLE, PROFESSIONAL_HELP_POINTS, RESOURCE_SEARCH_PATHS } from '../api/_lib/nextsteps.js';
+import { NEXT_STEPS_TITLE, PROFESSIONAL_HELP_POINTS, RESOURCE_SEARCH_PATHS, buildPacketNextSteps as buildPacketNextStepsForLang } from '../api/_lib/nextsteps.js';
 
 const PAYWALL_UI_ON = () => {
   try { return (import.meta as any).env && (import.meta as any).env.VITE_PAYWALL_ENABLED === 'true'; }
@@ -49,7 +54,7 @@ function saveFormToken(formId: string, token: string) {
 
 // Evidence intelligence (server-side source of truth, pure module — no
 // secrets, no I/O). Imported read-only for honest packet rendering.
-import { EVIDENCE_KB, requiresLegalReview, legalReviewReason, nextActionFor } from '../api/_lib/evidence.js';
+import { EVIDENCE_KB, requiresLegalReview, legalReviewReason, nextActionFor, localizedKb } from '../api/_lib/evidence.js';
 
 /** Display names for the 9 evidence checklist keys (packet rendering). */
 const EVIDENCE_ITEM_NAMES: Record<string, string> = {
@@ -104,8 +109,30 @@ function stripForServer(answers: Record<string, string>): Record<string, string>
   return out;
 }
 
+export const SUPPORTED_LANGS = ['EN', 'ES', 'ZH', 'HT', 'AR'];
+export const LANG_STORAGE_KEY = 'iru_lang';
+
+/** Read the persisted language code (WS2). ONLY the language code is ever
+ * stored — never applicant data. Invalid/absent values fall back to EN. */
+export function loadPersistedLang(): string {
+  try {
+    const v = localStorage.getItem(LANG_STORAGE_KEY);
+    return v && SUPPORTED_LANGS.includes(v) ? v : 'EN';
+  } catch { return 'EN'; }
+}
+
+/** Persist ONLY the language code so a full reload (e.g. returning from
+ * checkout) restores the applicant's language. */
+export function persistLang(code: string) {
+  try { localStorage.setItem(LANG_STORAGE_KEY, code); } catch { /* storage unavailable */ }
+}
+
 export default function App() {
-  const [lang, setLang] = useState('EN');
+  const [lang, setLang] = useState(() => loadPersistedLang());
+
+  // Write on every language change (WS2). A failed analyze/checkout request
+  // never touches lang, so it cannot reset the persisted choice.
+  useEffect(() => { persistLang(lang); }, [lang]);
   const [stage, setStage] = useState<'LANG' | 'PHASE1' | 'TRIAGE' | 'PHASE2' | 'PHASE3' | 'PHASE4' | 'PHOTO' | 'ANALYZING' | 'PACKET'>('LANG');
   const [currentQ, setCurrentQ] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string>>({});
@@ -127,14 +154,38 @@ export default function App() {
   const [narrativeError, setNarrativeError] = useState('');
   const [narrativeDates, setNarrativeDates] = useState<Record<string, string>>({});
   const [selectedFormId, setSelectedFormId] = useState<string>('');
-  const [formSummary, setFormSummary] = useState<any>(null);
-  const [formPdfBase64, setFormPdfBase64] = useState<string>('');
+  // Per-form generated drafts (R5): each form's summary, PDF, draft
+  // metadata and final-review checklist state are retained in a store
+  // keyed by form id (api/_lib/formSelection.js), so switching forms
+  // never destroys another form's draft — switching back redisplays it
+  // without regeneration. Per-form version counters live in the same
+  // store and survive draft invalidation (R4a).
+  const [formDraftStore, setFormDraftStore] = useState<any>(() => emptyFormDraftStore());
   const [formBusy, setFormBusy] = useState(false);
   const [formError, setFormError] = useState('');
   const [formAnswers, setFormAnswers] = useState<Record<string, string>>({});
-  // Form review (B2C §5): version identification + final-review checklist.
-  const [formDraftMeta, setFormDraftMeta] = useState<{ draftId: string; generatedAt: string; version: number; formId: string } | null>(null);
-  const [reviewChecks, setReviewChecks] = useState<Record<number, boolean>>({});
+  // Facts correction editor (R4b): which fact row is being corrected.
+  const [editingFactId, setEditingFactId] = useState<string>('');
+  const [factEditValue, setFactEditValue] = useState<string>('');
+  // The visible draft is always the SELECTED form's retained draft; the
+  // render additionally gates it through summaryForSelection (D4).
+  const currentFormDraft: any = draftForForm(formDraftStore, selectedFormId);
+  const formSummary: any = currentFormDraft ? currentFormDraft.summary : null;
+  const formPdfBase64: string = currentFormDraft ? currentFormDraft.pdfBase64 : '';
+  const formDraftMeta: any = currentFormDraft ? currentFormDraft.meta : null;
+  const reviewChecks: Record<number, boolean> = currentFormDraft ? currentFormDraft.reviewChecks : {};
+  // Draft freshness (defect-closure P1): the selected form's retained
+  // draft is current ONLY while its bound fact snapshot still matches
+  // the current record. Recomputed on every render, so a draft whose
+  // facts changed by any path is never presented — or downloaded — as
+  // current, even if it was never withdrawn from the store.
+  const selectedFormEntry: any = selectedFormId ? getFormEntry(selectedFormId) : null;
+  const selectedDraftFreshness: string = currentFormDraft
+    ? draftFreshness(formDraftMeta, factRecord, selectedFormEntry)
+    : 'none';
+  const updateReviewChecks = (checks: Record<number, boolean>) => {
+    if (selectedFormId) setFormDraftStore((prev: any) => withReviewChecks(prev, selectedFormId, checks));
+  };
   // Purchase state for the offer panel (B2C §3), refreshed from the
   // server-side entitlement status of the tokens this browser holds.
   const [purchaseState, setPurchaseState] = useState<{ hasEvaluation: boolean; ownedForms: string[] }>({ hasEvaluation: false, ownedForms: [] });
@@ -150,25 +201,26 @@ export default function App() {
   /** Plain-text rendering of the structured assessment for the packet. */
   const renderAssessmentText = (a: any): string => {
     if (aiUnavailable) {
-      return 'AI analysis unavailable. Showing rule-based findings from your intake answers.\n\n' +
-        (a?.readinessSummary || 'The automated readiness review could not be completed. Please present your packet to a qualified legal professional.');
+      return t('pktAiUnavailable', 'AI analysis unavailable. Showing rule-based findings from your intake answers.') + '\n\n' +
+        (a?.readinessSummary || t('pktAiFallbackSummary', 'The automated readiness review could not be completed. Please present your packet to a qualified legal professional.'));
     }
-    if (!a) return 'Analysis could not be generated.';
+    if (!a) return t('pktAnalysisFailed', 'Analysis could not be generated.');
     const section = (title: string, items: string[]) =>
       items && items.length > 0 ? `${title}:\n${items.map(i => `\u2022 ${i}`).join('\n')}` : '';
     return [
       a.readinessSummary || '',
-      section('Information provided', a.factsProvided),
-      section('Missing information', a.missingInformation),
-      section('Contradictions to resolve', a.contradictions),
-      section('Suggested questions for your legal consultation', a.suggestedQuestions),
-      section('Uncertainty notes', a.uncertaintyNotes),
+      section(t('pktSectionInfo', 'Information provided'), a.factsProvided),
+      section(t('pktSectionMissing', 'Missing information'), a.missingInformation),
+      section(t('pktSectionContradictions', 'Contradictions to resolve'), a.contradictions),
+      section(t('pktSectionQuestions', 'Suggested questions for your legal consultation'), a.suggestedQuestions),
+      section(t('pktSectionUncertainty', 'Uncertainty notes'), a.uncertaintyNotes),
       a.notLegalAdvice || '',
     ].filter(Boolean).join('\n\n');
   };
 
   const ui = UI_LABELS[lang] || UI_LABELS['EN'];
-  // New-feature strings: translated for EN/ES; other languages fall back to English.
+  // UI strings are translated for every supported language (EN/ES/ZH/HT/AR);
+  // t() falls back to the given English string only if a key is ever missing.
   const t = (key: string, fallback: string) => (ui[key] as string) || fallback;
 
   /**
@@ -228,6 +280,40 @@ export default function App() {
       }
     }
     return rec;
+  };
+
+  // Fact ids the interview rebuild derives from questionnaire answers
+  // (buildFactRecord's answer set + location facts + derived name
+  // parts). overlayConsumerState uses this list to tell questionnaire
+  // facts apart from form-panel facts a rebuild cannot reproduce.
+  const ANSWER_DERIVED_FACT_IDS = [
+    'full_name', 'country_of_origin', 'country_of_birth', 'citizenship',
+    'gender', 'marital_status', 'entry_date', 'case_type',
+    'has_passport', 'has_i94', 'has_lease', 'has_persecution_proof',
+    'has_green_card', 'has_tax_transcripts', 'has_marriage_cert',
+    'has_proof_of_relationship', 'has_arrests', 'narrative_text',
+    'residence_country', 'residence_city', 'residence_region',
+    'residence_postal_code', 'residence_street',
+    'family_name', 'given_name', 'middle_name',
+  ];
+
+  /**
+   * The answers every output must be computed from (defect-closure
+   * Priority 2): the questionnaire answers with canonical-record
+   * corrections overlaid. A correction outranks the original answer —
+   * in the analysis request, the readiness score, and the packet — so
+   * a corrected value can never be silently replaced by the older
+   * questionnaire answer it corrected.
+   */
+  const answersWithCorrections = (ans: Record<string, string>, rec: any) => {
+    if (!rec || !rec.facts) return ans;
+    const out = { ...ans };
+    for (const fact of Object.values<any>(rec.facts)) {
+      if (fact && fact.source === 'correction' && typeof fact.value === 'string' && fact.value !== '') {
+        out[fact.id] = fact.value;
+      }
+    }
+    return out;
   };
 
   const getQuestionsForStage = () => {
@@ -316,6 +402,7 @@ export default function App() {
           imageBase64,
           mimeType: photoFile.type || 'image/jpeg',
           relatedEvidenceKey: photoEvidenceKey || undefined,
+          lang,
         }),
       });
       if (!response.ok) throw new Error(`Server error: ${response.status}`);
@@ -347,33 +434,40 @@ export default function App() {
     setResourceResult(null);
     setFactRecord(null);
     setSelectedFormId('');
-    setFormSummary(null);
-    setFormPdfBase64('');
     setFormError('');
     setFormAnswers({});
     setPhotoEvidenceKey('');
     setConsulate(null);
     setResources([]);
     setCopied(false);
-    setFormDraftMeta(null);
-    setReviewChecks({});
+    // Complete reset: every form's drafts AND version counters clear.
+    setFormDraftStore(emptyFormDraftStore());
+    setEditingFactId('');
     setPurchaseState({ hasEvaluation: false, ownedForms: [] });
   };
 
   // ── Facts: consumer confirmation / conflict resolution / correction (§8).
   // Every mutation goes through the canonical record; derived outputs are
   // marked stale by the record itself and the UI offers regeneration.
+  // Draft invalidation on mutation (defect-closure directive
+  // 2026-10-23, P1 req 6 / P2 req 7): a mutation withdraws only the
+  // drafts whose bound fact snapshot it actually changed — a draft
+  // for an unrelated form, built from unaffected facts, stays
+  // available. When the affected set cannot be determined, EVERY
+  // draft is withdrawn (the safe default). Per-form version counters
+  // always survive (R4a): a regenerated draft is numbered as that
+  // form's next version, never restarted at 1. Defense in depth: any
+  // draft that somehow remains despite a changed snapshot is caught
+  // by the render-time freshness check (draftFreshness) and is never
+  // presented or downloaded as current.
   const applyFactMutation = (mutate: (rec: any) => void) => {
     if (!factRecord) return;
     const next = JSON.parse(JSON.stringify(factRecord));
     mutate(next);
     setFactRecord(next);
-    // A previously generated form draft no longer matches the record:
-    // it is stale, so it is withdrawn and the review state resets.
-    setFormSummary(null);
-    setFormPdfBase64('');
-    setFormDraftMeta(null);
-    setReviewChecks({});
+    const affected = affectedFormsForMutation(factRecord, next, FORM_REGISTRY);
+    setFormDraftStore((prev: any) => (affected === null ? invalidateDrafts(prev) : invalidateDraftsForForms(prev, affected)));
+    setEditingFactId('');
   };
 
   const handleConfirmFact = (factId: string) => {
@@ -416,8 +510,7 @@ export default function App() {
       const next = JSON.parse(JSON.stringify(factRecord));
       approveNarrative(next.narrative, next, new Date().toISOString());
       setFactRecord(next);
-      setFormSummary(null);
-      setFormPdfBase64('');
+      setFormDraftStore((prev: any) => invalidateDrafts(prev));
       setNarrativeError('');
     } catch (e: any) {
       setNarrativeError(String((e && e.message) || e));
@@ -439,8 +532,9 @@ export default function App() {
     if (!selectedFormId || !factRecord || formBusy) return;
     setFormBusy(true);
     setFormError('');
-    setFormSummary(null);
-    setFormPdfBase64('');
+    // Generating supersedes this form's previous draft (other forms'
+    // retained drafts are untouched — R5).
+    setFormDraftStore((prev: any) => removeDraft(prev, selectedFormId));
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       // The entitlement that covers THIS form (B2C scoped grants), with
@@ -448,28 +542,44 @@ export default function App() {
       const formTokens = loadFormTokens();
       const savedToken = formTokens[selectedFormId] || sessionStorage.getItem('iru_entitlement_token');
       if (savedToken) headers['x-entitlement-token'] = savedToken;
+      // Freshness presentation (defect-closure P1): present the
+      // snapshot hash of the record exactly as this interface holds
+      // it; the server refuses (409, 'stale-fact-snapshot') if the
+      // record it receives does not match — it never binds a draft
+      // to facts the applicant is not looking at.
+      const expectedSnapshotHash = selectedFormEntry ? (computeDraftSnapshotHash(factRecord, selectedFormEntry) || '') : '';
       const resp = await fetch('/api/generate-form', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ formId: selectedFormId, factRecord }),
+        body: JSON.stringify({ formId: selectedFormId, factRecord, lang, expectedSnapshotHash }),
       });
       const data = await resp.json().catch(() => null);
       if (!resp.ok || !data || !data.ok) {
-        throw new Error((data && data.error) || `Server error: ${resp.status}`);
+        // Server refusals carry machine-readable reason codes; the
+        // applicant sees the message in their own language, never raw
+        // server text.
+        const reason = data && data.reason;
+        if (reason === 'narrative-not-approved') throw new Error(t('errNarrativeGate', 'Your story (personal narrative) has not been approved yet. Review and approve it in the "Your Story" section first — IRU prepares form drafts only from information you have reviewed and approved.'));
+        if (reason === 'stale-fact-snapshot') throw new Error(t('errStaleSnapshot', 'Your information changed while this draft was being prepared, so it was not generated from out-of-date information. Review your current information and generate the draft again.'));
+        if (resp.status === 402) throw new Error(t('errEntitlementRequired', 'A paid entitlement covering this form is required to generate its draft, or that form has already been delivered.'));
+        throw new Error(t('errFormUnavailable', 'Form generation unavailable. Please try again later.'));
       }
-      setFormSummary(data.summary);
-      setFormPdfBase64(data.pdfBase64);
       // Version identification (B2C §5.C): every generation is a new,
-      // distinguishable draft; only the latest is current.
-      setFormDraftMeta((prev) => ({
+      // distinguishable draft of THIS form, numbered from the form's
+      // own surviving counter (R4a); only the latest is current. The
+      // draft is recorded under its form id, so it survives switching
+      // to another form and back (R5).
+      setFormDraftStore((prev: any) => recordDraft(prev, selectedFormId, {
+        summary: data.summary,
+        pdfBase64: data.pdfBase64,
         draftId: data.draftId || '',
         generatedAt: data.generatedAt || new Date().toISOString(),
-        version: (prev && prev.formId === selectedFormId ? prev.version : 0) + 1,
-        formId: selectedFormId,
+        // The server-issued binding: this draft is current only while
+        // the record's snapshot hash still equals it (defect-closure P1).
+        snapshotHash: data.factSnapshotHash || '',
       }));
-      setReviewChecks({});
     } catch (e: any) {
-      setFormError(e && e.message ? e.message : 'Form generation unavailable.');
+      setFormError(e && e.message ? e.message : t('errFormUnavailable', 'Form generation unavailable. Please try again later.'));
     } finally {
       setFormBusy(false);
     }
@@ -491,7 +601,12 @@ export default function App() {
       if (opts && opts.prerequisiteToken) body.entitlementToken = opts.prerequisiteToken;
       const resp = await fetch('/api/checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const data = await resp.json().catch(() => null);
-      if (!resp.ok || !data || !data.checkoutUrl) throw new Error((data && data.error) || 'Checkout unavailable.');
+      if (!resp.ok || !data || !data.checkoutUrl) {
+        const reason = data && data.reason;
+        if (reason === 'evaluation-required') throw new Error(t('errEvaluationRequired', 'The $1 evaluation purchase is required first — its payment is credited toward this total.'));
+        if (reason === 'already-purchased') throw new Error(t('errAlreadyPurchased', 'This purchase has already been completed. A second charge would duplicate it.'));
+        throw new Error(t('errCheckoutUnavailable', 'Checkout unavailable. Please try again later.'));
+      }
       // Keep the buyer's credential(s) for the return + later delivery.
       if (data.sku === SKUS.EVALUATION) {
         sessionStorage.setItem('iru_evaluation_token', data.entitlementToken);
@@ -543,6 +658,10 @@ export default function App() {
 
   const downloadFormPdf = () => {
     if (!formPdfBase64) return;
+    // Freshness gate (defect-closure P1): a retained draft whose bound
+    // fact snapshot no longer matches the current record is stale (or
+    // unbound) and is never downloaded as a current deliverable.
+    if (selectedDraftFreshness !== 'current') return;
     const bytes = Uint8Array.from(atob(formPdfBase64), (c) => c.charCodeAt(0));
     const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
     const a = document.createElement('a');
@@ -554,34 +673,48 @@ export default function App() {
 
   const handleInterviewComplete = async () => {
     setStage('ANALYZING');
+    // One canonical fact record for the packet and form preparation (§4).
+    // A rebuild must never discard consumer state (defect-closure
+    // Priority 2): the previous record's corrections, unresolved
+    // conflicts, confirmations, form-panel facts, and narrative
+    // approvals are overlaid onto the rebuilt record under the defined
+    // precedence in api/_lib/facts.js (overlayConsumerState) — a
+    // correction can never be silently overwritten by the original
+    // questionnaire answer it corrected.
+    const builtRecord = buildFactRecord(answers, imageReview);
+    const record = factRecord
+      ? overlayConsumerState(builtRecord, factRecord, { answerFactIds: ANSWER_DERIVED_FACT_IDS }, new Date().toISOString()).record
+      : builtRecord;
+    setFactRecord(record);
+    // Every output of this run is computed from the corrected answers:
+    // corrections outrank the original questionnaire answers in
+    // resource matching, the analysis request, and the packet.
+    const effectiveAnswers = answersWithCorrections(answers, record);
     // Country-aware layered resolution (§3.3): ZIP/postal selects resources
     // only — it never gates the federal readiness workflow. Non-U.S. users
     // get honestly-labeled national directories, never a U.S. org as "local".
-    const residenceCountry = answers.residence_country || 'US';
+    const residenceCountry = effectiveAnswers.residence_country || 'US';
     const result = resolveResourcesForLocation({
       country: residenceCountry,
-      postalCode: residenceCountry === 'US' ? (answers.zip_code || '') : (answers.residence_postal_code || ''),
-      region: answers.residence_region || '',
-      city: answers.residence_city || '',
+      postalCode: residenceCountry === 'US' ? (effectiveAnswers.zip_code || '') : (effectiveAnswers.residence_postal_code || ''),
+      region: effectiveAnswers.residence_region || '',
+      city: effectiveAnswers.residence_city || '',
     });
     setResourceResult(result);
-    // One canonical fact record for the packet and form preparation (§4).
-    const record = buildFactRecord(answers, imageReview);
-    setFactRecord(record);
     setIsNycCoverage(result.isNycCoverage);
     // Flatten verified orgs for the packet renderer (local first, then statewide).
     setResources([...result.local, ...result.statewide]);
 
-    const country = (answers.country_of_origin || '').toLowerCase().trim();
+    const country = (effectiveAnswers.country_of_origin || '').toLowerCase().trim();
     if (country && CONSULATES[country]) setConsulate(CONSULATES[country]);
 
     try {
       const narrativeStarters = NARRATIVE_STARTERS
-        .filter(s => answers[s.id] === 'yes')
+        .filter(s => effectiveAnswers[s.id] === 'yes')
         .map(s => s.labels['EN']);
 
       // Privacy: strip direct identifiers before any network call.
-      const serverAnswers = stripForServer(answers);
+      const serverAnswers = stripForServer(effectiveAnswers);
 
       // Client-side timeout: never spin forever on a hung stream.
       const controller = new AbortController();
@@ -619,6 +752,12 @@ export default function App() {
         setAiUnavailable(true);
       }
       setAssessment(finalAssessment);
+      // The regenerated assessment was computed from the current
+      // record — including every overlaid correction — so the
+      // record's derived outputs are fresh again. (On failure the
+      // catch below leaves outputsStale set: the banner keeps
+      // offering the re-run.)
+      setFactRecord((prev: any) => (prev ? markOutputsFresh(JSON.parse(JSON.stringify(prev)), new Date().toISOString()) : prev));
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') {
         console.error('AI request timed out after 90s');
@@ -632,27 +771,33 @@ export default function App() {
   };
 
   const generateExecutiveSummary = () => {
-    const name = answers.full_name || "The applicant";
-    const country = answers.country_of_origin || "their home country";
-    const caseType = answers.case_type === 'asylum' ? "asylum" : answers.case_type === 'family' ? "a family petition" : "citizenship";
-    const entry = answers.entry_date ? `entered the United States on ${answers.entry_date}` : "entered the United States on an unspecified date";
-    const residenceCountry = answers.residence_country || 'US';
-    const residence = residenceCountry === 'US'
-      ? `They reside in the ${answers.zip_code || 'unspecified'} zip code area`
-      : `They currently live in ${answers.residence_city ? answers.residence_city + ', ' : ''}${residenceCountry}`;
-    return `${name}, originally from ${country}, ${entry} and is currently seeking ${caseType}. ${residence} and have completed an initial evidence audit to prepare for their legal consultation.`;
+    // Built from the corrected answers (defect-closure P2): a corrected
+    // name/country/date is what the summary reports.
+    const eff = answersWithCorrections(answers, factRecord);
+    return buildExecutiveSummary(lang, {
+    name: eff.full_name || undefined,
+    country: eff.country_of_origin || undefined,
+    caseType: eff.case_type,
+    entryDate: eff.entry_date || undefined,
+    residenceCountry: eff.residence_country || 'US',
+    zip: eff.zip_code || undefined,
+    city: eff.residence_city || undefined,
+    });
   };
 
   const calculateReadinessScore = () => {
+    // Scored from the corrected answers (defect-closure P2): a fact
+    // correction changes the score exactly as it changes the analysis.
+    const eff = answersWithCorrections(answers, factRecord);
     let score = 0;
     let total = 0;
     const check = (key: string) => {
-      if (answers[key]) {
+      if (eff[key]) {
         total++;
-        if (answers[key] === 'yes') {
+        if (eff[key] === 'yes') {
           score++;
         } else if (PROXIES[key]) {
-          const selectedProxies = PROXIES[key].items.filter((i: any) => answers[i.id] === 'yes');
+          const selectedProxies = PROXIES[key].items.filter((i: any) => eff[i.id] === 'yes');
           if (selectedProxies.length > 0) {
             score += 0.5;  // Secondary docs carry half weight vs primary
           }
@@ -681,70 +826,65 @@ export default function App() {
    * "YOUR NEXT STEPS — HOW TO USE THIS REPORT" for the readiness packet
    * (B2C directive §6). Tailored to this session's actual findings;
    * ZIP-independent; verified resources are distinguished from general
-   * search paths; no eligibility determination, no guarantee. English
-   * body text, following the packet's established pattern for guidance
-   * content (the evidence-gap knowledge base is likewise English with
-   * a note); UI chrome strings go through t().
+   * search paths; no eligibility determination, no guarantee. Body
+   * text is rendered in the applicant's selected language by
+   * api/_lib/nextsteps.js — the same builder the form completion
+   * summary uses, so screen, packet, and form guidance never diverge.
+   * (The evidence-gap knowledge base content is localized via
+   * localizedKb() in the packet gap section — see generateHtml.)
    */
   const buildPacketNextSteps = () => {
-    const conflicts = factRecord ? Object.values(factRecord.facts).filter((f: any) => f.status === 'conflicted').length : 0;
-    const unconfirmed = factRecord ? Object.values(factRecord.facts).filter((f: any) => f.status === 'reported-unconfirmed').length : 0;
+    // Fact-status strings are the canonical FACT_STATUSES from
+    // api/_lib/facts.js ('conflicting', 'extracted-unconfirmed').
+    // (Value-upgrade fix 2026-10-23: this wrapper previously counted
+    // 'conflicted' / 'reported-unconfirmed', which are not fact
+    // statuses — the packet's conflict/unconfirmed tailoring could
+    // therefore never fire in the real client flow.)
+    const conflictFacts = factRecord ? Object.values(factRecord.facts).filter((f: any) => f.status === 'conflicting') : [];
+    const conflicts = conflictFacts.length;
+    const conflictLabels = conflictFacts.map((f: any) => (ui.factLabels && ui.factLabels[f.id]) || f.id);
+    const unconfirmed = factRecord ? Object.values(factRecord.facts).filter((f: any) => f.status === 'extracted-unconfirmed').length : 0;
     const pct = assessment && typeof assessment.readinessPercent === 'number' ? assessment.readinessPercent : null;
-    const understand: string[] = [
-      `This report organizes the information you provided for your ${(assessment && assessment.caseType) || answers.case_type || 'immigration'} preparation and identifies what still needs attention. It is based only on your answers and documents — nothing was independently verified.`,
-      ...(pct !== null
-        ? [`Your readiness estimate is ${pct}%. It is an approximate document-completeness heuristic — not a probability, a score of your chances, or a prediction of any outcome.`]
-        : []),
-      `The evidence review identified ${Object.keys(EVIDENCE_KB).filter((k) => answers[k] && answers[k] !== 'yes').length} item(s) to address, listed above in priority order.`,
-      ...(conflicts > 0 ? [`${conflicts} item(s) in your information are in conflict between sources and are listed above — resolve them before relying on any output.`] : []),
-      ...(unconfirmed > 0 ? [`${unconfirmed} value(s) came from your documents and still need your confirmation.`] : []),
-      'This report does not decide whether you are eligible for any immigration benefit, and it does not predict or guarantee any outcome.',
-      'Preparation assistance is not legal advice, and IRU is not a law firm. Nothing has been signed, filed, or submitted on your behalf.',
-    ];
-    const review: string[] = formSummary
-      ? [
-          `Your latest form output is the ${formSummary.formId} draft (Edition ${formSummary.editionDate}), labeled "IRU Pre-filled Draft — Review and Correct". Earlier downloads of the same form are stale once your information changes — use only the latest version.`,
-          `Compare the draft with the "Official Blank Form — Reference Copy" (${formSummary.formId}, Edition ${formSummary.editionDate}${formSummary.blankForm ? `, ${formSummary.blankForm.sourceUrl}` : ''}) and with your own records before any use.`,
-          'Confirm the current edition, instructions, fee, and filing address on the official form page before you use the form — official requirements change.',
-        ]
-      : [
-          'No form draft was generated in this session. If you prepare a form, compare the pre-filled draft with the official blank form and your own records before any use, and confirm the current edition, instructions, fee, and filing address on the official USCIS form page.',
-        ];
     const verifiedOrgs = resourceResult && !resourceResult.isInternational ? (resourceResult.local || []) : [];
-    const resourcesIntro = verifiedOrgs.length > 0
-      ? 'The organizations under "Local Resources" above were matched by IRU to the location you provided. IRU does not guarantee their availability, cost, capacity, or acceptance of your case. The directories below are additional general starting points.'
-      : resourceResult && resourceResult.isInternational
-        ? 'You are located outside IRU\u2019s U.S. resource coverage area, so no U.S. organization is presented as local to you. Use the general directories below to find qualified help that serves your situation, and confirm any deadline or filing question with an official source or a qualified professional.'
-        : 'No verified local organization was matched for this report. The directories below are general starting points for finding qualified help — inclusion is not a recommendation, and availability is not guaranteed.';
-    const checklist: string[] = [
-      ...(conflicts > 0 ? [`Resolve the ${conflicts} conflicting item(s) in your information, then regenerate any affected outputs.`] : []),
-      ...(unconfirmed > 0 ? [`Confirm the ${unconfirmed} document-provided value(s) marked as needing confirmation.`] : []),
-      'Work through the evidence gaps above in priority order; for each one, use the listed primary evidence or an accepted alternative.',
-      ...(formSummary
-        ? [`Review your ${formSummary.formId} draft field by field against the official blank form and your records; correct mistakes in your information and regenerate so you hold only the latest version.`]
-        : ['If you prepare a form draft, review it field by field before any use.']),
-      'Confirm the current form editions, instructions, fees, and any deadline that may apply to you with an official source (uscis.gov) or a qualified professional.',
-      'If you consult an attorney or accredited representative, bring this report and your latest draft version.',
-    ];
-    return { title: NEXT_STEPS_TITLE, understand, review, professionalHelp: PROFESSIONAL_HELP_POINTS as string[], resourcesIntro, searchPaths: RESOURCE_SEARCH_PATHS, checklist };
+    return buildPacketNextStepsForLang({
+      caseType: (assessment && assessment.caseType) || answers.case_type,
+      readinessPercent: pct,
+      evidenceItemCount: Object.keys(EVIDENCE_KB).filter((k) => { const eff = answersWithCorrections(answers, factRecord); return eff[k] && eff[k] !== 'yes'; }).length,
+      conflicts,
+      unconfirmed,
+      form: formSummary ? {
+        id: formSummary.formId,
+        editionDate: formSummary.editionDate,
+        sourceUrl: formSummary.blankForm ? formSummary.blankForm.sourceUrl : '',
+      } : null,
+      resourcesKind: verifiedOrgs.length > 0 ? 'verified' : resourceResult && resourceResult.isInternational ? 'international' : 'none',
+      localResourcesName: ui.localResources,
+      conflictLabels,
+    }, lang);
   };
 
   const generateHtml = () => {
+    const htmlLang = ({ EN: 'en', ES: 'es', ZH: 'zh', HT: 'ht', AR: 'ar' } as Record<string, string>)[lang] || 'en';
     const { score, total } = calculateReadinessScore();
     const readinessPercent = Math.round((score / total) * 100);
 
     const resourcesHtml = resources.map((res: ResourceOrg) => {
-      const layerLabel = res.layer === 'statewide' ? 'Statewide' : (res.borough || 'Local');
-      const eligibilityHtml = res.eligibility
-        ? `<p style="font-size: 0.875rem; color: #92400e; background-color: #fef3c7; padding: 0.5rem 0.75rem; border-radius: 0.375rem; margin: 0 0 0.75rem 0;"><strong>Eligibility:</strong> ${escapeHtml(res.eligibility)}</p>`
+      const layerLabel = res.layer === 'statewide' ? t('pktLayerStatewide', 'Statewide') : (res.borough || t('pktLayerLocal', 'Local'));
+      const eligibilityText = localizedResourceText(res, 'eligibility', lang);
+      const servicesText = localizedResourceText(res, 'servicesOffered', lang);
+      const serviceAreaText = localizedResourceText(res, 'serviceArea', lang);
+      const transitText = localizedResourceText(res, 'transit', lang);
+      const exitText = localizedResourceText(res, 'exit', lang);
+      const eligibilityHtml = eligibilityText
+        ? `<p style="font-size: 0.875rem; color: #92400e; background-color: #fef3c7; padding: 0.5rem 0.75rem; border-radius: 0.375rem; margin: 0 0 0.75rem 0;"><strong>${escapeHtml(t('pktEligibility', 'Eligibility'))}:</strong> ${escapeHtml(eligibilityText)}</p>`
         : '';
-      const servicesHtml = res.servicesOffered
-        ? `<p style="font-size: 0.875rem; color: #334155; margin: 0 0 0.75rem 0;"><strong>Services:</strong> ${escapeHtml(res.servicesOffered)}</p>`
+      const servicesHtml = servicesText
+        ? `<p style="font-size: 0.875rem; color: #334155; margin: 0 0 0.75rem 0;"><strong>${escapeHtml(t('pktServices', 'Services'))}:</strong> ${escapeHtml(servicesText)}</p>`
         : '';
-      const transitHtml = (res.transit || res.exit)
+      const transitHtml = (transitText || exitText)
         ? `<div style="background-color: white; padding: 1rem; border-radius: 0.5rem; border: 1px solid #c7d2fe; margin-bottom: 1rem;">
-          ${res.transit ? `<p style="font-size: 0.875rem; font-weight: 600; color: #312e81; margin: 0 0 0.5rem 0;">🚇 ${escapeHtml(res.transit)}</p>` : ''}
-          ${res.exit ? `<p style="font-size: 0.875rem; font-weight: 500; color: #475569; margin: 0;">🚶 ${escapeHtml(ui.subwayExit)}: ${escapeHtml(res.exit)}</p>` : ''}
+          ${transitText ? `<p style="font-size: 0.875rem; font-weight: 600; color: #312e81; margin: 0 0 0.5rem 0;">🚇 ${escapeHtml(transitText)}</p>` : ''}
+          ${exitText ? `<p style="font-size: 0.875rem; font-weight: 500; color: #475569; margin: 0;">🚶 ${escapeHtml(ui.subwayExit)}: ${escapeHtml(exitText)}</p>` : ''}
         </div>`
         : '';
       const websiteHtml = res.website
@@ -757,11 +897,12 @@ export default function App() {
         </div>
         <h4 style="font-size: 1.25rem; font-weight: 700; color: #0f172a; margin: 0 0 0.5rem 0;">${escapeHtml(res.name)}</h4>
         <p style="color: #334155; margin: 0 0 0.25rem 0; font-weight: 500;">${escapeHtml(res.address)}</p>
-        <p style="color: #334155; margin: 0 0 0.75rem 0; font-weight: 500;">${escapeHtml(res.phone)}</p>
+        <p style="color: #334155; margin: 0 0 0.75rem 0; font-weight: 500;"><span dir="ltr">${escapeHtml(res.phone)}</span></p>
         ${websiteHtml}
         ${servicesHtml}
         ${eligibilityHtml}
-        <p style="font-size: 0.8rem; color: #64748b; margin: 0 0 0.75rem 0; font-style: italic;">Service area: ${escapeHtml(res.serviceArea)}${res.legalRepresentation ? ' · Provides legal representation' : ''}</p>
+        <p style="font-size: 0.8rem; color: #64748b; margin: 0 0 0.75rem 0; font-style: italic;">${escapeHtml(t('pktServiceArea', 'Service area'))}: ${escapeHtml(serviceAreaText)}${res.legalRepresentation ? ' · ' + escapeHtml(t('pktLegalRep', 'Provides legal representation')) : ''}</p>
+        ${(res.lastVerified || res.sourceOfVerification) ? `<p style="font-size: 0.8rem; color: #64748b; margin: 0 0 0.75rem 0;">${res.lastVerified ? `${escapeHtml(t('pktVerified', 'Verified'))}: ${escapeHtml(res.lastVerified)}` : ''}${res.lastVerified && res.sourceOfVerification ? ' · ' : ''}${res.sourceOfVerification ? `${escapeHtml(t('pktVerifiedSource', 'Source'))}: ${escapeHtml(res.sourceOfVerification)}` : ''}</p>` : ''}
         ${transitHtml}
       </div>
     `;
@@ -773,7 +914,7 @@ export default function App() {
         <p style="margin: 0 0 0.25rem 0; font-weight: 700; color: #0f172a; font-size: 0.95rem;">
           <a href="${escapeHtml(dir.url)}" style="color: #1d4ed8; text-decoration: underline;">${escapeHtml(dir.name)}</a>
         </p>
-        <p style="margin: 0; font-size: 0.85rem; color: #475569;">${escapeHtml(dir.description)}</p>
+        <p style="margin: 0; font-size: 0.85rem; color: #475569;">${escapeHtml(localizedNationalDescription(dir, lang))}</p>
       </div>
     `).join('');
 
@@ -832,15 +973,15 @@ export default function App() {
         `);
     };
 
-    addRow('Passport', 'has_passport', 'Photo-Vault & Email to self', consulate ? `Visit ${consulate.name} at ${consulate.address}` : 'Locate alternative ID');
-    addRow('I-94 Record', 'has_i94', 'Photo-Vault & Email to self', 'Retrieve digitally at i94.cbp.dhs.gov');
-    addRow('Formal Lease', 'has_lease', 'Photo-Vault & Email to self', 'Gather alternative residence documents');
-    addRow('Proof of Persecution', 'has_persecution_proof', 'Photo-Vault & Email to self', 'Begin gathering photos, reports, or witness letters');
-    addRow('Green Card', 'has_green_card', 'Photo-Vault & Email to self', 'Locate or request replacement');
-    addRow('Tax Transcripts', 'has_tax_transcripts', 'Photo-Vault & Email to self', 'Request from IRS.gov');
-    addRow('Marriage/Divorce Certs', 'has_marriage_cert', 'Photo-Vault & Email to self', 'Request from vital records');
-    addRow('Proof of Relationship', 'has_proof_of_relationship', 'Photo-Vault & Email to self', 'Gather photos, joint accounts');
-    addRow('Certificates of Disposition', 'has_arrests', 'Photo-Vault & Email to self', 'Request from criminal court');
+    addRow((ui.evidenceItemNames && ui.evidenceItemNames['has_passport']) || 'Passport', 'has_passport', t('pktStepVault', 'Photo-Vault & Email to self'), consulate ? t('pktStepConsulate', 'Visit {name} at {address}').replace('{name}', consulate.name).replace('{address}', consulate.address) : t('pktStepAltId', 'Locate alternative ID'));
+    addRow((ui.evidenceItemNames && ui.evidenceItemNames['has_i94']) || 'I-94 Record', 'has_i94', t('pktStepVault', 'Photo-Vault & Email to self'), t('pktStepI94', 'Retrieve digitally at i94.cbp.dhs.gov'));
+    addRow((ui.evidenceItemNames && ui.evidenceItemNames['has_lease']) || 'Formal Lease', 'has_lease', t('pktStepVault', 'Photo-Vault & Email to self'), t('pktStepAltResidence', 'Gather alternative residence documents'));
+    addRow((ui.evidenceItemNames && ui.evidenceItemNames['has_persecution_proof']) || 'Proof of Persecution', 'has_persecution_proof', t('pktStepVault', 'Photo-Vault & Email to self'), t('pktStepPersecution', 'Begin gathering photos, reports, or witness letters'));
+    addRow((ui.evidenceItemNames && ui.evidenceItemNames['has_green_card']) || 'Green Card', 'has_green_card', t('pktStepVault', 'Photo-Vault & Email to self'), t('pktStepGreenCard', 'Locate or request replacement'));
+    addRow((ui.evidenceItemNames && ui.evidenceItemNames['has_tax_transcripts']) || 'Tax Transcripts', 'has_tax_transcripts', t('pktStepVault', 'Photo-Vault & Email to self'), t('pktStepTax', 'Request from IRS.gov'));
+    addRow((ui.evidenceItemNames && ui.evidenceItemNames['has_marriage_cert']) || 'Marriage/Divorce Certs', 'has_marriage_cert', t('pktStepVault', 'Photo-Vault & Email to self'), t('pktStepMarriage', 'Request from vital records'));
+    addRow((ui.evidenceItemNames && ui.evidenceItemNames['has_proof_of_relationship']) || 'Proof of Relationship', 'has_proof_of_relationship', t('pktStepVault', 'Photo-Vault & Email to self'), t('pktStepRelationship', 'Gather photos, joint accounts'));
+    addRow((ui.evidenceItemNames && ui.evidenceItemNames['has_arrests']) || 'Certificates of Disposition', 'has_arrests', t('pktStepVault', 'Photo-Vault & Email to self'), t('pktStepDisposition', 'Request from criminal court'));
 
     // Evidence Gaps & Alternatives section — rendered from the server-side KB.
     // Alternatives are per-item with supports/limitations; nothing is marked ready.
@@ -849,11 +990,11 @@ export default function App() {
         <div class="section">
           <h3 class="section-title font-serif">${escapeHtml(ui.gapSectionTitle || 'Evidence Gaps & Alternatives')}</h3>
           ${gapKeys.map(k => {
-            const kb: any = (EVIDENCE_KB as any)[k];
+            const kb: any = localizedKb(k, lang);
             if (!kb) return '';
-            const na = nextActionFor(k, answers[k]);
+            const na = nextActionFor(k, answers[k], lang);
             const legalFlag = requiresLegalReview(k)
-              ? `<p style="font-size:0.875rem;color:#92400e;font-weight:600;">⚖️ ${escapeHtml(legalReviewReason(k) || '')}</p>`
+              ? `<p style="font-size:0.875rem;color:#92400e;font-weight:600;">⚖️ ${escapeHtml(legalReviewReason(k, lang) || '')}</p>`
               : '';
             // Cross-reference the standalone Document Photo Review section when
             // the uploaded photo was reviewed for this gap — avoids duplicating
@@ -863,9 +1004,9 @@ export default function App() {
               : '';
             return `
             <div style="border: 1px solid #e2e8f0; border-radius: 0.75rem; padding: 1.25rem; margin-bottom: 1rem; background-color: #fffbeb;">
-              <h4 style="margin: 0 0 0.5rem 0; font-size: 1rem; font-weight: 700; color: #0f172a;">${escapeHtml(EVIDENCE_ITEM_NAMES[k] || k)} — ${escapeHtml(answers[k] === 'unknown' ? (ui.evidenceStates?.unknown || 'Unknown') : (ui.evidenceStates?.actionRequired || 'Action required'))}</h4>
-              <p style="margin: 0 0 0.5rem 0; font-size: 0.875rem; color: #334155;"><strong>Target fact:</strong> ${escapeHtml(kb.targetFact)}</p>
-              <p style="margin: 0 0 0.5rem 0; font-size: 0.875rem; color: #334155;"><strong>Primary evidence:</strong> ${escapeHtml(kb.primaryEvidence)}</p>
+              <h4 style="margin: 0 0 0.5rem 0; font-size: 1rem; font-weight: 700; color: #0f172a;">${escapeHtml((ui.evidenceItemNames && ui.evidenceItemNames[k]) || EVIDENCE_ITEM_NAMES[k] || k)} — ${escapeHtml(answers[k] === 'unknown' ? (ui.evidenceStates?.unknown || 'Unknown') : (ui.evidenceStates?.actionRequired || 'Action required'))}</h4>
+              <p style="margin: 0 0 0.5rem 0; font-size: 0.875rem; color: #334155;"><strong>${escapeHtml(t('pktTargetFact', 'Target fact'))}:</strong> ${escapeHtml(kb.targetFact)}</p>
+              <p style="margin: 0 0 0.5rem 0; font-size: 0.875rem; color: #334155;"><strong>${escapeHtml(t('pktPrimaryEvidence', 'Primary evidence'))}:</strong> ${escapeHtml(kb.primaryEvidence)}</p>
               <ul style="margin: 0 0 0.5rem 0; padding-left: 1.25rem; font-size: 0.875rem; color: #334155;">
                 ${kb.alternatives.map((a: any) => `
                 <li style="margin-bottom: 0.5rem;">
@@ -874,12 +1015,12 @@ export default function App() {
                   <span>${escapeHtml(ui.gapCannotShow || 'Cannot show by itself')}: ${escapeHtml(a.limitations)}</span>
                 </li>`).join('')}
               </ul>
-              <p style="margin: 0 0 0.5rem 0; font-size: 0.875rem; color: #334155;"><strong>${escapeHtml(ui.gapNextAction || 'Next step')}:</strong> ${escapeHtml(na.step)} <em>(${(na.responsible || '')}, ${(na.priority || '')} priority)</em></p>
+              <p style="margin: 0 0 0.5rem 0; font-size: 0.875rem; color: #334155;"><strong>${escapeHtml(ui.gapNextAction || 'Next step')}:</strong> ${escapeHtml(na.step)} <em>(${(na.responsible || '')}, ${(na.priority || '')} ${escapeHtml(t('pktPriorityWord', 'priority'))})</em></p>
               ${imageRef}
               ${legalFlag}
             </div>`;
           }).join('')}
-          <p style="font-size: 0.8rem; color: #64748b; font-style: italic;">Alternative descriptions are in English. Ask your legal representative to explain any item you do not understand.</p>
+          <p style="font-size: 0.8rem; color: #64748b; font-style: italic;">${escapeHtml(lang === 'EN' ? t('pktKbNote', 'Alternative descriptions are in English. Ask your legal representative to explain any item you do not understand.') : t('pktKbNoteLocalized', 'Alternative descriptions are shown in your selected language. Ask your legal representative to explain any item you do not understand.'))}</p>
         </div>` : '';
 
     // Information on Record (§6): the consumer can see exactly which facts
@@ -900,17 +1041,17 @@ export default function App() {
       city_of_birth: 'City of birth',
       passport_number: 'Passport number (from document)', a_number: 'A-Number (from document)',
     };
-    const factStatusLabel = (f: any) => f.status === 'conflicting' ? 'Sources disagree — needs your decision'
-      : f.status === 'extracted-unconfirmed' ? 'From your document — not yet confirmed by you'
-      : f.source === 'document' ? 'From your document — confirmed by you' : 'Provided by you';
+    const factStatusLabel = (f: any) => f.status === 'conflicting' ? t('pktFactStatusConflicting', 'Sources disagree — needs your decision')
+      : f.status === 'extracted-unconfirmed' ? t('pktFactStatusExtracted', 'From your document — not yet confirmed by you')
+      : f.source === 'document' ? t('pktFactStatusDocConfirmed', 'From your document — confirmed by you') : t('pktFactStatusReported', 'Provided by you');
     const factRows = factRecord ? Object.values(factRecord.facts)
       .filter((f: any) => f && f.value && FACT_DISPLAY_NAMES[f.id])
-      .map((f: any) => `<tr><td style="font-weight:500;">${escapeHtml(FACT_DISPLAY_NAMES[f.id])}</td><td>${escapeHtml(String(f.value))}</td><td style="color:#64748b;">${escapeHtml(factStatusLabel(f))}</td></tr>`).join('') : '';
+      .map((f: any) => `<tr><td style="font-weight:500;">${escapeHtml(lang === 'EN' ? FACT_DISPLAY_NAMES[f.id] : ((ui.factLabels && ui.factLabels[f.id]) || FACT_DISPLAY_NAMES[f.id]))}</td><td>${escapeHtml(String(f.value))}</td><td style="color:#64748b;">${escapeHtml(factStatusLabel(f))}</td></tr>`).join('') : '';
     const factsSectionHtml = factRows ? `
         <div class="section">
           <h3 class="section-title font-serif">${escapeHtml(t('factsTitle', 'Your Information on Record'))}</h3>
-          <table><thead><tr><th>Item</th><th>Value</th><th>Status</th></tr></thead><tbody>${factRows}</tbody></table>
-          <p style="font-size:0.8rem;color:#64748b;font-style:italic;">Document-extracted values show what a document contains; they are not proof of authenticity. Correct anything that is wrong before relying on it.</p>
+          <table><thead><tr><th>${escapeHtml(ui.item)}</th><th>${escapeHtml(t('pktValueHeader', 'Value'))}</th><th>${escapeHtml(ui.status)}</th></tr></thead><tbody>${factRows}</tbody></table>
+          <p style="font-size:0.8rem;color:#64748b;font-style:italic;">${escapeHtml(t('pktFactsNote', 'Document-extracted values show what a document contains; they are not proof of authenticity. Correct anything that is wrong before relying on it.'))}</p>
         </div>` : '';
 
     // Next steps (B2C §6) — part of THIS report, not a separate document.
@@ -919,19 +1060,52 @@ export default function App() {
     const nextStepsHtml = `
         <div class="section">
           <h3 class="section-title font-serif">${escapeHtml(ns.title)}</h3>
-          <h4 style="font-size:1rem;font-weight:700;margin:0 0 0.5rem;">A. What this report does — and does not — establish</h4>
+          <h4 style="font-size:1rem;font-weight:700;margin:0 0 0.5rem;">${escapeHtml(t('pktNsUnderstand', 'A. What this report does — and does not — establish'))}</h4>
           <ul style="margin:0 0 1rem;padding-left:1.25rem;font-size:0.875rem;color:#334155;">${li(ns.understand)}</ul>
-          <h4 style="font-size:1rem;font-weight:700;margin:0 0 0.5rem;">B. How to review your information and any form output</h4>
+          <h4 style="font-size:1rem;font-weight:700;margin:0 0 0.5rem;">${escapeHtml(t('pktNsReview', 'B. How to review your information and any form output'))}</h4>
           <ul style="margin:0 0 1rem;padding-left:1.25rem;font-size:0.875rem;color:#334155;">${li(ns.review)}</ul>
-          <h4 style="font-size:1rem;font-weight:700;margin:0 0 0.5rem;">C. Preparing for professional help</h4>
+          <h4 style="font-size:1rem;font-weight:700;margin:0 0 0.5rem;">${escapeHtml(t('pktNsProfessional', 'C. Preparing for professional help'))}</h4>
           <ul style="margin:0 0 1rem;padding-left:1.25rem;font-size:0.875rem;color:#334155;">${li(ns.professionalHelp)}</ul>
-          <h4 style="font-size:1rem;font-weight:700;margin:0 0 0.5rem;">D. Finding additional help</h4>
+          ${(ns.professionalQuestions && ns.professionalQuestions.length) ? `<p style="font-size:0.875rem;font-weight:700;color:#0f172a;margin:0 0 0.5rem;">${escapeHtml(ns.professionalQuestionsTitle)}</p>
+          <ul style="margin:0 0 1rem;padding-left:1.25rem;font-size:0.875rem;color:#334155;">${li(ns.professionalQuestions)}</ul>` : ''}
+          <h4 style="font-size:1rem;font-weight:700;margin:0 0 0.5rem;">${escapeHtml(t('pktNsResources', 'D. Finding additional help'))}</h4>
           <p style="margin:0 0 0.5rem;font-size:0.875rem;color:#334155;">${escapeHtml(ns.resourcesIntro)}</p>
           <ul style="margin:0 0 1rem;padding-left:1.25rem;font-size:0.875rem;color:#334155;">
             ${ns.searchPaths.map(p => `<li style="margin-bottom:0.35rem;"><strong>${escapeHtml(p.name)}</strong> — ${escapeHtml(p.description)}<br/><span style="color:#64748b;">${escapeHtml(p.url)}</span></li>`).join('')}
           </ul>
-          <h4 style="font-size:1rem;font-weight:700;margin:0 0 0.5rem;">E. Your ordered checklist</h4>
+          <h4 style="font-size:1rem;font-weight:700;margin:0 0 0.5rem;">${escapeHtml(t('pktNsChecklist', 'E. Your ordered checklist'))}</h4>
           <ol style="margin:0;padding-left:1.25rem;font-size:0.875rem;color:#334155;">${li(ns.checklist)}</ol>
+        </div>`;
+
+    // Preparation-package summary (value-upgrade directive §6): ONE
+    // place that enumerates what the customer received — report,
+    // per-form draft state with edition + version, blank official
+    // forms, and the next-steps plan — so nobody has to hunt across
+    // screens to reconstruct their package.
+    const packageFormRows = FORM_REGISTRY.map((entry: any) => {
+      const d: any = draftForForm(formDraftStore, entry.id);
+      // Freshness (defect-closure P1): the package enumerates a draft
+      // as a current deliverable ONLY while its bound fact snapshot
+      // still matches the current record. A retained draft whose facts
+      // changed is enumerated as STALE — never as current.
+      const freshness = d ? draftFreshness(d.meta, factRecord, entry) : 'none';
+      const draftText = d && freshness === 'current'
+        ? `${escapeHtml(t('pktPackageDraft', 'Prepared draft'))}: ${escapeHtml(entry.id)} — ${escapeHtml(t('formEdition', 'Edition'))} ${escapeHtml(entry.editionDate)} — ${escapeHtml(t('draftVersion', 'Draft version'))} ${d.meta.version}${d.meta.draftId ? ` (${escapeHtml(d.meta.draftId)})` : ''}${d.meta.generatedAt ? ` · ${escapeHtml(new Date(d.meta.generatedAt).toLocaleString())}` : ''}`
+        : d
+          ? `${escapeHtml(t('pktPackageDraft', 'Prepared draft'))}: ${escapeHtml(entry.id)} — ${escapeHtml(t('pktPackageStale', 'Stale — your information changed after this draft was generated. Regenerate it and use only the latest version.'))}`
+          : `${escapeHtml(t('pktPackageDraft', 'Prepared draft'))}: ${escapeHtml(entry.id)} — ${escapeHtml(t('pktPackageNotGenerated', 'not generated yet'))}`;
+      const blankText = `${escapeHtml(t('blankFormBtn', 'Official Blank Form — Reference Copy'))}: ${escapeHtml(entry.id)} — ${escapeHtml(t('formEdition', 'Edition'))} ${escapeHtml(entry.editionDate)}`;
+      return `<li style="margin-bottom:0.35rem;">${draftText}<br/>${blankText}</li>`;
+    }).join('');
+    const packageHtml = `
+        <div class="section">
+          <h3 class="section-title font-serif">${escapeHtml(t('pktPackageTitle', 'Your preparation package'))}</h3>
+          <ul style="margin:0 0 1rem;padding-left:1.25rem;font-size:0.875rem;color:#334155;">
+            <li style="margin-bottom:0.35rem;">${escapeHtml(t('pktPackageReport', 'Readiness report — this document: your information on record, evidence review, and findings.'))}</li>
+            ${packageFormRows}
+            <li style="margin-bottom:0.35rem;">${escapeHtml(t('pktPackageNextSteps', 'Your Next Steps — the section below, generated from your findings.'))}</li>
+          </ul>
+          <p style="font-size:0.8rem;color:#64748b;font-style:italic;margin:0;">${escapeHtml(t('pktPackageNote', 'Drafts are for your review only — not signed and not submitted. If you correct information after generating a draft, that draft becomes stale: regenerate it and use only the latest version.'))}</p>
         </div>`;
 
     const selectedStarters = NARRATIVE_STARTERS.filter(s => answers[s.id] === 'yes').map(s => s.labels[lang as keyof typeof s.labels]);
@@ -940,7 +1114,7 @@ export default function App() {
 
     return `
       <!DOCTYPE html>
-      <html lang="en">
+      <html lang="${htmlLang}"${lang === 'AR' ? ' dir="rtl"' : ''}>
       <head>
         <meta charset="UTF-8">
         <title>${ui.packetTitle}</title>
@@ -972,7 +1146,7 @@ export default function App() {
           <h1 class="font-serif">${ui.packetTitle}</h1>
           <p>${ui.humanAnchorSeal} • ${new Date().toLocaleDateString()}</p>
           <div style="margin-top: 1rem; display: inline-block; background-color: #eef2ff; color: #4f46e5; padding: 0.5rem 1rem; border-radius: 9999px; font-weight: 700; font-size: 0.875rem;">
-            ${ui.readinessScore}: ${readinessPercent}% <span style="font-weight:400;font-size:0.75rem;">(approximate document-completeness heuristic \u2014 not a validated metric)</span>
+            ${ui.readinessScore}: ${readinessPercent}% <span style="font-weight:400;font-size:0.75rem;">${escapeHtml(t('pktHeuristicNote', '(approximate document-completeness heuristic — not a validated metric)'))}</span>
           </div>
         </div>
         <div class="section">
@@ -989,7 +1163,7 @@ export default function App() {
             </ul>
             ` : ''}
             ${factRecord && factRecord.narrative ? `
-            <p style="margin: 0 0 0.75rem; font-size: 0.8rem; font-weight: 600; color: #475569;">${escapeHtml(narrativeForPacket(factRecord.narrative, factRecord)?.label || '')}</p>
+            <p style="margin: 0 0 0.75rem; font-size: 0.8rem; font-weight: 600; color: #475569;">${escapeHtml(narrativeForPacket(factRecord.narrative, factRecord, lang)?.label || '')}</p>
             ` : ''}
             ${narrativeText ? `
             <p style="margin: 0; color: #1e293b; line-height: 1.6; white-space: pre-wrap;">${escapeHtml(narrativeText)}</p>
@@ -1016,11 +1190,11 @@ export default function App() {
         <div class="section">
           <h3 class="section-title font-serif">${escapeHtml(ui.photoTitle || 'Document Photo Review')}</h3>
           <div style="background-color: #f8fafc; padding: 1.25rem; border: 1px solid #e2e8f0; border-radius: 0.75rem; font-size: 0.875rem; color: #334155;">
-            <p style="margin: 0 0 0.5rem 0;"><strong>Category:</strong> ${escapeHtml(String(imageReview.documentCategory || ''))}</p>
-            <p style="margin: 0 0 0.5rem 0;"><strong>Legibility:</strong> ${escapeHtml(String(imageReview.legibility || ''))} &nbsp; <strong>Appears complete:</strong> ${escapeHtml(String(imageReview.appearsComplete || ''))}</p>
+            <p style="margin: 0 0 0.5rem 0;"><strong>${escapeHtml(t('photoCategory', 'Category'))}:</strong> ${escapeHtml(String(imageReview.documentCategory || ''))}</p>
+            <p style="margin: 0 0 0.5rem 0;"><strong>${escapeHtml(t('photoLegibility', 'Legibility'))}:</strong> ${escapeHtml(String(imageReview.legibility || ''))} &nbsp; <strong>${escapeHtml(t('photoAppearsComplete', 'Appears complete'))}:</strong> ${escapeHtml(String(imageReview.appearsComplete || ''))}</p>
             ${(imageReview.inconsistencies || []).length > 0 ? `<ul style="margin: 0 0 0.5rem 0; padding-left: 1.25rem;">${(imageReview.inconsistencies || []).map((x: any) => `<li>${escapeHtml(String(x))}</li>`).join('')}</ul>` : ''}
             ${(imageReview.limitations || []).length > 0 ? `<ul style="margin: 0; padding-left: 1.25rem; color: #64748b;">${(imageReview.limitations || []).map((x: any) => `<li>${escapeHtml(String(x))}</li>`).join('')}</ul>` : ''}
-            <p style="margin: 0.75rem 0 0 0; font-size: 0.8rem; color: #64748b; font-style: italic;">${escapeHtml(ui.photoPrivacy || '')} This review does not establish authenticity or legal sufficiency.</p>
+            <p style="margin: 0.75rem 0 0 0; font-size: 0.8rem; color: #64748b; font-style: italic;">${escapeHtml(ui.photoPrivacy || '')} ${escapeHtml(t('pktPhotoDisclaimer', 'This review does not establish authenticity or legal sufficiency.'))}</p>
           </div>
         </div>` : ''}
         <div class="section">
@@ -1032,14 +1206,15 @@ export default function App() {
           </div>` : resourceResult?.fallback ? `<div style="background-color: #fef3c7; border: 1px solid #f59e0b; border-radius: 0.5rem; padding: 1rem; margin-bottom: 1rem;">
             <p style="font-size: 0.875rem; color: #92400e; margin: 0; font-weight: 600;">
               ${answers.zip_code
-                ? `No verified local providers found for ZIP ${escapeHtml(answers.zip_code)} in IRU's curated directory yet.`
-                : 'No verified local providers found for your area in IRU\'s curated directory yet.'}
-              The national directories below can help you find immigration legal aid in your area.
+                ? t('pktNoProvidersZip', "No verified local providers found for ZIP {zip} in IRU's curated directory yet.").replace('{zip}', escapeHtml(answers.zip_code))
+                : t('pktNoProvidersArea', "No verified local providers found for your area in IRU's curated directory yet.")}
+              ${escapeHtml(t('pktNoProvidersTail', 'The national directories below can help you find immigration legal aid in your area.'))}
             </p>
           </div>` : ''}
-          ${resourcesHtml || '<p style="color: #64748b; font-style: italic;">No specific resources found.</p>'}
-          ${nationalDirsHtml ? `<h4 style="font-size: 1rem; font-weight: 700; color: #0f172a; margin: 1.5rem 0 0.75rem 0;">National Directories</h4>${nationalDirsHtml}` : ''}
+          ${resourcesHtml || `<p style="color: #64748b; font-style: italic;">${escapeHtml(t('pktNoResources', 'No specific resources found.'))}</p>`}
+          ${nationalDirsHtml ? `<h4 style="font-size: 1rem; font-weight: 700; color: #0f172a; margin: 1.5rem 0 0.75rem 0;">${escapeHtml(t('pktNationalDirs', 'National Directories'))}</h4>${nationalDirsHtml}` : ''}
         </div>
+        ${packageHtml}
         ${nextStepsHtml}
         <div class="footer">
           ${hasAlternatives ? `<p style="font-size: 0.875rem; font-weight: 600; color: #92400e; background-color: #fef3c7; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem; text-align: left;">${ui.noteForLegalCounsel}</p>` : ''}
@@ -1057,7 +1232,7 @@ export default function App() {
   const openPrintablePacket = () => {
     const printWindow = window.open('', '_blank');
     if (!printWindow) {
-      alert("Please allow pop-ups to print your Readiness Packet.");
+      alert(t('popupBlocked', 'Please allow pop-ups to print your Readiness Packet.'));
       return;
     }
     const html = generateHtml();
@@ -1073,15 +1248,34 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-3xl w-full text-center mb-8">
+    <div
+      dir={lang === 'AR' && stage !== 'LANG' ? 'rtl' : undefined}
+      lang={lang === 'AR' ? 'ar' : undefined}
+      className="min-h-screen flex flex-col items-center py-12 px-4 sm:px-6 lg:px-8 relative"
+      style={stage === 'LANG' ? { background: 'radial-gradient(ellipse 85% 60% at 50% 32%, #ffffff 0%, rgba(255,255,255,0) 55%), linear-gradient(165deg, #e2f0fd 0%, #f6fbff 42%, #e7f3fd 72%, #cfe8fc 100%)' } : undefined}
+    >
+      {stage === 'LANG' && (
+        <svg aria-hidden="true" focusable="false" className="pointer-events-none absolute inset-x-0 bottom-0 z-0 h-56 sm:h-72 w-full" viewBox="0 0 1440 320" preserveAspectRatio="none">
+          <path d="M0,150 C240,80 480,220 720,175 C960,130 1200,215 1440,145 L1440,320 L0,320 Z" fill="#bae6fd" opacity="0.5" />
+          <path d="M0,205 C260,145 520,255 780,215 C1040,175 1240,245 1440,200 L1440,320 L0,320 Z" fill="#7dd3fc" opacity="0.45" />
+          <path d="M0,250 C280,200 560,295 840,255 C1120,215 1300,285 1440,240 L1440,320 L0,320 Z" fill="#5eead4" opacity="0.4" />
+          <path d="M0,290 C300,250 620,315 900,285 C1150,258 1320,305 1440,278 L1440,320 L0,320 Z" fill="#38bdf8" opacity="0.35" />
+        </svg>
+      )}
+      <div className="max-w-3xl w-full text-center mb-8 relative z-10">
         <img src="/seal.png" alt="SMRG - Saint Martin Revenue Group" className="w-24 h-24 mx-auto mb-6 object-contain" />
-        <h1 className="text-4xl font-serif font-bold text-slate-900 mb-4 tracking-tight">
+        <h1 className="text-4xl sm:text-5xl font-serif font-bold text-[#0a2a5e] mb-4 tracking-tight">
           {ui.title}
         </h1>
-        <p className="text-lg text-slate-600 font-medium">
+        <p className="text-2xl font-semibold text-[#0a2a5e]">
           {ui.subtitle}
         </p>
+        {stage === 'LANG' && (
+          <>
+            <div aria-hidden="true" className="mx-auto mt-5 h-1 w-24 rounded-full bg-gradient-to-r from-teal-400 to-sky-500" />
+            <p className="text-base sm:text-lg text-[#3d6396] mt-4 max-w-xl mx-auto">{t('welcomeDesc', 'Organize your information, prepare your forms, and understand your next steps.')}</p>
+          </>
+        )}
       </div>
 
       {stage !== 'LANG' && stage !== 'PACKET' && stage !== 'ANALYZING' && (
@@ -1096,7 +1290,7 @@ export default function App() {
         </div>
       )}
 
-      <div className="max-w-3xl w-full bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+      <div className={`max-w-3xl w-full rounded-2xl overflow-hidden relative z-10 border ${stage === 'LANG' ? 'bg-transparent border-transparent shadow-none' : 'bg-white shadow-sm border-slate-200'}`}>
         {stage === 'LANG' && (
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
@@ -1105,28 +1299,22 @@ export default function App() {
             className="p-8 sm:p-12"
           >
             <div className="text-center mb-8">
-              <Globe className="w-12 h-12 text-indigo-500 mx-auto mb-4" />
-              <h2 className="text-2xl font-serif font-semibold text-slate-900">{ui.selectLanguage}</h2>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8 text-left">
-              <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4">
-                <h3 className="font-bold text-indigo-900 mb-1">{t('whatWeDo', 'What IRU does')}</h3>
-                <p className="text-sm text-indigo-900/80">{t('whatWeDoText', 'IRU helps you organize your circumstances and documents, identify missing information, prepare for your next steps, find relevant resources, and fill in supported official immigration forms (currently I-589 and I-765 drafts) from information you provide.')}</p>
-              </div>
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
-                <h3 className="font-bold text-slate-800 mb-1">{t('whatWeDont', 'What IRU does not do')}</h3>
-                <p className="text-sm text-slate-600">{t('whatWeDontText', 'IRU is not a law firm and does not give legal advice, decide your eligibility, sign, or submit any form. You review and control everything.')}</p>
-              </div>
+              <Globe className="w-12 h-12 text-blue-600 mx-auto mb-4" />
+              <h2 className="text-2xl font-semibold text-[#0a2a5e]">{ui.selectLanguage}</h2>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {LANGUAGES.map((l) => (
                 <button
                   key={l.code}
                   onClick={() => { setLang(l.code); setStage('PHASE1'); setCurrentQ(0); }}
-                  className="p-4 rounded-xl border-2 text-left transition-all duration-200 border-slate-200 hover:border-indigo-300 hover:bg-slate-50 text-slate-700"
+                  aria-pressed={lang === l.code}
+                  className={`flex items-center justify-between gap-3 p-4 sm:p-5 rounded-xl border-2 text-left transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 ${lang === l.code ? 'border-blue-600 bg-blue-50 shadow-sm' : 'border-blue-200/80 bg-white/85 hover:border-blue-400 hover:bg-blue-50/70'}`}
                 >
-                  <span className="block text-lg font-medium">{l.name}</span>
-                  <span className="block text-xs text-slate-500 mt-1">{l.code}</span>
+                  <span>
+                    <span className="block text-lg font-medium text-[#0a2a5e]">{l.name}</span>
+                    <span className="block text-xs text-slate-500 mt-1">{l.code}</span>
+                  </span>
+                  <ChevronRight className="w-5 h-5 text-blue-500 shrink-0" aria-hidden="true" />
                 </button>
               ))}
             </div>
@@ -1170,7 +1358,7 @@ export default function App() {
                         onChange={(e) => setAnswers({ ...answers, residence_country: e.target.value })}
                         className="w-full p-4 rounded-xl border-2 border-slate-200 text-lg"
                       >
-                        {COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
+                        {COUNTRIES.map(c => <option key={c.code} value={c.code}>{localizedCountryName(c, lang)}</option>)}
                       </select>
                     </label>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1193,7 +1381,7 @@ export default function App() {
                     </div>
                     {isUsCountry(answers.residence_country || 'US') ? (
                       <label className="block">
-                        <span className="block text-sm font-semibold text-slate-600 mb-1">ZIP Code (optional — for local resources)</span>
+                        <span className="block text-sm font-semibold text-slate-600 mb-1">{t('locationZip', 'ZIP Code (optional — for local resources)')}</span>
                         <input
                           type="text" inputMode="numeric" value={answers.zip_code || ''}
                           onChange={(e) => setAnswers({ ...answers, zip_code: e.target.value })}
@@ -1212,7 +1400,7 @@ export default function App() {
                       </label>
                     )}
                     <label className="block">
-                      <span className="block text-sm font-semibold text-slate-600 mb-1">Street address (optional — used only if you prepare a form)</span>
+                      <span className="block text-sm font-semibold text-slate-600 mb-1">{t('locationStreet', 'Street address (optional — used only if you prepare a form)')}</span>
                       <input
                         type="text" value={answers.residence_street || ''}
                         onChange={(e) => setAnswers({ ...answers, residence_street: e.target.value })}
@@ -1449,7 +1637,7 @@ export default function App() {
                 >
                   <option value="">—</option>
                   {Object.keys(EVIDENCE_ITEM_NAMES).map(k => (
-                    <option key={k} value={k}>{EVIDENCE_ITEM_NAMES[k]}</option>
+                    <option key={k} value={k}>{(ui.evidenceItemNames && ui.evidenceItemNames[k]) || EVIDENCE_ITEM_NAMES[k]}</option>
                   ))}
                 </select>
 
@@ -1464,9 +1652,9 @@ export default function App() {
 
                 {imageReview && (
                   <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 text-left space-y-2">
-                    <p className="text-sm text-slate-700"><strong>Category:</strong> {imageReview.documentCategory}</p>
-                    <p className="text-sm text-slate-700"><strong>Legibility:</strong> {imageReview.legibility}</p>
-                    <p className="text-sm text-slate-700"><strong>Appears complete:</strong> {imageReview.appearsComplete}</p>
+                    <p className="text-sm text-slate-700"><strong>{t('photoCategory', 'Category')}:</strong> {imageReview.documentCategory}</p>
+                    <p className="text-sm text-slate-700"><strong>{t('photoLegibility', 'Legibility')}:</strong> {imageReview.legibility}</p>
+                    <p className="text-sm text-slate-700"><strong>{t('photoAppearsComplete', 'Appears complete')}:</strong> {imageReview.appearsComplete}</p>
                     {imageReview.inconsistencies && imageReview.inconsistencies.length > 0 && (
                       <ul className="text-sm text-amber-800 list-disc pl-5">
                         {imageReview.inconsistencies.map((x: string, i: number) => <li key={i}>{x}</li>)}
@@ -1542,26 +1730,26 @@ export default function App() {
               const caseForms = USCIS_FORMS[caseType] || USCIS_FORMS.asylum;
               return (
                 <div className="mt-8 mb-8 text-left">
-                  <h3 className="text-lg font-serif font-bold text-slate-900 mb-2">Required Forms for Your Case</h3>
-                  <p className="text-xs text-slate-500 mb-4">All forms are official USCIS documents. Download free directly from uscis.gov. Fees last verified {FEE_SCHEDULE_AS_OF} \u2014 confirm current fees at uscis.gov before filing.</p>
+                  <h3 className="text-lg font-serif font-bold text-slate-900 mb-2">{t('formsPanelTitle', 'Required Forms for Your Case')}</h3>
+                  <p className="text-xs text-slate-500 mb-4">{t('formsPanelNote', 'All forms are official USCIS documents. Download free directly from uscis.gov. Fees last verified {date} — confirm current fees at uscis.gov before filing.').replace('{date}', FEE_SCHEDULE_AS_OF)}</p>
                   <div className="space-y-3">
                     {caseForms.map((form, i) => (
                       <div key={i} className={`rounded-xl border-2 p-4 ${i === 0 || i === 1 && caseType === 'family' ? 'border-indigo-200 bg-indigo-50/30' : 'border-slate-100'}`}>
                         <div className="flex items-center gap-2 mb-1">
-                          <span className={`text-xs font-black uppercase tracking-widest px-2 py-0.5 rounded-full ${i === 0 || i === 1 && caseType === 'family' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-500'}`}>{form.tag}</span>
+                          <span className={`text-xs font-black uppercase tracking-widest px-2 py-0.5 rounded-full ${i === 0 || i === 1 && caseType === 'family' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-500'}`}>{{ PRIMARY: t('formsTagPrimary', 'PRIMARY'), SECONDARY: t('formsTagSecondary', 'SECONDARY'), 'IF TRAVELING': t('formsTagIfTraveling', 'IF TRAVELING'), 'WITH I-485': t('formsTagWithI485', 'WITH I-485') }[form.tag] || form.tag}</span>
                           <span className="font-bold text-slate-900">{form.name}</span>
-                          <span className="text-xs text-slate-400 ml-auto">{form.fee}</span>
+                          <span className="text-xs text-slate-400 ml-auto">{form.fee === 'Free' ? t('formsFeeFree', 'Free') : form.fee === 'Free (asylum)' ? t('formsFeeFreeAsylum', 'Free (asylum)') : form.fee.replace('(with I-485)', t('formsFeeWithSuffix', '(with I-485)'))}</span>
                         </div>
-                        <p className="text-xs text-slate-600 mb-2">{form.desc}</p>
+                        <p className="text-xs text-slate-600 mb-2">{(form.descI18n && form.descI18n[lang]) || form.desc}</p>
                         <div className="flex flex-wrap gap-2">
-                          <a href={form.pdf} target="_blank" rel="noopener noreferrer" className="text-xs font-bold bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700 transition-colors">⬇ Download PDF</a>
-                          <a href={form.instructions} target="_blank" rel="noopener noreferrer" className="text-xs font-bold border border-slate-200 text-slate-600 px-3 py-1.5 rounded-lg hover:border-slate-400 transition-colors">Instructions</a>
-                          <a href={form.page} target="_blank" rel="noopener noreferrer" className="text-xs font-bold border border-slate-200 text-slate-600 px-3 py-1.5 rounded-lg hover:border-slate-400 transition-colors">USCIS Page ↗</a>
+                          <a href={form.pdf} target="_blank" rel="noopener noreferrer" className="text-xs font-bold bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700 transition-colors">⬇ {t('formsDownload', 'Download PDF')}</a>
+                          <a href={form.instructions} target="_blank" rel="noopener noreferrer" className="text-xs font-bold border border-slate-200 text-slate-600 px-3 py-1.5 rounded-lg hover:border-slate-400 transition-colors">{t('formsInstructions', 'Instructions')}</a>
+                          <a href={form.page} target="_blank" rel="noopener noreferrer" className="text-xs font-bold border border-slate-200 text-slate-600 px-3 py-1.5 rounded-lg hover:border-slate-400 transition-colors">{t('formsUscisPage', 'USCIS Page')} ↗</a>
                         </div>
                       </div>
                     ))}
                   </div>
-                  <p className="text-xs text-slate-400 text-center mt-3">Procedural information only — not legal advice. Verify all forms at uscis.gov before filing.</p>
+                  <p className="text-xs text-slate-400 text-center mt-3">{t('formsPanelFooter', 'Procedural information only — not legal advice. Verify all forms at uscis.gov before filing.')}</p>
                 </div>
               );
             })()}
@@ -1581,7 +1769,7 @@ export default function App() {
                   {Object.values(factRecord.facts).filter((f: any) => f && f.value && FACT_LABELS[f.id]).map((f: any) => (
                     <div key={f.id} className="border border-slate-200 rounded-xl p-3">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-semibold text-slate-800 text-sm">{FACT_LABELS[f.id]}</span>
+                        <span className="font-semibold text-slate-800 text-sm">{(ui.factLabels && ui.factLabels[f.id]) || FACT_LABELS[f.id]}</span>
                         <span className="text-slate-700 text-sm">{String(f.value)}</span>
                         <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${f.status === 'conflicting' ? 'bg-red-100 text-red-800' : f.status === 'extracted-unconfirmed' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600'}`}>
                           {f.status === 'conflicting' ? t('factStatusConflicting', 'Sources disagree') : f.status === 'extracted-unconfirmed' ? t('factStatusExtracted', 'From your document — please confirm') : t('factStatusReported', 'You provided this')}
@@ -1593,15 +1781,35 @@ export default function App() {
                       {f.status === 'conflicting' && (
                         <div className="mt-2 space-y-1">
                           <button onClick={() => handleResolveConflict(f.id, f.source)} className="block px-3 py-1.5 border border-slate-300 text-xs font-semibold rounded-lg hover:bg-slate-50">
-                            Keep: {String(f.value)} <span className="text-slate-400">({f.source === 'document' ? 'from document' : 'your answer'})</span>
+                            {t('factKeep', 'Keep')}: {String(f.value)} <span className="text-slate-400">({f.source === 'document' ? t('factFromDocument', 'from document') : t('factFromAnswer', 'your answer')})</span>
                           </button>
                           {(f.alternatives || []).map((a: any, i: number) => (
                             <button key={i} onClick={() => handleResolveConflict(f.id, a.source)} className="block px-3 py-1.5 border border-slate-300 text-xs font-semibold rounded-lg hover:bg-slate-50">
-                              Use instead: {String(a.value)} <span className="text-slate-400">({a.source === 'document' ? 'from document' : 'your answer'})</span>
+                              {t('factUseInstead', 'Use instead')}: {String(a.value)} <span className="text-slate-400">({a.source === 'document' ? t('factFromDocument', 'from document') : t('factFromAnswer', 'your answer')})</span>
                             </button>
                           ))}
                         </div>
                       )}
+                      {/* Correction (§8 / R4b): EVERY fact on record can be
+                          corrected by the applicant — including facts they
+                          reported themselves, which previously rendered
+                          with no control at all even though the correction
+                          handler existed. Saving routes through
+                          handleCorrectFact → upsertFact(source:
+                          'correction'), which marks outputs stale and
+                          withdraws generated drafts like any mutation. */}
+                      <div className="mt-2">
+                        {editingFactId === f.id ? (
+                          <span className="flex flex-wrap items-center gap-2">
+                            <input type="text" value={factEditValue} onChange={(e) => setFactEditValue(e.target.value)}
+                              className="flex-1 min-w-[12rem] p-2 rounded-lg border-2 border-slate-200 text-sm" />
+                            <button onClick={() => { handleCorrectFact(f.id, factEditValue); setEditingFactId(''); }} className="px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-lg hover:bg-indigo-700">{t('saveFact', 'Save')}</button>
+                            <button onClick={() => setEditingFactId('')} className="px-3 py-1.5 border border-slate-300 text-xs font-semibold rounded-lg hover:bg-slate-50">{t('cancelEdit', 'Cancel')}</button>
+                          </span>
+                        ) : (
+                          <button onClick={() => { setEditingFactId(f.id); setFactEditValue(String(f.value)); }} className="px-3 py-1.5 border border-slate-300 text-xs font-semibold rounded-lg hover:bg-slate-50">{t('correctFact', 'Correct')}</button>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1610,7 +1818,7 @@ export default function App() {
 
             {/* ── Your Story (successive §4): chronology, issues, approval gate ── */}
             {factRecord && factRecord.narrative && (() => {
-              const analysis: any = analyzeNarrative(factRecord.narrative, factRecord);
+              const analysis: any = analyzeNarrative(factRecord.narrative, factRecord, lang);
               const approved = factRecord.narrative.status === 'approved';
               const blocking = analysis.issues.filter((i: any) => i.blocking);
               return (
@@ -1662,7 +1870,7 @@ export default function App() {
                 payment. Only when the paywall build flag is on; amounts come
                 from the same pricing module the server enforces with. ── */}
             {PAYWALL_UI_ON() && (() => {
-              const offer = buildOffer();
+              const offer = buildOffer(lang);
               const evalToken = (() => { try { return sessionStorage.getItem('iru_evaluation_token'); } catch { return null; } })();
               const formTokens = loadFormTokens();
               const owned = purchaseState.ownedForms;
@@ -1687,10 +1895,10 @@ export default function App() {
                     {purchaseState.hasEvaluation && owned.length === 0 && (
                       <>
                         <button onClick={() => { if (selectedFormId) handleCheckout(SKUS.ONE_FORM, { formId: selectedFormId, prerequisiteToken: evalToken || undefined }); }} disabled={checkoutBusy || !selectedFormId} className="px-5 py-2.5 border-2 border-indigo-600 text-indigo-700 text-sm font-semibold rounded-xl hover:bg-indigo-50 disabled:opacity-50">
-                          {t('offerOneForm', 'Complete ONE form')} ({selectedFormId || '…'}) — {formatCents(PRICING.oneForm.upgradeChargeCents)} {t('offerMore', 'more')}
+                          {t('offerOneForm', 'Complete ONE form')} ({selectedFormId || '…'}) — {formatCents(PRICING.oneForm.chargeCents)} {t('offerMore', 'more')}
                         </button>
                         <button onClick={() => handleCheckout(SKUS.BUNDLE, { prerequisiteToken: evalToken || undefined })} disabled={checkoutBusy} className="px-5 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-50">
-                          {t('offerBundle', 'Complete BOTH forms')} — {formatCents(PRICING.bundle.upgradeChargeCents)} {t('offerMore', 'more')}
+                          {t('offerBundle', 'Complete BOTH forms')} — {formatCents(PRICING.bundle.chargeCents)} {t('offerMore', 'more')}
                         </button>
                         {!selectedFormId && <span className="text-xs text-slate-500 self-center">{t('offerPickForm', 'Select a form below to enable the one-form option.')}</span>}
                       </>
@@ -1713,7 +1921,7 @@ export default function App() {
                 <p className="text-xs text-slate-500 mb-4">{t('formPrepIntro', 'IRU can fill a draft of an official USCIS form from your information on record. You choose the form — IRU does not decide what you should file. Drafts are never signed or submitted by IRU.')}</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
                   {FORM_REGISTRY.map((entry: any) => (
-                    <button key={entry.id} onClick={() => { const s = selectForm(entry.id); setSelectedFormId(s.selectedFormId); setFormSummary(s.formSummary); setFormPdfBase64(s.formPdfBase64); setFormError(s.formError); setFormDraftMeta(s.formDraftMeta); setReviewChecks(s.reviewChecks); }}
+                    <button key={entry.id} onClick={() => { const s = selectForm(entry.id); setSelectedFormId(s.selectedFormId); setFormError(s.formError); }}
                       className={`p-4 rounded-xl border-2 text-left ${selectedFormId === entry.id ? 'border-indigo-600 bg-indigo-50' : 'border-slate-200 hover:border-indigo-300'}`}>
                       <span className="block font-bold text-slate-900">{entry.id}</span>
                       <span className="block text-xs text-slate-500 mt-1">{entry.name}</span>
@@ -1723,7 +1931,7 @@ export default function App() {
                 </div>
                 {selectedFormId && (() => {
                   const entry: any = getFormEntry(selectedFormId);
-                  const plan: any = buildFillPlan(factRecord, entry);
+                  const plan: any = buildFillPlan(factRecord, entry, lang);
                   // D4 guard: the generated-draft panel below renders ONLY
                   // the summary generated for the currently selected form
                   // (summaryForSelection) — never a previous form's draft
@@ -1731,13 +1939,13 @@ export default function App() {
                   const currentSummary: any = summaryForSelection(formSummary, selectedFormId);
                   return (
                     <div className="border border-slate-200 rounded-xl p-4 space-y-4">
-                      <p className="text-xs text-slate-500">{entry.applicability}</p>
+                      <p className="text-xs text-slate-500">{localizedApplicability(entry, lang)}</p>
                       <p className="text-sm text-slate-700"><strong>{plan.fill.length}</strong> {t('formPopulated', 'fields can be filled from your information')}.</p>
                       {plan.needsConfirmation.length > 0 && (
                         <div>
                           <p className="text-sm font-semibold text-amber-800">{t('formNeedsConfirm', 'Needs your confirmation before it can be used')}:</p>
                           <ul className="text-sm text-slate-600 list-disc pl-5">
-                            {plan.needsConfirmation.map((n: any) => <li key={n.factId}>{n.label}: “{String(n.value)}” — confirm it in Your Information above.</li>)}
+                            {plan.needsConfirmation.map((n: any) => <li key={n.factId}>{n.label}: “{String(n.value)}” {t('formConfirmInFacts', '— confirm it in Your Information above.')}</li>)}
                           </ul>
                         </div>
                       )}
@@ -1756,7 +1964,7 @@ export default function App() {
                               </label>
                             ))}
                           </div>
-                          <button onClick={() => handleSaveFormAnswers(entry, plan)} className="mt-3 px-4 py-2 border-2 border-indigo-600 text-indigo-700 text-sm font-semibold rounded-lg hover:bg-indigo-50">Save answers</button>
+                          <button onClick={() => handleSaveFormAnswers(entry, plan)} className="mt-3 px-4 py-2 border-2 border-indigo-600 text-indigo-700 text-sm font-semibold rounded-lg hover:bg-indigo-50">{t('saveAnswers', 'Save answers')}</button>
                         </div>
                       )}
                       {formError && <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl p-3">{formError}</p>}
@@ -1769,7 +1977,7 @@ export default function App() {
                         <button onClick={downloadBlankForm} className="px-6 py-3 border-2 border-slate-300 text-slate-700 font-semibold rounded-xl hover:bg-slate-50">
                           {t('blankFormBtn', 'Official Blank Form — Reference Copy')} (PDF)
                         </button>
-                        {formPdfBase64 && currentSummary && (() => {
+                        {formPdfBase64 && currentSummary && selectedDraftFreshness === 'current' && (() => {
                           const checklist = (currentSummary && currentSummary.finalReviewChecklist) || [];
                           const allChecked = checklist.length > 0 && checklist.every((_: any, i: number) => reviewChecks[i]);
                           return (
@@ -1781,6 +1989,9 @@ export default function App() {
                           );
                         })()}
                       </div>
+                      {currentFormDraft && selectedDraftFreshness !== 'current' && (
+                        <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl p-3">{t('pktPackageStale', 'Stale — your information changed after this draft was generated. Regenerate it and use only the latest version.')}</p>
+                      )}
                       {formPdfBase64 && currentSummary && currentSummary.finalReviewChecklist && !(currentSummary.finalReviewChecklist.every((_: any, i: number) => reviewChecks[i])) && (
                         <p className="text-xs text-amber-800">{t('checklistGate', 'Complete the final review checklist below before downloading.')}</p>
                       )}
@@ -1795,10 +2006,13 @@ export default function App() {
                               <strong>{currentSummary.draftDocumentLabel || 'IRU Pre-filled Draft — Review and Correct'}</strong>
                               {' · '}{t('draftVersion', 'Draft version')} {formDraftMeta.version} ({formDraftMeta.draftId})
                               {' · '}{new Date(formDraftMeta.generatedAt).toLocaleString()}
-                              {' · '}<span className="font-semibold text-green-700">{t('draftLatest', 'This is the latest version — use only this one.')}</span>
+                              {' · '}{selectedDraftFreshness === 'current'
+                                ? <span className="font-semibold text-green-700">{t('draftLatest', 'This is the latest version — use only this one.')}</span>
+                                : <span className="font-semibold text-red-700">{t('pktPackageStale', 'Stale — your information changed after this draft was generated. Regenerate it and use only the latest version.')}</span>}
                             </p>
                           )}
                           {currentSummary.staleVersionNote && <p className="text-xs text-amber-800">{currentSummary.staleVersionNote}</p>}
+                          {currentSummary.downloadedDraftNote && <p className="text-xs text-slate-500">{currentSummary.downloadedDraftNote}</p>}
                           {/* Pre-download review instructions (B2C §5.A) */}
                           {currentSummary.reviewInstructions && (
                             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
@@ -1822,10 +2036,23 @@ export default function App() {
                             <div><p className="font-semibold">{t('formMissing', 'Still needed for this form')}:</p>
                             <ul className="list-disc pl-5">{currentSummary.missingRequired.map((m: any, i: number) => <li key={i}>{m.label}</li>)}</ul></div>
                           )}
+                          {currentSummary.formatIssues && currentSummary.formatIssues.length > 0 && (
+                            <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                              <p className="font-semibold text-red-900">{t('formFormatIssues', 'Needs a format correction')}:</p>
+                              <ul className="list-disc pl-5 text-red-900">{currentSummary.formatIssues.map((f: any, i: number) => <li key={i}>{f.message}</li>)}</ul>
+                            </div>
+                          )}
                           <div>
                             <p className="font-semibold">{t('formConsumerSections', 'You complete these parts yourself')}:</p>
                             <ul className="list-disc pl-5">{currentSummary.consumerCompletedSections.map((c: string, i: number) => <li key={i}>{c}</li>)}</ul>
                           </div>
+                          {currentSummary.conditionalNotes && currentSummary.conditionalNotes.length > 0 && (
+                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-1.5">
+                              {currentSummary.conditionalNotes.map((n: any, i: number) => (
+                                <p key={i} className="text-sm text-amber-900"><strong>{n.section}:</strong> {n.note}</p>
+                              ))}
+                            </div>
+                          )}
                           <p className="text-xs text-slate-500">{t('formSignatureNote', 'No signature was added and nothing was submitted. Signing and filing are your responsibility, after your review.')}</p>
                           {/* Final review checklist (B2C §5.D) — the draft
                               is not presented as ready until every item
@@ -1836,7 +2063,7 @@ export default function App() {
                               <p className="font-semibold text-slate-900">{t('finalChecklistTitle', 'Final review checklist')}</p>
                               {currentSummary.finalReviewChecklist.map((item: string, i: number) => (
                                 <label key={i} className="flex items-start gap-2 mt-1.5 cursor-pointer">
-                                  <input type="checkbox" checked={!!reviewChecks[i]} onChange={(e) => setReviewChecks({ ...reviewChecks, [i]: e.target.checked })} className="mt-0.5" />
+                                  <input type="checkbox" checked={!!reviewChecks[i]} onChange={(e) => updateReviewChecks({ ...reviewChecks, [i]: e.target.checked })} className="mt-0.5" />
                                   <span>{item}</span>
                                 </label>
                               ))}
@@ -1864,6 +2091,38 @@ export default function App() {
                 })()}
               </div>
             )}
+
+            {/* ── Your preparation package (defect-closure P3B): the
+                on-screen counterpart of the packet's package section.
+                Same per-form draft store, same freshness rule: a draft
+                is enumerated as a current deliverable only while its
+                bound fact snapshot matches the current record; a stale
+                draft is labeled stale and is never downloadable here. ── */}
+            <div className="mt-8 text-left border border-slate-200 bg-white rounded-xl p-5">
+              <h3 className="text-base font-serif font-bold text-slate-900 mb-3">{t('pktPackageTitle', 'Your preparation package')}</h3>
+              <ul className="text-sm text-slate-700 space-y-2.5">
+                <li>{t('pktPackageReport', 'Readiness report — this document: your information on record, evidence review, and findings.')}</li>
+                {FORM_REGISTRY.map((entry: any) => {
+                  const d: any = draftForForm(formDraftStore, entry.id);
+                  const freshness = d ? draftFreshness(d.meta, factRecord, entry) : 'none';
+                  return (
+                    <li key={entry.id}>
+                      {d && freshness === 'current' ? (
+                        <span>{t('pktPackageDraft', 'Prepared draft')}: {entry.id} — {t('formEdition', 'Edition')} {entry.editionDate} — {t('draftVersion', 'Draft version')} {d.meta.version}{d.meta.draftId ? ` (${d.meta.draftId})` : ''}{d.meta.generatedAt ? ` · ${new Date(d.meta.generatedAt).toLocaleString()}` : ''}</span>
+                      ) : d ? (
+                        <span className="text-red-700 font-medium">{t('pktPackageDraft', 'Prepared draft')}: {entry.id} — {t('pktPackageStale', 'Stale — your information changed after this draft was generated. Regenerate it and use only the latest version.')}</span>
+                      ) : (
+                        <span>{t('pktPackageDraft', 'Prepared draft')}: {entry.id} — {t('pktPackageNotGenerated', 'not generated yet')}</span>
+                      )}
+                      <br />
+                      <span className="text-slate-500">{t('blankFormBtn', 'Official Blank Form — Reference Copy')}: {entry.id} — {t('formEdition', 'Edition')} {entry.editionDate}</span>
+                    </li>
+                  );
+                })}
+                <li>{t('pktPackageNextSteps', 'Your Next Steps — the section below, generated from your findings.')}</li>
+              </ul>
+              <p className="text-xs text-slate-500 italic mt-3">{t('pktPackageNote', 'Drafts are for your review only — not signed and not submitted. If you correct information after generating a draft, that draft becomes stale: regenerate it and use only the latest version.')}</p>
+            </div>
 
             {/* ── Next steps (B2C §6) — the same section the printable
                 packet carries, shown on screen. ── */}
@@ -1915,7 +2174,7 @@ export default function App() {
           </button>
         </div>
       )}
-      <div className="mt-12 text-center text-xs text-slate-400 uppercase tracking-widest">
+      <div className="mt-12 text-center text-xs text-slate-400 uppercase tracking-widest relative z-10">
         Sanctuary Architect 20345 | Powered by Parametric Insight Engine
       </div>
     </div>
