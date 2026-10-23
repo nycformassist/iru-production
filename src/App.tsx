@@ -12,7 +12,7 @@ import { COUNTRIES, isUsCountry, localizedCountryName } from './location';
 
 // Canonical fact record (directive §4) — one shared model for answers,
 // document extraction, corrections, the packet, and form preparation.
-import { createFactRecord, upsertFact, confirmFact, resolveConflict } from '../api/_lib/facts.js';
+import { createFactRecord, upsertFact, confirmFact, resolveConflict, overlayConsumerState, markOutputsFresh } from '../api/_lib/facts.js';
 // Form engine (directive §7): registry + mapper run client-side for the
 // review UI; the PDF itself is generated server-side from the same record.
 import { FORM_REGISTRY, getFormEntry, localizedApplicability } from '../api/_lib/forms/registry.js';
@@ -21,7 +21,12 @@ import { buildFillPlan, splitFullName } from '../api/_lib/formmap.js';
 // chronology + issue analysis + applicant approval gate for form use.
 import { createNarrative, addNarrativeEvent, analyzeNarrative, approveNarrative, correctNarrativeEvent, confirmNarrativeEvent, narrativeForPacket } from '../api/_lib/narrative.js';
 import { readAnalyzeStream } from '../api/_lib/sse.js';
-import { selectForm, summaryForSelection, emptyFormDraftStore, recordDraft, draftForForm, removeDraft, invalidateDrafts, withReviewChecks } from '../api/_lib/formSelection.js';
+import { selectForm, summaryForSelection, emptyFormDraftStore, recordDraft, draftForForm, removeDraft, invalidateDrafts, invalidateDraftsForForms, withReviewChecks } from '../api/_lib/formSelection.js';
+// Draft↔fact-snapshot binding (defect-closure directive 2026-10-23,
+// Priority 1): the same module the server uses, so the hash computed
+// here over the current record is the hash the server bound the draft
+// to at generation.
+import { computeDraftSnapshotHash, draftFreshness, affectedFormsForMutation } from '../api/_lib/draftIntegrity.js';
 
 // B2C pricing + next steps (2026-10-21 directive): the SAME modules the
 // server enforces with, so what the consumer is shown is what the
@@ -169,6 +174,15 @@ export default function App() {
   const formPdfBase64: string = currentFormDraft ? currentFormDraft.pdfBase64 : '';
   const formDraftMeta: any = currentFormDraft ? currentFormDraft.meta : null;
   const reviewChecks: Record<number, boolean> = currentFormDraft ? currentFormDraft.reviewChecks : {};
+  // Draft freshness (defect-closure P1): the selected form's retained
+  // draft is current ONLY while its bound fact snapshot still matches
+  // the current record. Recomputed on every render, so a draft whose
+  // facts changed by any path is never presented — or downloaded — as
+  // current, even if it was never withdrawn from the store.
+  const selectedFormEntry: any = selectedFormId ? getFormEntry(selectedFormId) : null;
+  const selectedDraftFreshness: string = currentFormDraft
+    ? draftFreshness(formDraftMeta, factRecord, selectedFormEntry)
+    : 'none';
   const updateReviewChecks = (checks: Record<number, boolean>) => {
     if (selectedFormId) setFormDraftStore((prev: any) => withReviewChecks(prev, selectedFormId, checks));
   };
@@ -266,6 +280,40 @@ export default function App() {
       }
     }
     return rec;
+  };
+
+  // Fact ids the interview rebuild derives from questionnaire answers
+  // (buildFactRecord's answer set + location facts + derived name
+  // parts). overlayConsumerState uses this list to tell questionnaire
+  // facts apart from form-panel facts a rebuild cannot reproduce.
+  const ANSWER_DERIVED_FACT_IDS = [
+    'full_name', 'country_of_origin', 'country_of_birth', 'citizenship',
+    'gender', 'marital_status', 'entry_date', 'case_type',
+    'has_passport', 'has_i94', 'has_lease', 'has_persecution_proof',
+    'has_green_card', 'has_tax_transcripts', 'has_marriage_cert',
+    'has_proof_of_relationship', 'has_arrests', 'narrative_text',
+    'residence_country', 'residence_city', 'residence_region',
+    'residence_postal_code', 'residence_street',
+    'family_name', 'given_name', 'middle_name',
+  ];
+
+  /**
+   * The answers every output must be computed from (defect-closure
+   * Priority 2): the questionnaire answers with canonical-record
+   * corrections overlaid. A correction outranks the original answer —
+   * in the analysis request, the readiness score, and the packet — so
+   * a corrected value can never be silently replaced by the older
+   * questionnaire answer it corrected.
+   */
+  const answersWithCorrections = (ans: Record<string, string>, rec: any) => {
+    if (!rec || !rec.facts) return ans;
+    const out = { ...ans };
+    for (const fact of Object.values<any>(rec.facts)) {
+      if (fact && fact.source === 'correction' && typeof fact.value === 'string' && fact.value !== '') {
+        out[fact.id] = fact.value;
+      }
+    }
+    return out;
   };
 
   const getQuestionsForStage = () => {
@@ -401,16 +449,24 @@ export default function App() {
   // ── Facts: consumer confirmation / conflict resolution / correction (§8).
   // Every mutation goes through the canonical record; derived outputs are
   // marked stale by the record itself and the UI offers regeneration.
+  // Draft invalidation on mutation (defect-closure directive
+  // 2026-10-23, P1 req 6 / P2 req 7): a mutation withdraws only the
+  // drafts whose bound fact snapshot it actually changed — a draft
+  // for an unrelated form, built from unaffected facts, stays
+  // available. When the affected set cannot be determined, EVERY
+  // draft is withdrawn (the safe default). Per-form version counters
+  // always survive (R4a): a regenerated draft is numbered as that
+  // form's next version, never restarted at 1. Defense in depth: any
+  // draft that somehow remains despite a changed snapshot is caught
+  // by the render-time freshness check (draftFreshness) and is never
+  // presented or downloaded as current.
   const applyFactMutation = (mutate: (rec: any) => void) => {
     if (!factRecord) return;
     const next = JSON.parse(JSON.stringify(factRecord));
     mutate(next);
     setFactRecord(next);
-    // Previously generated form drafts no longer match the record:
-    // they are stale, so every form's draft is withdrawn. The per-form
-    // version counters survive (R4a): a regenerated draft is numbered
-    // as that form's next version, never restarted at 1.
-    setFormDraftStore((prev: any) => invalidateDrafts(prev));
+    const affected = affectedFormsForMutation(factRecord, next, FORM_REGISTRY);
+    setFormDraftStore((prev: any) => (affected === null ? invalidateDrafts(prev) : invalidateDraftsForForms(prev, affected)));
     setEditingFactId('');
   };
 
@@ -486,10 +542,16 @@ export default function App() {
       const formTokens = loadFormTokens();
       const savedToken = formTokens[selectedFormId] || sessionStorage.getItem('iru_entitlement_token');
       if (savedToken) headers['x-entitlement-token'] = savedToken;
+      // Freshness presentation (defect-closure P1): present the
+      // snapshot hash of the record exactly as this interface holds
+      // it; the server refuses (409, 'stale-fact-snapshot') if the
+      // record it receives does not match — it never binds a draft
+      // to facts the applicant is not looking at.
+      const expectedSnapshotHash = selectedFormEntry ? (computeDraftSnapshotHash(factRecord, selectedFormEntry) || '') : '';
       const resp = await fetch('/api/generate-form', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ formId: selectedFormId, factRecord, lang }),
+        body: JSON.stringify({ formId: selectedFormId, factRecord, lang, expectedSnapshotHash }),
       });
       const data = await resp.json().catch(() => null);
       if (!resp.ok || !data || !data.ok) {
@@ -498,6 +560,7 @@ export default function App() {
         // server text.
         const reason = data && data.reason;
         if (reason === 'narrative-not-approved') throw new Error(t('errNarrativeGate', 'Your story (personal narrative) has not been approved yet. Review and approve it in the "Your Story" section first — IRU prepares form drafts only from information you have reviewed and approved.'));
+        if (reason === 'stale-fact-snapshot') throw new Error(t('errStaleSnapshot', 'Your information changed while this draft was being prepared, so it was not generated from out-of-date information. Review your current information and generate the draft again.'));
         if (resp.status === 402) throw new Error(t('errEntitlementRequired', 'A paid entitlement covering this form is required to generate its draft, or that form has already been delivered.'));
         throw new Error(t('errFormUnavailable', 'Form generation unavailable. Please try again later.'));
       }
@@ -511,6 +574,9 @@ export default function App() {
         pdfBase64: data.pdfBase64,
         draftId: data.draftId || '',
         generatedAt: data.generatedAt || new Date().toISOString(),
+        // The server-issued binding: this draft is current only while
+        // the record's snapshot hash still equals it (defect-closure P1).
+        snapshotHash: data.factSnapshotHash || '',
       }));
     } catch (e: any) {
       setFormError(e && e.message ? e.message : t('errFormUnavailable', 'Form generation unavailable. Please try again later.'));
@@ -592,6 +658,10 @@ export default function App() {
 
   const downloadFormPdf = () => {
     if (!formPdfBase64) return;
+    // Freshness gate (defect-closure P1): a retained draft whose bound
+    // fact snapshot no longer matches the current record is stale (or
+    // unbound) and is never downloaded as a current deliverable.
+    if (selectedDraftFreshness !== 'current') return;
     const bytes = Uint8Array.from(atob(formPdfBase64), (c) => c.charCodeAt(0));
     const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
     const a = document.createElement('a');
@@ -603,34 +673,48 @@ export default function App() {
 
   const handleInterviewComplete = async () => {
     setStage('ANALYZING');
+    // One canonical fact record for the packet and form preparation (§4).
+    // A rebuild must never discard consumer state (defect-closure
+    // Priority 2): the previous record's corrections, unresolved
+    // conflicts, confirmations, form-panel facts, and narrative
+    // approvals are overlaid onto the rebuilt record under the defined
+    // precedence in api/_lib/facts.js (overlayConsumerState) — a
+    // correction can never be silently overwritten by the original
+    // questionnaire answer it corrected.
+    const builtRecord = buildFactRecord(answers, imageReview);
+    const record = factRecord
+      ? overlayConsumerState(builtRecord, factRecord, { answerFactIds: ANSWER_DERIVED_FACT_IDS }, new Date().toISOString()).record
+      : builtRecord;
+    setFactRecord(record);
+    // Every output of this run is computed from the corrected answers:
+    // corrections outrank the original questionnaire answers in
+    // resource matching, the analysis request, and the packet.
+    const effectiveAnswers = answersWithCorrections(answers, record);
     // Country-aware layered resolution (§3.3): ZIP/postal selects resources
     // only — it never gates the federal readiness workflow. Non-U.S. users
     // get honestly-labeled national directories, never a U.S. org as "local".
-    const residenceCountry = answers.residence_country || 'US';
+    const residenceCountry = effectiveAnswers.residence_country || 'US';
     const result = resolveResourcesForLocation({
       country: residenceCountry,
-      postalCode: residenceCountry === 'US' ? (answers.zip_code || '') : (answers.residence_postal_code || ''),
-      region: answers.residence_region || '',
-      city: answers.residence_city || '',
+      postalCode: residenceCountry === 'US' ? (effectiveAnswers.zip_code || '') : (effectiveAnswers.residence_postal_code || ''),
+      region: effectiveAnswers.residence_region || '',
+      city: effectiveAnswers.residence_city || '',
     });
     setResourceResult(result);
-    // One canonical fact record for the packet and form preparation (§4).
-    const record = buildFactRecord(answers, imageReview);
-    setFactRecord(record);
     setIsNycCoverage(result.isNycCoverage);
     // Flatten verified orgs for the packet renderer (local first, then statewide).
     setResources([...result.local, ...result.statewide]);
 
-    const country = (answers.country_of_origin || '').toLowerCase().trim();
+    const country = (effectiveAnswers.country_of_origin || '').toLowerCase().trim();
     if (country && CONSULATES[country]) setConsulate(CONSULATES[country]);
 
     try {
       const narrativeStarters = NARRATIVE_STARTERS
-        .filter(s => answers[s.id] === 'yes')
+        .filter(s => effectiveAnswers[s.id] === 'yes')
         .map(s => s.labels['EN']);
 
       // Privacy: strip direct identifiers before any network call.
-      const serverAnswers = stripForServer(answers);
+      const serverAnswers = stripForServer(effectiveAnswers);
 
       // Client-side timeout: never spin forever on a hung stream.
       const controller = new AbortController();
@@ -668,6 +752,12 @@ export default function App() {
         setAiUnavailable(true);
       }
       setAssessment(finalAssessment);
+      // The regenerated assessment was computed from the current
+      // record — including every overlaid correction — so the
+      // record's derived outputs are fresh again. (On failure the
+      // catch below leaves outputsStale set: the banner keeps
+      // offering the re-run.)
+      setFactRecord((prev: any) => (prev ? markOutputsFresh(JSON.parse(JSON.stringify(prev)), new Date().toISOString()) : prev));
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') {
         console.error('AI request timed out after 90s');
@@ -680,26 +770,34 @@ export default function App() {
     setStage('PACKET');
   };
 
-  const generateExecutiveSummary = () => buildExecutiveSummary(lang, {
-    name: answers.full_name || undefined,
-    country: answers.country_of_origin || undefined,
-    caseType: answers.case_type,
-    entryDate: answers.entry_date || undefined,
-    residenceCountry: answers.residence_country || 'US',
-    zip: answers.zip_code || undefined,
-    city: answers.residence_city || undefined,
-  });
+  const generateExecutiveSummary = () => {
+    // Built from the corrected answers (defect-closure P2): a corrected
+    // name/country/date is what the summary reports.
+    const eff = answersWithCorrections(answers, factRecord);
+    return buildExecutiveSummary(lang, {
+    name: eff.full_name || undefined,
+    country: eff.country_of_origin || undefined,
+    caseType: eff.case_type,
+    entryDate: eff.entry_date || undefined,
+    residenceCountry: eff.residence_country || 'US',
+    zip: eff.zip_code || undefined,
+    city: eff.residence_city || undefined,
+    });
+  };
 
   const calculateReadinessScore = () => {
+    // Scored from the corrected answers (defect-closure P2): a fact
+    // correction changes the score exactly as it changes the analysis.
+    const eff = answersWithCorrections(answers, factRecord);
     let score = 0;
     let total = 0;
     const check = (key: string) => {
-      if (answers[key]) {
+      if (eff[key]) {
         total++;
-        if (answers[key] === 'yes') {
+        if (eff[key] === 'yes') {
           score++;
         } else if (PROXIES[key]) {
-          const selectedProxies = PROXIES[key].items.filter((i: any) => answers[i.id] === 'yes');
+          const selectedProxies = PROXIES[key].items.filter((i: any) => eff[i.id] === 'yes');
           if (selectedProxies.length > 0) {
             score += 0.5;  // Secondary docs carry half weight vs primary
           }
@@ -751,7 +849,7 @@ export default function App() {
     return buildPacketNextStepsForLang({
       caseType: (assessment && assessment.caseType) || answers.case_type,
       readinessPercent: pct,
-      evidenceItemCount: Object.keys(EVIDENCE_KB).filter((k) => answers[k] && answers[k] !== 'yes').length,
+      evidenceItemCount: Object.keys(EVIDENCE_KB).filter((k) => { const eff = answersWithCorrections(answers, factRecord); return eff[k] && eff[k] !== 'yes'; }).length,
       conflicts,
       unconfirmed,
       form: formSummary ? {
@@ -804,7 +902,7 @@ export default function App() {
         ${servicesHtml}
         ${eligibilityHtml}
         <p style="font-size: 0.8rem; color: #64748b; margin: 0 0 0.75rem 0; font-style: italic;">${escapeHtml(t('pktServiceArea', 'Service area'))}: ${escapeHtml(serviceAreaText)}${res.legalRepresentation ? ' · ' + escapeHtml(t('pktLegalRep', 'Provides legal representation')) : ''}</p>
-        ${res.lastVerified ? `<p style="font-size: 0.8rem; color: #64748b; margin: 0 0 0.75rem 0;">${escapeHtml(t('pktVerified', 'Verified'))}: ${escapeHtml(res.lastVerified)}</p>` : ''}
+        ${(res.lastVerified || res.sourceOfVerification) ? `<p style="font-size: 0.8rem; color: #64748b; margin: 0 0 0.75rem 0;">${res.lastVerified ? `${escapeHtml(t('pktVerified', 'Verified'))}: ${escapeHtml(res.lastVerified)}` : ''}${res.lastVerified && res.sourceOfVerification ? ' · ' : ''}${res.sourceOfVerification ? `${escapeHtml(t('pktVerifiedSource', 'Source'))}: ${escapeHtml(res.sourceOfVerification)}` : ''}</p>` : ''}
         ${transitHtml}
       </div>
     `;
@@ -986,9 +1084,16 @@ export default function App() {
     // screens to reconstruct their package.
     const packageFormRows = FORM_REGISTRY.map((entry: any) => {
       const d: any = draftForForm(formDraftStore, entry.id);
-      const draftText = d
+      // Freshness (defect-closure P1): the package enumerates a draft
+      // as a current deliverable ONLY while its bound fact snapshot
+      // still matches the current record. A retained draft whose facts
+      // changed is enumerated as STALE — never as current.
+      const freshness = d ? draftFreshness(d.meta, factRecord, entry) : 'none';
+      const draftText = d && freshness === 'current'
         ? `${escapeHtml(t('pktPackageDraft', 'Prepared draft'))}: ${escapeHtml(entry.id)} — ${escapeHtml(t('formEdition', 'Edition'))} ${escapeHtml(entry.editionDate)} — ${escapeHtml(t('draftVersion', 'Draft version'))} ${d.meta.version}${d.meta.draftId ? ` (${escapeHtml(d.meta.draftId)})` : ''}${d.meta.generatedAt ? ` · ${escapeHtml(new Date(d.meta.generatedAt).toLocaleString())}` : ''}`
-        : `${escapeHtml(t('pktPackageDraft', 'Prepared draft'))}: ${escapeHtml(entry.id)} — ${escapeHtml(t('pktPackageNotGenerated', 'not generated yet'))}`;
+        : d
+          ? `${escapeHtml(t('pktPackageDraft', 'Prepared draft'))}: ${escapeHtml(entry.id)} — ${escapeHtml(t('pktPackageStale', 'Stale — your information changed after this draft was generated. Regenerate it and use only the latest version.'))}`
+          : `${escapeHtml(t('pktPackageDraft', 'Prepared draft'))}: ${escapeHtml(entry.id)} — ${escapeHtml(t('pktPackageNotGenerated', 'not generated yet'))}`;
       const blankText = `${escapeHtml(t('blankFormBtn', 'Official Blank Form — Reference Copy'))}: ${escapeHtml(entry.id)} — ${escapeHtml(t('formEdition', 'Edition'))} ${escapeHtml(entry.editionDate)}`;
       return `<li style="margin-bottom:0.35rem;">${draftText}<br/>${blankText}</li>`;
     }).join('');
@@ -1872,7 +1977,7 @@ export default function App() {
                         <button onClick={downloadBlankForm} className="px-6 py-3 border-2 border-slate-300 text-slate-700 font-semibold rounded-xl hover:bg-slate-50">
                           {t('blankFormBtn', 'Official Blank Form — Reference Copy')} (PDF)
                         </button>
-                        {formPdfBase64 && currentSummary && (() => {
+                        {formPdfBase64 && currentSummary && selectedDraftFreshness === 'current' && (() => {
                           const checklist = (currentSummary && currentSummary.finalReviewChecklist) || [];
                           const allChecked = checklist.length > 0 && checklist.every((_: any, i: number) => reviewChecks[i]);
                           return (
@@ -1884,6 +1989,9 @@ export default function App() {
                           );
                         })()}
                       </div>
+                      {currentFormDraft && selectedDraftFreshness !== 'current' && (
+                        <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl p-3">{t('pktPackageStale', 'Stale — your information changed after this draft was generated. Regenerate it and use only the latest version.')}</p>
+                      )}
                       {formPdfBase64 && currentSummary && currentSummary.finalReviewChecklist && !(currentSummary.finalReviewChecklist.every((_: any, i: number) => reviewChecks[i])) && (
                         <p className="text-xs text-amber-800">{t('checklistGate', 'Complete the final review checklist below before downloading.')}</p>
                       )}
@@ -1898,10 +2006,13 @@ export default function App() {
                               <strong>{currentSummary.draftDocumentLabel || 'IRU Pre-filled Draft — Review and Correct'}</strong>
                               {' · '}{t('draftVersion', 'Draft version')} {formDraftMeta.version} ({formDraftMeta.draftId})
                               {' · '}{new Date(formDraftMeta.generatedAt).toLocaleString()}
-                              {' · '}<span className="font-semibold text-green-700">{t('draftLatest', 'This is the latest version — use only this one.')}</span>
+                              {' · '}{selectedDraftFreshness === 'current'
+                                ? <span className="font-semibold text-green-700">{t('draftLatest', 'This is the latest version — use only this one.')}</span>
+                                : <span className="font-semibold text-red-700">{t('pktPackageStale', 'Stale — your information changed after this draft was generated. Regenerate it and use only the latest version.')}</span>}
                             </p>
                           )}
                           {currentSummary.staleVersionNote && <p className="text-xs text-amber-800">{currentSummary.staleVersionNote}</p>}
+                          {currentSummary.downloadedDraftNote && <p className="text-xs text-slate-500">{currentSummary.downloadedDraftNote}</p>}
                           {/* Pre-download review instructions (B2C §5.A) */}
                           {currentSummary.reviewInstructions && (
                             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
@@ -1980,6 +2091,38 @@ export default function App() {
                 })()}
               </div>
             )}
+
+            {/* ── Your preparation package (defect-closure P3B): the
+                on-screen counterpart of the packet's package section.
+                Same per-form draft store, same freshness rule: a draft
+                is enumerated as a current deliverable only while its
+                bound fact snapshot matches the current record; a stale
+                draft is labeled stale and is never downloadable here. ── */}
+            <div className="mt-8 text-left border border-slate-200 bg-white rounded-xl p-5">
+              <h3 className="text-base font-serif font-bold text-slate-900 mb-3">{t('pktPackageTitle', 'Your preparation package')}</h3>
+              <ul className="text-sm text-slate-700 space-y-2.5">
+                <li>{t('pktPackageReport', 'Readiness report — this document: your information on record, evidence review, and findings.')}</li>
+                {FORM_REGISTRY.map((entry: any) => {
+                  const d: any = draftForForm(formDraftStore, entry.id);
+                  const freshness = d ? draftFreshness(d.meta, factRecord, entry) : 'none';
+                  return (
+                    <li key={entry.id}>
+                      {d && freshness === 'current' ? (
+                        <span>{t('pktPackageDraft', 'Prepared draft')}: {entry.id} — {t('formEdition', 'Edition')} {entry.editionDate} — {t('draftVersion', 'Draft version')} {d.meta.version}{d.meta.draftId ? ` (${d.meta.draftId})` : ''}{d.meta.generatedAt ? ` · ${new Date(d.meta.generatedAt).toLocaleString()}` : ''}</span>
+                      ) : d ? (
+                        <span className="text-red-700 font-medium">{t('pktPackageDraft', 'Prepared draft')}: {entry.id} — {t('pktPackageStale', 'Stale — your information changed after this draft was generated. Regenerate it and use only the latest version.')}</span>
+                      ) : (
+                        <span>{t('pktPackageDraft', 'Prepared draft')}: {entry.id} — {t('pktPackageNotGenerated', 'not generated yet')}</span>
+                      )}
+                      <br />
+                      <span className="text-slate-500">{t('blankFormBtn', 'Official Blank Form — Reference Copy')}: {entry.id} — {t('formEdition', 'Edition')} {entry.editionDate}</span>
+                    </li>
+                  );
+                })}
+                <li>{t('pktPackageNextSteps', 'Your Next Steps — the section below, generated from your findings.')}</li>
+              </ul>
+              <p className="text-xs text-slate-500 italic mt-3">{t('pktPackageNote', 'Drafts are for your review only — not signed and not submitted. If you correct information after generating a draft, that draft becomes stale: regenerate it and use only the latest version.')}</p>
+            </div>
 
             {/* ── Next steps (B2C §6) — the same section the printable
                 packet carries, shown on screen. ── */}

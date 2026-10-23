@@ -58,5 +58,29 @@ export default async function handler(req, res) {
     return res.status(200).json({ received: true, applied: result.applied, duplicate: !!result.duplicate });
   }
 
+  // Failed / abandoned checkouts (defect-closure directive 2026-10-23,
+  // Priority 6): previously these events were ignored and the
+  // entitlement dangled as RESERVED until its TTL lapsed.
+  if (event.type === 'checkout.session.expired') {
+    const session = event.data && event.data.object ? event.data.object : {};
+    if (!session.id) return res.status(400).json({ error: 'Missing session id.' });
+    // An expired session can never be paid: resolve the entitlement
+    // terminally (VOID) so the buyer can start a clean checkout.
+    const result = entitlementStore.voidByExpiredSession(session.id, event.id);
+    console.log(`[iru] webhook checkout.session.expired: applied=${result.applied} duplicate=${!!result.duplicate}${result.reason ? ` reason=${result.reason}` : ''}`);
+    return res.status(200).json({ received: true, applied: result.applied, duplicate: !!result.duplicate });
+  }
+
+  if (event.type === 'checkout.session.async_payment_failed') {
+    const session = event.data && event.data.object ? event.data.object : {};
+    if (!session.id) return res.status(400).json({ error: 'Missing session id.' });
+    // A failed delayed payment does NOT end the entitlement: the buyer
+    // may retry on the same session and a later success must still
+    // mark it paid. The failure is recorded for audit only.
+    const result = entitlementStore.notePaymentFailedBySession(session.id, event.id);
+    console.log(`[iru] webhook checkout.session.async_payment_failed: recorded=${result.applied} duplicate=${!!result.duplicate}${result.reason ? ` reason=${result.reason}` : ''}`);
+    return res.status(200).json({ received: true, applied: result.applied, duplicate: !!result.duplicate });
+  }
+
   return res.status(200).json({ received: true, ignored: true });
 }

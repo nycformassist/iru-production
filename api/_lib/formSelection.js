@@ -84,6 +84,12 @@ export function recordDraft(store, formId, draft) {
         meta: {
           draftId: draft.draftId || '',
           generatedAt: draft.generatedAt || null,
+          // Draft↔fact-snapshot binding (defect-closure P1): the
+          // server-computed hash of the exact per-form fact snapshot
+          // this draft was generated from. Presentation paths recompute
+          // it over the current record; a mismatch marks the draft
+          // stale even if it was never withdrawn.
+          snapshotHash: draft.snapshotHash || '',
           version,
           formId,
         },
@@ -122,6 +128,22 @@ export function removeDraft(store, formId) {
 export function invalidateDrafts(store) {
   if (!store) return emptyFormDraftStore();
   return { drafts: {}, versions: { ...store.versions } };
+}
+
+/**
+ * Withdraw only the named forms' drafts (defect-closure directive
+ * 2026-10-23, P1 req 6 / P2 req 7): a correction invalidates the
+ * drafts whose bound fact snapshot it actually changed — a draft for
+ * an unrelated form, built from unaffected facts, stays available.
+ * Version counters survive for every form (R4a).
+ */
+export function invalidateDraftsForForms(store, formIds) {
+  if (!store || !store.drafts) return store || emptyFormDraftStore();
+  const drop = new Set(Array.isArray(formIds) ? formIds : []);
+  if (drop.size === 0) return { drafts: { ...store.drafts }, versions: { ...store.versions } };
+  const drafts = { ...store.drafts };
+  for (const id of drop) delete drafts[id];
+  return { drafts, versions: { ...store.versions } };
 }
 
 /** Replace one form's final-review checklist state; no-op without a draft. */

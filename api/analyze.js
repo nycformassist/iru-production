@@ -103,14 +103,40 @@ export default async function handler(req, res) {
     console.log(`[iru] analyze with ${validatedReviews.reviews.length} validated image observation(s)`);
   }
 
-  const min = minimizeForModel(sanitized.answers, narrativeStarters);
   // Canonical fact record (directive §4/§5): strictly re-validated here.
+  const cleanRecord = sanitizeFactRecord(factRecord);
+
+  // Correction precedence (defect-closure directive 2026-10-23,
+  // Priority 2): a consumer correction recorded in the canonical fact
+  // record OUTRANKS the original questionnaire answer for the same
+  // field. Without this overlay, re-running the analysis rebuilt gaps
+  // and findings from the pre-correction answers, so corrected values
+  // silently reverted server-side even when the client record was
+  // right. The overlay applies to exactly the allowlisted analysis
+  // fields; narrative text is excluded (narrative corrections flow
+  // through the narrative module, not the fact-correction path).
+  if (cleanRecord) {
+    const OVERLAY_FIELDS = new Set([
+      'country_of_origin', 'residence_country', 'country_of_birth', 'citizenship',
+      'entry_date', 'case_type',
+      'has_passport', 'has_i94', 'has_lease', 'has_persecution_proof',
+      'has_green_card', 'has_tax_transcripts', 'has_marriage_cert',
+      'has_proof_of_relationship', 'has_arrests',
+    ]);
+    for (const fact of Object.values(cleanRecord.facts)) {
+      if (fact && fact.source === 'correction' && OVERLAY_FIELDS.has(fact.id)
+        && typeof fact.value === 'string' && fact.value !== '' && fact.value.length <= 200) {
+        sanitized.answers[fact.id] = fact.value;
+      }
+    }
+  }
+
+  const min = minimizeForModel(sanitized.answers, narrativeStarters);
   // Only document-extracted facts are passed to the model — as document
   // CONTENTS to cross-check against the applicant's answers, never as
   // established facts. Client-claimed 'verified' facts are dropped by the
   // sanitizer. Identifier-class facts (names, A-numbers, passport numbers)
   // are excluded: the model never needs their values.
-  const cleanRecord = sanitizeFactRecord(factRecord);
   const IDENTIFIER_FACTS = new Set(['full_name', 'a_number', 'passport_number', 'ssn', 'usci_number', 'spouse_name']);
   const documentFacts = cleanRecord
     ? Object.values(cleanRecord.facts)

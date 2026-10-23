@@ -386,6 +386,13 @@ export function fallbackAssessment(min, gaps = [], imageReviews = [], lang = 'EN
     evidenceGaps: (gaps || []).map(g => ({
       key: g.key,
       targetFact: g.targetFact,
+      // The gap's basis sentence (defect-closure directive 2026-10-23,
+      // Priority 2): WHY this item is a gap — applicant-reported
+      // absence ("do not have it") vs unknown / does-not-apply. The
+      // model path receives currentState in its prompt; the rule-based
+      // fallback previously DROPPED it when mapping gap records for
+      // display, erasing the distinction. It is retained verbatim.
+      currentState: g.currentState,
       alternatives: g.evidentiaryConnection.map(c => ({
         id: c.id,
         relevance: c.supports,

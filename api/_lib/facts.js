@@ -260,6 +260,142 @@ export function markOutputsFresh(record, nowIso) {
   return record;
 }
 
+const cloneFact = (fact) => JSON.parse(JSON.stringify(fact));
+
+/**
+ * Correction-to-output propagation (defect-closure directive
+ * 2026-10-23, Priority 2).
+ *
+ * THE DEFECT: re-running the analysis rebuilt the canonical record
+ * from the original questionnaire answers alone, silently discarding
+ * every consumer action taken on the record since — corrections,
+ * conflict state, confirmations, and facts entered in the
+ * form-preparation panel (which never lived in the questionnaire
+ * answers). The rebuilt record then drove gaps, findings, and form
+ * preparation, so corrected values reverted and stale findings
+ * returned.
+ *
+ * THE PRECEDENCE RULE (defined here, applied on every rebuild):
+ *   1. CORRECTION beats ANSWER. A fact whose current value was set by
+ *      a consumer correction (source 'correction') is re-imposed on
+ *      the rebuilt record with the corrected value. An older
+ *      questionnaire answer can never silently overwrite it.
+ *   2. CONFLICTS are preserved, never resolved by the rebuild. When
+ *      the rebuilt record still rests on the same primary value, the
+ *      prior conflict state (both candidates + provenance) is carried
+ *      over verbatim. If the consumer re-answered with a different
+ *      value, the rebuilt record's own state stands.
+ *   3. CONFIRMATION is preserved. A document-extracted fact the
+ *      consumer confirmed (status 'reported', source 'document')
+ *      stays confirmed when the rebuild reproduces the same value.
+ *   4. PANEL facts are preserved. A consumer-entered fact that the
+ *      questionnaire rebuild cannot reproduce (it was entered in the
+ *      form-preparation panel, source 'answer'/'narrative', and its id
+ *      is not questionnaire-derived) is carried over when the rebuild
+ *      has no value for it.
+ *   5. NARRATIVE state is preserved when the story text is unchanged:
+ *      approvals, event corrections and confirmations carry over. A
+ *      changed story text produces a fresh narrative (the consumer
+ *      re-answered).
+ * Everything else — facts the rebuild derives from the CURRENT
+ * answers and document review — stands as rebuilt.
+ *
+ * @param {object} freshRecord record rebuilt from current answers/review
+ * @param {object} priorRecord the live record holding consumer state
+ * @param {object} [options] { answerFactIds: string[] } — fact ids the
+ *   rebuild derived from questionnaire answers (rule 4 exclusion list)
+ * @returns {{record, correctedFactIds, preservedConflictIds,
+ *   confirmedFactIds, preservedFactIds, narrativePreserved}}
+ */
+export function overlayConsumerState(freshRecord, priorRecord, options = {}, nowIso) {
+  const report = {
+    correctedFactIds: [],
+    preservedConflictIds: [],
+    confirmedFactIds: [],
+    preservedFactIds: [],
+    narrativePreserved: false,
+  };
+  if (!freshRecord || !freshRecord.facts || !priorRecord || !priorRecord.facts) {
+    return { record: freshRecord, ...report };
+  }
+  const now = nowIso || null;
+  const answerFactIds = new Set(Array.isArray(options.answerFactIds) ? options.answerFactIds : []);
+  let changed = false;
+
+  for (const [id, prior] of Object.entries(priorRecord.facts)) {
+    if (!prior || typeof prior !== 'object') continue;
+    const fresh = freshRecord.facts[id];
+
+    // Rule 1 — correction wins over the rebuilt answer.
+    if (prior.source === 'correction' && prior.value !== null && prior.value !== undefined && prior.value !== '') {
+      if (!fresh || String(fresh.value ?? '') !== String(prior.value) || fresh.source !== 'correction') {
+        upsertFact(freshRecord, { id, value: prior.value, source: 'correction', type: prior.type }, now);
+        report.correctedFactIds.push(id);
+        changed = true;
+      }
+      continue;
+    }
+
+    // Rule 2 — preserve an unresolved conflict resting on the same
+    // primary value; both candidates and their provenance survive.
+    if (prior.status === 'conflicting') {
+      const samePrimary = fresh && String(fresh.value ?? '') === String(prior.value ?? '');
+      if (!fresh || samePrimary) {
+        if (!fresh || fresh.status !== 'conflicting'
+          || JSON.stringify(fresh.alternatives || []) !== JSON.stringify(prior.alternatives || [])) {
+          freshRecord.facts[id] = cloneFact(prior);
+          report.preservedConflictIds.push(id);
+          changed = true;
+        }
+      }
+      continue;
+    }
+
+    // Rule 3 — a confirmed document fact stays confirmed when the
+    // rebuild reproduces the same extracted value.
+    if (prior.source === 'document' && prior.status === 'reported') {
+      if (fresh && fresh.status === 'extracted-unconfirmed'
+        && String(fresh.value ?? '') === String(prior.value ?? '')) {
+        confirmFact(freshRecord, id, now);
+        report.confirmedFactIds.push(id);
+        changed = true;
+      }
+      continue;
+    }
+
+    // Rule 4 — panel-entered facts the rebuild cannot reproduce.
+    if ((prior.source === 'answer' || prior.source === 'narrative')
+      && !answerFactIds.has(id)
+      && prior.value !== null && prior.value !== undefined && prior.value !== ''
+      && (!fresh || fresh.value === null || fresh.value === undefined || fresh.value === '')) {
+      freshRecord.facts[id] = cloneFact(prior);
+      report.preservedFactIds.push(id);
+      changed = true;
+    }
+  }
+
+  // Rule 5 — narrative approvals/corrections survive an unchanged story.
+  if (priorRecord.narrative && freshRecord.narrative) {
+    const mainText = (n) => {
+      const ev = (n.events || []).find((e) => e && e.id === 'story_main') || (n.events || [])[0];
+      return ev ? String(ev.text || '') : '';
+    };
+    if (mainText(priorRecord.narrative) !== '' && mainText(priorRecord.narrative) === mainText(freshRecord.narrative)) {
+      freshRecord.narrative = JSON.parse(JSON.stringify(priorRecord.narrative));
+      report.narrativePreserved = true;
+    }
+  }
+
+  if (changed) {
+    // The outputs the consumer is looking at were derived from the
+    // pre-overlay record; they are stale until regenerated from this
+    // one (the caller regenerates and then calls markOutputsFresh).
+    freshRecord.outputsStale = true;
+    freshRecord.updatedAt = now;
+  }
+  return { record: freshRecord, ...report };
+}
+
 /** Facts that block form completion: conflicting or unconfirmed-required. */
 export function getBlockingIssues(record) {
   const issues = [];
