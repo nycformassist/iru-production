@@ -90,7 +90,7 @@ export default async function handler(req, res) {
   // Optional image-review findings: strictly re-validated server-side.
   // Client-supplied reviews are treated as unverified observations only —
   // they can refine guidance, never establish facts or verification.
-  const validatedReviews = validateImageReviews(imageReviews);
+  const validatedReviews = validateImageReviews(imageReviews, lang);
   if (!validatedReviews.ok) {
     return res.status(400).json({ error: "Invalid submission.", details: [validatedReviews.error] });
   }
@@ -103,14 +103,40 @@ export default async function handler(req, res) {
     console.log(`[iru] analyze with ${validatedReviews.reviews.length} validated image observation(s)`);
   }
 
-  const min = minimizeForModel(sanitized.answers, narrativeStarters);
   // Canonical fact record (directive §4/§5): strictly re-validated here.
+  const cleanRecord = sanitizeFactRecord(factRecord);
+
+  // Correction precedence (defect-closure directive 2026-10-23,
+  // Priority 2): a consumer correction recorded in the canonical fact
+  // record OUTRANKS the original questionnaire answer for the same
+  // field. Without this overlay, re-running the analysis rebuilt gaps
+  // and findings from the pre-correction answers, so corrected values
+  // silently reverted server-side even when the client record was
+  // right. The overlay applies to exactly the allowlisted analysis
+  // fields; narrative text is excluded (narrative corrections flow
+  // through the narrative module, not the fact-correction path).
+  if (cleanRecord) {
+    const OVERLAY_FIELDS = new Set([
+      'country_of_origin', 'residence_country', 'country_of_birth', 'citizenship',
+      'entry_date', 'case_type',
+      'has_passport', 'has_i94', 'has_lease', 'has_persecution_proof',
+      'has_green_card', 'has_tax_transcripts', 'has_marriage_cert',
+      'has_proof_of_relationship', 'has_arrests',
+    ]);
+    for (const fact of Object.values(cleanRecord.facts)) {
+      if (fact && fact.source === 'correction' && OVERLAY_FIELDS.has(fact.id)
+        && typeof fact.value === 'string' && fact.value !== '' && fact.value.length <= 200) {
+        sanitized.answers[fact.id] = fact.value;
+      }
+    }
+  }
+
+  const min = minimizeForModel(sanitized.answers, narrativeStarters);
   // Only document-extracted facts are passed to the model — as document
   // CONTENTS to cross-check against the applicant's answers, never as
   // established facts. Client-claimed 'verified' facts are dropped by the
   // sanitizer. Identifier-class facts (names, A-numbers, passport numbers)
   // are excluded: the model never needs their values.
-  const cleanRecord = sanitizeFactRecord(factRecord);
   const IDENTIFIER_FACTS = new Set(['full_name', 'a_number', 'passport_number', 'ssn', 'usci_number', 'spouse_name']);
   const documentFacts = cleanRecord
     ? Object.values(cleanRecord.facts)
@@ -120,7 +146,15 @@ export default async function handler(req, res) {
     : [];
   // Evidence-gap engine: server-side KB records for every missing/unknown
   // item. The model tailors these; it never invents alternatives.
+  // The LIVE path keeps the EN records: the prompt instructs the model to
+  // answer in the target language, so it localizes KB-derived content
+  // itself. The DETERMINISTIC fallback paths consume localized records
+  // (buildGapRecords with lang) so a non-EN fallback never mixes English
+  // KB text into a localized summary.
   const gaps = buildGapRecords(min, validatedReviews.reviews);
+  const gapsForFallback = (lang && lang !== 'EN')
+    ? buildGapRecords(min, validatedReviews.reviews, lang)
+    : gaps;
 
   // ── Limited evaluation (B2C §3/§4): the $1 deliverable. Deterministic
   // category-level result ONLY — it never reaches the model, the prompt,
@@ -146,7 +180,7 @@ export default async function handler(req, res) {
         });
       }
     }
-    const evaluation = buildLimitedEvaluation(min);
+    const evaluation = buildLimitedEvaluation(min, lang);
     if (paywallOn) {
       const consumed = entitlementStore.consumeByToken(entitlementToken);
       if (!consumed.ok) {
@@ -188,7 +222,7 @@ export default async function handler(req, res) {
     await Promise.race([streamPromise, timeoutPromise]);
 
     const validated = validateModelOutput(fullText);
-    const assessment = validated.ok ? validated.data : fallbackAssessment(min, gaps, validatedReviews.reviews);
+    const assessment = validated.ok ? validated.data : fallbackAssessment(min, gapsForFallback, validatedReviews.reviews, lang);
     if (!validated.ok) {
       const durationMs = Date.now() - startTime;
       console.error(JSON.stringify({
@@ -232,7 +266,7 @@ export default async function handler(req, res) {
     send({ 
       type: "error", 
       status: "ai_unavailable",
-      assessment: fallbackAssessment(min, gaps, validatedReviews.reviews) 
+      assessment: fallbackAssessment(min, gapsForFallback, validatedReviews.reviews, lang) 
     });
     res.end();
   }
