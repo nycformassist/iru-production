@@ -20,7 +20,7 @@
  */
 
 export const FORM_REGISTRY_VERSION = 1;
-export const REGISTRY_CHECKED_DATE = '2026-10-21';
+export const REGISTRY_CHECKED_DATE = '2026-10-23';
 
 const S589 = 'form1[0].#subform[0]';
 const S765_1 = 'form1[0].Page1[0]';
@@ -33,7 +33,7 @@ export const FORM_REGISTRY = [
     name: 'Form I-589, Application for Asylum and for Withholding of Removal',
     editionDate: '07/28/26',
     editionNote:
-      'Edition printed on the PDF USCIS serves (retrieved 2026-10-21). The I-589 web page lists 01/20/25 as the current edition; USCIS also accepts editions 01/20/25 and 09/03/24.',
+      'Edition printed on the PDF USCIS serves (retrieved 2026-10-21; re-verified against the USCIS monitor baseline 2026-10-23). The I-589 web page listed 01/20/25 as the current edition until 2026-10-22, when it moved to 07/28/26 — the page now matches the served PDF. USCIS also accepts editions 01/20/25 and 09/03/24.',
     sourceUrl: 'https://www.uscis.gov/i-589',
     pdfUrl: 'https://www.uscis.gov/sites/default/files/document/forms/i-589.pdf',
     instructionsUrl: 'https://www.uscis.gov/sites/default/files/document/forms/i-589instr.pdf',
@@ -42,6 +42,12 @@ export const FORM_REGISTRY = [
     checkedDate: REGISTRY_CHECKED_DATE,
     applicability:
       'For people in the United States applying for asylum or withholding of removal. The consumer chooses this form; IRU does not determine eligibility.',
+    applicabilityI18n: {
+      ES: 'Para personas en los Estados Unidos que solicitan asilo o suspensión de deportación. El consumidor elige este formulario; IRU no determina la elegibilidad.',
+      ZH: '适用于在美国申请庇护或暂缓遣返的人。由消费者选择此表格；IRU 不决定资格。',
+      HT: 'Pou moun Ozetazini k ap aplike pou azil oswa sispansyon depòtasyon. Konsomatè a chwazi fòm sa a; IRU pa detèmine elijibilite.',
+      AR: 'للأشخاص في الولايات المتحدة المتقدمين بطلب اللجوء أو وقف الترحيل. يختار المستهلك هذا النموذج؛ لا تحدد IRU الأهلية.',
+    },
     fields: [
       { pdfField: `${S589}.PtAILine1_ANumber[0]`, factId: 'a_number', required: false, transform: 'aNumber', label: 'A-Number (Part A.I, Item 1)' },
       { pdfField: `${S589}.PtAILine4_LastName[0]`, factId: 'family_name', required: true, label: 'Complete last name (Item 4)', question: 'What is your complete last (family) name?' },
@@ -97,6 +103,12 @@ export const FORM_REGISTRY = [
     checkedDate: REGISTRY_CHECKED_DATE,
     applicability:
       'For people in the United States applying for an Employment Authorization Document (work permit) in an eligibility category they select. The consumer chooses this form and category; IRU does not determine eligibility.',
+    applicabilityI18n: {
+      ES: 'Para personas en los Estados Unidos que solicitan un Documento de Autorización de Empleo (permiso de trabajo) en una categoría de elegibilidad que ellos seleccionan. El consumidor elige este formulario y categoría; IRU no determina la elegibilidad.',
+      ZH: '适用于在美国申请就业授权文件（工作许可）的人，类别由其自行选择。由消费者选择此表格和类别；IRU 不决定资格。',
+      HT: 'Pou moun Ozetazini k ap aplike pou yon Dokiman Otorizasyon Travay (pèmi travay) nan yon kategori elijibilite yo chwazi. Konsomatè a chwazi fòm sa a ak kategori a; IRU pa detèmine elijibilite.',
+      AR: 'للأشخاص في الولايات المتحدة المتقدمين بطلب وثيقة تصريح عمل (تصريح عمل) في فئة أهلية يختارونها. يختار المستهلك هذا النموذج والفئة؛ لا تحدد IRU الأهلية.',
+    },
     fields: [
       // Reason for applying — indices per form order: [0]=1.a initial, [1]=1.b replacement, [2]=1.c renewal.
       { pdfField: `${S765_1}.Part1_Checkbox[0]`, factId: 'application_reason', required: true, kind: 'checkbox', matchValue: 'initial', label: 'Reason — initial permission to accept employment (Part 1, 1.a)', question: 'Is this an initial application, a replacement, or a renewal?' },
@@ -146,6 +158,69 @@ export const FORM_REGISTRY = [
 
 export function getFormEntry(formId) {
   return FORM_REGISTRY.find((f) => f.id === formId) || null;
+}
+
+/**
+ * Localized missing-information questions (language-continuity
+ * directive 2026-10-22). The registry `question` on each field is the
+ * English prompt that explains what the OFFICIAL form item asks for;
+ * these are the same explanations in the applicant's language. Field
+ * `label`s are NOT translated — they name official form items.
+ * Keyed by form id, then fact id (the question lives on the first
+ * field for each fact; later same-fact fields carry no question).
+ */
+export const FIELD_QUESTION_I18N = {
+  'I-589': {
+    family_name: { ES: '¿Cuál es su apellido completo?', ZH: '您的完整姓氏是什么？', HT: 'Ki non fanmi konplè ou?', AR: 'ما هو اسم عائلتك الكامل؟' },
+    given_name: { ES: '¿Cuál es su primer nombre?', ZH: '您的名字是什么？', HT: 'Ki prenon ou?', AR: 'ما هو اسمك الأول؟' },
+    residence_street: { ES: '¿Cuál es la dirección donde reside físicamente en EE. UU.?', ZH: '您在美国实际居住的街道地址是什么？', HT: 'Ki adrès ri kote ou rete fizikman Ozetazini?', AR: 'ما هو عنوان الشارع الذي تقيم فيه فعليًا في الولايات المتحدة؟' },
+    residence_city: { ES: '¿En qué ciudad de EE. UU. reside?', ZH: '您居住在美国哪个城市？', HT: 'Nan ki vil Ozetazini ou rete?', AR: 'في أي مدينة أمريكية تقيم؟' },
+    residence_region: { ES: '¿En qué estado de EE. UU. reside?', ZH: '您居住在美国哪个州？', HT: 'Nan ki eta Ozetazini ou rete?', AR: 'في أي ولاية أمريكية تقيم؟' },
+    residence_postal_code: { ES: '¿Cuál es su código postal de EE. UU.?', ZH: '您的美国邮政编码是什么？', HT: 'Ki kòd postal Etazini ou?', AR: 'ما هو الرمز البريدي الأمريكي الخاص بك؟' },
+    gender: { ES: '¿Cuál es su sexo tal como debe aparecer en el formulario (Masculino/Femenino)?', ZH: '您的性别是什么，应如表格所示（男/女）？', HT: 'Ki sèks ou jan li dwe parèt sou fòm nan (Gason/Fi)?', AR: 'ما هو جنسك كما يجب أن يظهر في النموذج (ذكر/أنثى)؟' },
+    marital_status: { ES: '¿Cuál es su estado civil?', ZH: '您的婚姻状况是什么？', HT: 'Ki eta sivil ou?', AR: 'ما هي حالتك الاجتماعية؟' },
+    date_of_birth: { ES: '¿Cuál es su fecha de nacimiento?', ZH: '您的出生日期是什么？', HT: 'Ki dat nesans ou?', AR: 'ما هو تاريخ ميلادك؟' },
+    city_of_birth: { ES: '¿En qué ciudad y país nació?', ZH: '您出生在哪个城市和国家？', HT: 'Nan ki vil ak peyi ou fèt?', AR: 'في أي مدينة وبلد وُلدت؟' },
+    citizenship: { ES: '¿Cuál es su nacionalidad (ciudadanía) actual?', ZH: '您目前的国籍（公民身份）是什么？', HT: 'Ki nasyonalite (sitwayènte) ou kounye a?', AR: 'ما هي جنسيتك (مواطنتك) الحالية؟' },
+  },
+  'I-765': {
+    application_reason: { ES: '¿Es esta una solicitud inicial, un reemplazo o una renovación?', ZH: '这是初次申请、补发还是续期？', HT: 'Èske se yon premye aplikasyon, yon ranplasman, oswa yon renouvèlman?', AR: 'هل هذا طلب أولي أم استبدال أم تجديد؟' },
+    family_name: { ES: '¿Cuál es su apellido?', ZH: '您的姓氏是什么？', HT: 'Ki non fanmi ou?', AR: 'ما هو اسم عائلتك؟' },
+    given_name: { ES: '¿Cuál es su nombre?', ZH: '您的名字是什么？', HT: 'Ki prenon ou?', AR: 'ما هو اسمك الأول؟' },
+    mailing_street: { ES: '¿Cuál es su dirección postal en EE. UU.?', ZH: '您的美国邮寄地址是什么？', HT: 'Ki adrès postal ou Ozetazini?', AR: 'ما هو عنوانك البريدي في الولايات المتحدة؟' },
+    mailing_city: { ES: '¿Ciudad de la dirección postal?', ZH: '邮寄地址城市？', HT: 'Vil adrès postal?', AR: 'مدينة العنوان البريدي؟' },
+    mailing_region: { ES: '¿Estado de la dirección postal?', ZH: '邮寄地址州？', HT: 'Eta adrès postal?', AR: 'ولاية العنوان البريدي؟' },
+    mailing_postal_code: { ES: '¿Código postal de la dirección postal?', ZH: '邮寄地址邮政编码？', HT: 'Kòd postal adrès postal?', AR: 'الرمز البريدي للعنوان البريدي؟' },
+    gender: { ES: '¿Cuál es su sexo tal como debe aparecer en el formulario (Masculino/Femenino)?', ZH: '您的性别是什么，应如表格所示（男/女）？', HT: 'Ki sèks ou jan li dwe parèt sou fòm nan (Gason/Fi)?', AR: 'ما هو جنسك كما يجب أن يظهر في النموذج (ذكر/أنثى)؟' },
+    marital_status: { ES: '¿Cuál es su estado civil?', ZH: '您的婚姻状况是什么？', HT: 'Ki eta sivil ou?', AR: 'ما هي حالتك الاجتماعية؟' },
+    citizenship: { ES: '¿Cuál es su país de ciudadanía o nacionalidad?', ZH: '您的公民身份或国籍所属国家是什么？', HT: 'Ki peyi sitwayènte oswa nasyonalite ou?', AR: 'ما هو بلد جنسيتك أو مواطنتك؟' },
+    city_of_birth: { ES: '¿En qué ciudad o pueblo nació?', ZH: '您出生在哪个城市或城镇？', HT: 'Nan ki vil ou fèt?', AR: 'في أي مدينة أو بلدة وُلدت؟' },
+    country_of_birth: { ES: '¿En qué país nació?', ZH: '您出生在哪个国家？', HT: 'Nan ki peyi ou fèt?', AR: 'في أي بلد وُلدت؟' },
+    date_of_birth: { ES: '¿Cuál es su fecha de nacimiento?', ZH: '您的出生日期是什么？', HT: 'Ki dat nesans ou?', AR: 'ما هو تاريخ ميلادك؟' },
+  },
+};
+
+/**
+ * The missing-information question for a field in `lang`: the
+ * localized explanation when one exists, else the field's own
+ * (English) question, else null (caller falls back to its template).
+ */
+export function localizedFieldQuestion(entry, field, lang) {
+  if (!field) return null;
+  if (lang && lang !== 'EN') {
+    const q = FIELD_QUESTION_I18N[entry?.id]?.[field.factId]?.[lang];
+    if (q) return q;
+  }
+  return field.question ? field.question : null;
+}
+
+/** The registry entry's applicability prose in `lang` (EN default). */
+export function localizedApplicability(entry, lang) {
+  if (!entry) return '';
+  if (lang && lang !== 'EN' && entry.applicabilityI18n && entry.applicabilityI18n[lang]) {
+    return entry.applicabilityI18n[lang];
+  }
+  return entry.applicability || '';
 }
 
 /**
