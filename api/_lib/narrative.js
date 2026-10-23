@@ -164,13 +164,78 @@ function findEvent(narrative, eventId) {
 }
 
 /**
+ * Localized applicant-facing narrative text (language-continuity
+ * directive 2026-10-22): the issue questions analyzeNarrative asks the
+ * applicant, and the packet status labels. The applicant's own event
+ * text is NEVER translated — only IRU's questions around it. English
+ * is the default and matches the original strings exactly.
+ */
+const NARRATIVE_I18N = {
+  EN: {
+    missingDate: (s) => `When did this happen? "${s}" — an approximate month/year is fine; IRU will record it as approximate, not exact.`,
+    unclearEvent: (s) => `Can you add a little more detail, in your own words, about what happened? "${s}"`,
+    unconfirmedDocument: (s) => `This event came from a document, not from you. Is it accurate as written? "${s}"`,
+    factConflict: (f) => `Your information on record disagrees with itself about "${f}". Please resolve that conflict before this part of your story is used.`,
+    dateInconsistency: (d, v) => `The date here (${d}) differs from the date on record for the same event (${v}). Which is correct?`,
+    unexplainedGap: (months, a, b) => `There is a gap of about ${months} months between "${a}" and "${b}". Is anything important missing in between? You may also leave this as-is.`,
+    packetApproved: 'Personal narrative — reviewed and approved by the applicant.',
+    packetDraft: 'Personal narrative — DRAFT, not yet reviewed and approved by the applicant. Not used in form preparation.',
+  },
+  ES: {
+    missingDate: (s) => `¿Cuándo sucedió esto? "${s}" — un mes/año aproximado está bien; IRU lo registrará como aproximado, no exacto.`,
+    unclearEvent: (s) => `¿Puede agregar un poco más de detalle, con sus propias palabras, sobre lo que sucedió? "${s}"`,
+    unconfirmedDocument: (s) => `Este evento provino de un documento, no de usted. ¿Es exacto tal como está escrito? "${s}"`,
+    factConflict: (f) => `Su información registrada no coincide consigo misma sobre "${f}". Resuelva ese conflicto antes de que esta parte de su historia se utilice.`,
+    dateInconsistency: (d, v) => `La fecha aquí (${d}) difiere de la fecha registrada para el mismo evento (${v}). ¿Cuál es la correcta?`,
+    unexplainedGap: (months, a, b) => `Hay un intervalo de aproximadamente ${months} meses entre "${a}" y "${b}". ¿Falta algo importante en el medio? También puede dejarlo como está.`,
+    packetApproved: 'Narrativa personal — revisada y aprobada por el solicitante.',
+    packetDraft: 'Narrativa personal — BORRADOR, aún no revisada ni aprobada por el solicitante. No se utiliza en la preparación de formularios.',
+  },
+  ZH: {
+    missingDate: (s) => `这件事是什么时候发生的？"${s}" — 大致的月份/年份即可；IRU 会将其记录为近似值，而非确切值。`,
+    unclearEvent: (s) => `您能用自己的话再补充一些关于所发生事情的细节吗？"${s}"`,
+    unconfirmedDocument: (s) => `此事件来自一份文件，而不是来自您本人。按所写内容它准确吗？"${s}"`,
+    factConflict: (f) => `您的记录信息在"${f}"上自相矛盾。在使用这部分故事之前，请先解决该冲突。`,
+    dateInconsistency: (d, v) => `这里的日期（${d}）与记录中同一事件的日期（${v}）不同。哪一个是正确的？`,
+    unexplainedGap: (months, a, b) => `"${a}"与"${b}"之间相隔约 ${months} 个月。中间是否遗漏了什么重要的事情？您也可以保持原样。`,
+    packetApproved: '个人陈述 — 已经申请人审核并批准。',
+    packetDraft: '个人陈述 — 草稿，尚未经申请人审核和批准。不用于表格准备。',
+  },
+  HT: {
+    missingDate: (s) => `Ki lè sa te rive? "${s}" — yon mwa/ane apwoksimatif bon; IRU ap anrejistre li kòm apwoksimatif, pa egzat.`,
+    unclearEvent: (s) => `Èske ou ka ajoute yon ti detay anplis, nan pwòp mo ou, sou sa ki te rive a? "${s}"`,
+    unconfirmedDocument: (s) => `Evènman sa a soti nan yon dokiman, pa nan ou menm. Èske li egzat jan li ekri a? "${s}"`,
+    factConflict: (f) => `Enfòmasyon ou nan dosye a pa dakò ak tèt li sou "${f}". Tanpri rezoud konfli sa a anvan yo itilize pati sa a nan istwa ou a.`,
+    dateInconsistency: (d, v) => `Dat ki isit la (${d}) diferan de dat ki nan dosye a pou menm evènman an (${v}). Ki youn ki korèk?`,
+    unexplainedGap: (months, a, b) => `Gen yon espas anviwon ${months} mwa ant "${a}" ak "${b}". Èske gen yon bagay enpòtan ki manke nan mitan? Ou ka kite li jan li ye tou.`,
+    packetApproved: 'Naratif pèsonèl — aplikan an te revize epi apwouve li.',
+    packetDraft: 'Naratif pèsonèl — BOUYON, aplikan an poko revize epi apwouve li. Yo pa itilize li nan preparasyon fòm.',
+  },
+  AR: {
+    missingDate: (s) => `متى حدث هذا؟ "${s}" — شهر/سنة تقريبي يكفي؛ ستسجله IRU على أنه تقريبي وليس دقيقًا.`,
+    unclearEvent: (s) => `هل يمكنك إضافة المزيد من التفاصيل بكلماتك الخاصة حول ما حدث؟ "${s}"`,
+    unconfirmedDocument: (s) => `جاء هذا الحدث من مستند وليس منك. هل هو دقيق كما هو مكتوب؟ "${s}"`,
+    factConflict: (f) => `معلوماتك المسجلة تتعارض مع نفسها بشأن "${f}". يرجى حل هذا التعارض قبل استخدام هذا الجزء من قصتك.`,
+    dateInconsistency: (d, v) => `التاريخ هنا (${d}) يختلف عن التاريخ المسجل لنفس الحدث (${v}). أيهما صحيح؟`,
+    unexplainedGap: (months, a, b) => `توجد فجوة تبلغ حوالي ${months} شهرًا بين "${a}" و"${b}". هل ينقص شيء مهم في المنتصف؟ يمكنك أيضًا ترك الأمر كما هو.`,
+    packetApproved: 'السرد الشخصي — راجعه مقدم الطلب ووافق عليه.',
+    packetDraft: 'السرد الشخصي — مسودة، لم يراجعها مقدم الطلب ولم يوافق عليها بعد. لا تُستخدم في إعداد النماذج.',
+  },
+};
+
+function narrativeStrings(lang) {
+  return NARRATIVE_I18N[lang] || NARRATIVE_I18N.EN;
+}
+
+/**
  * Analyze the narrative against the canonical fact record.
  * Returns a chronology (dated events ascending; undated last, in the
  * order given — their order is NOT invented) and a list of issues,
  * each with a focused question for the applicant. Issues never alter
  * the events themselves.
  */
-export function analyzeNarrative(narrative, record) {
+export function analyzeNarrative(narrative, record, lang = 'EN') {
+  const s = narrativeStrings(lang);
   const events = narrative?.events || [];
   const dated = events.filter((e) => e.dateIso).slice()
     .sort((a, b) => (a.dateIso < b.dateIso ? -1 : a.dateIso > b.dateIso ? 1 : 0));
@@ -182,19 +247,19 @@ export function analyzeNarrative(narrative, record) {
     if (!event.dateIso) {
       issues.push({
         eventId: event.id, kind: 'missing-date', blocking: true,
-        question: `When did this happen? "${snippet(event.text)}" — an approximate month/year is fine; IRU will record it as approximate, not exact.`,
+        question: s.missingDate(snippet(event.text)),
       });
     }
     if (String(event.text || '').trim().length < MIN_EVENT_DETAIL_CHARS) {
       issues.push({
         eventId: event.id, kind: 'unclear-event', blocking: false,
-        question: `Can you add a little more detail, in your own words, about what happened? "${snippet(event.text)}"`,
+        question: s.unclearEvent(snippet(event.text)),
       });
     }
     if (event.needsConfirmation) {
       issues.push({
         eventId: event.id, kind: 'unconfirmed-document-event', blocking: true,
-        question: `This event came from a document, not from you. Is it accurate as written? "${snippet(event.text)}"`,
+        question: s.unconfirmedDocument(snippet(event.text)),
       });
     }
     for (const factId of event.factIds || []) {
@@ -203,14 +268,14 @@ export function analyzeNarrative(narrative, record) {
       if (fact.status === 'conflicting') {
         issues.push({
           eventId: event.id, kind: 'fact-conflict', blocking: true, factId,
-          question: `Your information on record disagrees with itself about "${factId}". Please resolve that conflict before this part of your story is used.`,
+          question: s.factConflict(factId),
         });
       } else if (event.dateIso && fact.value && fact.type === 'date') {
         const factDate = parseEventDate(fact.value);
         if (factDate && factDate.iso !== event.dateIso) {
           issues.push({
             eventId: event.id, kind: 'date-inconsistency', blocking: true, factId,
-            question: `The date here (${event.date}) differs from the date on record for the same event (${fact.value}). Which is correct?`,
+            question: s.dateInconsistency(event.date, fact.value),
           });
         }
       }
@@ -221,7 +286,7 @@ export function analyzeNarrative(narrative, record) {
     if (days > GAP_THRESHOLD_DAYS) {
       issues.push({
         eventId: dated[i].id, kind: 'unexplained-gap', blocking: false,
-        question: `There is a gap of about ${Math.round(days / 30)} months between "${snippet(dated[i - 1].text)}" and "${snippet(dated[i].text)}". Is anything important missing in between? You may also leave this as-is.`,
+        question: s.unexplainedGap(Math.round(days / 30), snippet(dated[i - 1].text), snippet(dated[i].text)),
       });
     }
   }
@@ -263,16 +328,16 @@ export function isNarrativeApproved(narrative) {
  * unapproved narrative is exported as an UNAPPROVED DRAFT — visible to
  * the applicant in their own package, never represented as settled.
  */
-export function narrativeForPacket(narrative, record) {
+export function narrativeForPacket(narrative, record, lang = 'EN') {
   if (!narrative || !Array.isArray(narrative.events) || narrative.events.length === 0) return null;
-  const { chronology, issues } = analyzeNarrative(narrative, record);
+  const { chronology, issues } = analyzeNarrative(narrative, record, lang);
   return {
     status: narrative.status,
     approved: isNarrativeApproved(narrative),
     approvedAt: narrative.approvedAt,
     label: isNarrativeApproved(narrative)
-      ? 'Personal narrative — reviewed and approved by the applicant.'
-      : 'Personal narrative — DRAFT, not yet reviewed and approved by the applicant. Not used in form preparation.',
+      ? narrativeStrings(lang).packetApproved
+      : narrativeStrings(lang).packetDraft,
     chronology: chronology.map((e) => ({
       date: e.date, datePrecision: e.datePrecision, text: e.text, origin: e.origin,
     })),

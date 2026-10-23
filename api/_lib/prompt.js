@@ -242,6 +242,15 @@ export function validateModelOutput(text) {
   if (banned.test(haystack)) {
     return { ok: false, error: 'model output contained legal-certainty language' };
   }
+  // The same certainty claims in the other supported languages
+  // (language-continuity directive 2026-10-22 — the safety screen must
+  // not be English-only now that output is localized). Additive only:
+  // these patterns refuse output; they never admit anything.
+  const bannedLocalized =
+    /(el caso es (fuerte|sólido)|será aprobado|garantizado|definitivamente elegible|ka a (fò|solid)|yo garanti|aprobación garantizada|案件很强|保证(获批|成功)|一定符合资格|القضية قوية|مضمون|سيتم الموافقة)/i;
+  if (bannedLocalized.test(haystack)) {
+    return { ok: false, error: 'model output contained legal-certainty language' };
+  }
   // Refuse false verification claims about documents/evidence. IRU never
   // verifies documents, so the model must never claim it did.
   const bannedVerification =
@@ -249,7 +258,16 @@ export function validateModelOutput(text) {
   if (bannedVerification.test(haystack)) {
     return { ok: false, error: 'model output claimed documents were verified/authenticated' };
   }
+  // Verification claims in the other supported languages (additive).
+  const bannedVerificationLocalized =
+    /((documento|evidencia|pasaporte|certificado|registro)s?\s+(está|están|ha sido|fue|fueron)\s+(verificado|verificada|autenticado|autenticada))|((dokiman|prèv|paspò|sètifika)\s+(verifye|otantike))|((文档|证据|护照|证书|证件)(已|已经)?(被)?(核实|验证|认证))|((المستند|الدليل|جواز السفر|الشهادة)\s+(موثّق|تم التحقق منه|تمت المصادقة عليه))/i;
+  if (bannedVerificationLocalized.test(haystack)) {
+    return { ok: false, error: 'model output claimed documents were verified/authenticated' };
+  }
   if (/legally sufficient/i.test(haystack)) {
+    return { ok: false, error: 'model output claimed legal sufficiency' };
+  }
+  if (/(legalmente suficiente|sifizan legalman|legalman sifi|法律上充分|كافٍ قانونيًا|كافية قانونيًا)/i.test(haystack)) {
     return { ok: false, error: 'model output claimed legal sufficiency' };
   }
   // An image review can never independently verify anything. Reject any
@@ -257,34 +275,110 @@ export function validateModelOutput(text) {
   if (/independently[- ]verified/i.test(haystack)) {
     return { ok: false, error: 'model output claimed independent verification' };
   }
+  if (/(verificado independientemente|verifye endepandamman|独立核实|تم التحقق منه بشكل مستقل)/i.test(haystack)) {
+    return { ok: false, error: 'model output claimed independent verification' };
+  }
   // The model must not declare anything "ready" as a case-status claim.
   if (/(case|application|requirement)\s+is\s+ready/i.test(haystack)) {
+    return { ok: false, error: 'model output declared the case ready' };
+  }
+  if (/(el caso está listo|la solicitud está lista|ka a pare|طلبك جاهز|案件已准备就绪)/i.test(haystack)) {
     return { ok: false, error: 'model output declared the case ready' };
   }
   return { ok: true, data };
 }
 
+/**
+ * Localized framing for the fallback assessment (language-continuity
+ * directive 2026-10-22). The framing prose is localized; the evidence
+ * KB content it carries (target facts, alternatives, next actions from
+ * lib/evidence.js) remains the KB's English text, exactly as the live
+ * path's packet does — the model localizes KB-derived content in the
+ * live path, the deterministic fallback cannot.
+ */
+const FALLBACK_I18N = {
+  EN: {
+    summary: 'The automated readiness review could not be completed. The evidence checklist below is complete — please present this packet to a qualified legal professional for review.',
+    imageNote: ' One or more document photos were uploaded for automated review; the observations were not verified and did not change any evidence state — a qualified human must still examine the originals.',
+    factCaseType: 'Case type', factCountry: 'Country of origin', factEntryYear: 'Entry year',
+    missingDefault: 'No evidence items were marked missing.',
+    futureDate: 'The entry year provided is in the future and needs correction.',
+    suggestedQuestion: 'What documents should I prioritize gathering before my consultation?',
+    uncertainty: 'Automated analysis was unavailable for this submission.',
+    notLegalAdvice: 'This is an information-readiness summary, not legal advice. A qualified immigration attorney or accredited representative should review the complete file.',
+    nextActionWrap: (step, responsible, priority) => `${step} (Responsible: ${responsible}; priority: ${priority}.)`,
+    imageObsNote: (category, legibility) => `Automated observation (NOT verified): the uploaded photo appears to show "${category}" (legibility: ${legibility}). A qualified human must examine the original document.`,
+  },
+  ES: {
+    summary: 'La revisión automática de preparación no pudo completarse. La lista de verificación de evidencia a continuación está completa — presente este paquete a un profesional legal calificado para su revisión.',
+    imageNote: ' Se subieron una o más fotos de documentos para revisión automática; las observaciones no fueron verificadas y no cambiaron ningún estado de evidencia — un humano calificado aún debe examinar los originales.',
+    factCaseType: 'Tipo de caso', factCountry: 'País de origen', factEntryYear: 'Año de entrada',
+    missingDefault: 'Ningún elemento de evidencia fue marcado como faltante.',
+    futureDate: 'El año de entrada proporcionado está en el futuro y necesita corrección.',
+    suggestedQuestion: '¿Qué documentos debería priorizar reunir antes de mi consulta?',
+    uncertainty: 'El análisis automático no estuvo disponible para esta presentación.',
+    notLegalAdvice: 'Esto es un resumen de preparación informativa, no asesoría legal. Un abogado de inmigración calificado o un representante acreditado debería revisar el archivo completo.',
+    nextActionWrap: (step, responsible, priority) => `${step} (Responsable: ${responsible}; prioridad: ${priority}.)`,
+    imageObsNote: (category, legibility) => `Observación automática (NO verificada): la foto subida parece mostrar "${category}" (legibilidad: ${legibility}). Un humano calificado debe examinar el documento original.`,
+  },
+  ZH: {
+    summary: '自动准备审核无法完成。下面的证据清单是完整的 — 请将此资料包交给合格的法律专业人士审核。',
+    imageNote: ' 上传了一张或多张文件照片进行自动审核；这些观察未经核实，也没有改变任何证据状态 — 合格的人工审核员仍必须检查原件。',
+    factCaseType: '案件类型', factCountry: '原籍国', factEntryYear: '入境年份',
+    missingDefault: '没有证据项目被标记为缺失。',
+    futureDate: '所提供的入境年份在未来，需要更正。',
+    suggestedQuestion: '在咨询之前，我应该优先收集哪些文件？',
+    uncertainty: '本次提交无法使用自动分析。',
+    notLegalAdvice: '这是信息准备摘要，不是法律建议。合格的移民律师或认可代表应审核完整档案。',
+    nextActionWrap: (step, responsible, priority) => `${step}（负责人：${responsible}；优先级：${priority}。）`,
+    imageObsNote: (category, legibility) => `自动观察（未经核实）：上传的照片似乎显示"${category}"（清晰度：${legibility}）。合格的人工审核员必须检查原始文件。`,
+  },
+  HT: {
+    summary: 'Revizyon preparasyon otomatik la pa t ka konplete. Lis verifikasyon prèv ki anba a konplè — tanpri prezante pake sa a bay yon pwofesyonèl legal kalifye pou revizyon.',
+    imageNote: ' Yo te telechaje youn oswa plizyè foto dokiman pou revizyon otomatik; obsèvasyon yo pa t verifye epi yo pa t chanje okenn eta prèv — yon moun kalifye dwe toujou egzamine orijinal yo.',
+    factCaseType: 'Tip ka', factCountry: 'Peyi orijin', factEntryYear: 'Ane antre',
+    missingDefault: 'Okenn atik prèv pa t make kòm manke.',
+    futureDate: 'Ane antre ou te bay la nan lavni epi li bezwen koreksyon.',
+    suggestedQuestion: 'Ki dokiman mwen ta dwe priyorize rasanble anvan konsiltasyon mwen an?',
+    uncertainty: 'Analiz otomatik pa t disponib pou soumisyon sa a.',
+    notLegalAdvice: 'Sa a se yon rezime preparasyon enfòmasyon, pa konsèy legal. Yon avoka imigrasyon kalifye oswa yon reprezantan akredite ta dwe revize dosye konplè a.',
+    nextActionWrap: (step, responsible, priority) => `${step} (Responsab: ${responsible}; priyorite: ${priority}.)`,
+    imageObsNote: (category, legibility) => `Obsèvasyon otomatik (PA verifye): foto ou te telechaje a sanble montre "${category}" (lizibilite: ${legibility}). Yon moun kalifye dwe egzamine dokiman orijinal la.`,
+  },
+  AR: {
+    summary: 'تعذر إكمال مراجعة الجاهزية الآلية. قائمة التحقق من الأدلة أدناه كاملة — يرجى تقديم هذه الحزمة إلى أخصائي قانوني مؤهل للمراجعة.',
+    imageNote: ' تم تحميل صورة مستند واحدة أو أكثر للمراجعة الآلية؛ لم يتم التحقق من الملاحظات ولم تغير أي حالة دليل — يجب على إنسان مؤهل فحص الأصول.',
+    factCaseType: 'نوع القضية', factCountry: 'بلد الأصل', factEntryYear: 'سنة الدخول',
+    missingDefault: 'لم يتم تعليم أي عناصر أدلة على أنها مفقودة.',
+    futureDate: 'سنة الدخول المقدمة في المستقبل وتحتاج إلى تصحيح.',
+    suggestedQuestion: 'ما المستندات التي يجب أن أولي جمعها الأولوية قبل استشارتي؟',
+    uncertainty: 'لم يكن التحليل الآلي متاحًا لهذا التقديم.',
+    notLegalAdvice: 'هذا ملخص للجاهزية المعلوماتية، وليس مشورة قانونية. يجب على محامي هجرة مؤهل أو ممثل معتمد مراجعة الملف الكامل.',
+    nextActionWrap: (step, responsible, priority) => `${step} (المسؤول: ${responsible}؛ الأولوية: ${priority}.)`,
+    imageObsNote: (category, legibility) => `ملاحظة آلية (غير موثّقة): يبدو أن الصورة المحملة تُظهر "${category}" (الوضوح: ${legibility}). يجب على إنسان مؤهل فحص المستند الأصلي.`,
+  },
+};
+
 /** Safe fallback when the model fails or its output is invalid. */
-export function fallbackAssessment(min, gaps = [], imageReviews = []) {
+export function fallbackAssessment(min, gaps = [], imageReviews = [], lang = 'EN') {
+  const s = FALLBACK_I18N[lang] || FALLBACK_I18N.EN;
   const missing = Object.entries(min.evidence)
     .filter(([, v]) => v === 'no' || v === 'unknown')
     .map(([k]) => k);
   const imageNote = (imageReviews && imageReviews.length > 0)
-    ? ' One or more document photos were uploaded for automated review; the observations were not verified and did not change any evidence state — a qualified human must still examine the originals.'
+    ? s.imageNote
     : '';
   return {
-    readinessSummary:
-      'The automated readiness review could not be completed. The evidence checklist below is complete — please present this packet to a qualified legal professional for review.' + imageNote,
-    factsProvided: [`Case type: ${min.caseType}`, `Country of origin: ${min.countryOfOrigin}`, `Entry year: ${min.entryYear}`],
-    missingInformation: missing.length > 0 ? missing : ['No evidence items were marked missing.'],
+    readinessSummary: s.summary + imageNote,
+    factsProvided: [`${s.factCaseType}: ${min.caseType}`, `${s.factCountry}: ${min.countryOfOrigin}`, `${s.factEntryYear}: ${min.entryYear}`],
+    missingInformation: missing.length > 0 ? missing : [s.missingDefault],
     contradictions: min.entryDateFlag === 'future-date'
-      ? ['The entry year provided is in the future and needs correction.']
+      ? [s.futureDate]
       : [],
     inferences: [],
-    suggestedQuestions: ['What documents should I prioritize gathering before my consultation?'],
-    uncertaintyNotes: ['Automated analysis was unavailable for this submission.'],
-    notLegalAdvice:
-      'This is an information-readiness summary, not legal advice. A qualified immigration attorney or accredited representative should review the complete file.',
+    suggestedQuestions: [s.suggestedQuestion],
+    uncertaintyNotes: [s.uncertainty],
+    notLegalAdvice: s.notLegalAdvice,
     evidenceGaps: (gaps || []).map(g => ({
       key: g.key,
       targetFact: g.targetFact,
@@ -293,12 +387,12 @@ export function fallbackAssessment(min, gaps = [], imageReviews = []) {
         relevance: c.supports,
         limitation: c.limitations,
       })),
-      nextAction: `${g.nextAction.step} (Responsible: ${g.nextAction.responsible}; priority: ${g.nextAction.priority}.)`,
+      nextAction: s.nextActionWrap(g.nextAction.step, g.nextAction.responsible, g.nextAction.priority),
       legalReviewRequired: g.legalReviewRequired,
       // Surface validated image observations in the fallback too, clearly
       // marked as unverified — never as established facts.
       imageObservations: (g.imageObservations || []).map(o => ({
-        note: `Automated observation (NOT verified): the uploaded photo appears to show "${o.documentCategory}" (legibility: ${o.legibility}). A qualified human must examine the original document.`,
+        note: s.imageObsNote(o.documentCategory, o.legibility),
       })),
     })),
   };

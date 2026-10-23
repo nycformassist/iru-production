@@ -90,7 +90,7 @@ export default async function handler(req, res) {
   // Optional image-review findings: strictly re-validated server-side.
   // Client-supplied reviews are treated as unverified observations only —
   // they can refine guidance, never establish facts or verification.
-  const validatedReviews = validateImageReviews(imageReviews);
+  const validatedReviews = validateImageReviews(imageReviews, lang);
   if (!validatedReviews.ok) {
     return res.status(400).json({ error: "Invalid submission.", details: [validatedReviews.error] });
   }
@@ -146,7 +146,7 @@ export default async function handler(req, res) {
         });
       }
     }
-    const evaluation = buildLimitedEvaluation(min);
+    const evaluation = buildLimitedEvaluation(min, lang);
     if (paywallOn) {
       const consumed = entitlementStore.consumeByToken(entitlementToken);
       if (!consumed.ok) {
@@ -188,7 +188,7 @@ export default async function handler(req, res) {
     await Promise.race([streamPromise, timeoutPromise]);
 
     const validated = validateModelOutput(fullText);
-    const assessment = validated.ok ? validated.data : fallbackAssessment(min, gaps, validatedReviews.reviews);
+    const assessment = validated.ok ? validated.data : fallbackAssessment(min, gaps, validatedReviews.reviews, lang);
     if (!validated.ok) {
       const durationMs = Date.now() - startTime;
       console.error(JSON.stringify({
@@ -232,7 +232,7 @@ export default async function handler(req, res) {
     send({ 
       type: "error", 
       status: "ai_unavailable",
-      assessment: fallbackAssessment(min, gaps, validatedReviews.reviews) 
+      assessment: fallbackAssessment(min, gaps, validatedReviews.reviews, lang) 
     });
     res.end();
   }
