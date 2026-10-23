@@ -107,6 +107,12 @@ const STR = {
     pktChecklistFormGeneric: 'If you prepare a form draft, review it field by field before any use.',
     pktChecklistConfirm: 'Confirm the current form editions, instructions, fees, and any deadline that may apply to you with an official source (uscis.gov) or a qualified professional.',
     pktChecklistBring: 'If you consult an attorney or accredited representative, bring this report and your latest draft version.',
+    professionalQuestionsTitle: 'Questions to ask a qualified professional',
+    questionDeadlines: 'Are there any deadlines, risks, or time-sensitive issues in my situation that this report does not cover?',
+    questionConflicts: (list) => `My records disagree about: ${list}. Which record should control, and how do I correct the other one?`,
+    questionUnconfirmed: (n) => `${n} value(s) in my information came from my documents and have not been confirmed yet. How should they be verified before anyone relies on them?`,
+    questionGaps: (n) => `${n} evidence item(s) in my report are still missing. Which matter most in my situation, and what alternatives are acceptable if I cannot get the usual documents?`,
+    questionForm: (id) => `Before I sign or submit anything for the ${id}, what should I double-check given my situation?`,
   },
   ES: {
     title: 'SUS PRÓXIMOS PASOS — CÓMO USAR ESTE INFORME',
@@ -172,6 +178,12 @@ const STR = {
     pktChecklistFormGeneric: 'Si prepara un borrador de formulario, revíselo campo por campo antes de cualquier uso.',
     pktChecklistConfirm: 'Confirme las ediciones actuales de los formularios, las instrucciones, las tarifas y cualquier fecha límite que pueda aplicarle con una fuente oficial (uscis.gov) o un profesional calificado.',
     pktChecklistBring: 'Si consulta a un abogado o representante acreditado, lleve este informe y su versión de borrador más reciente.',
+    professionalQuestionsTitle: 'Preguntas para hacer a un profesional calificado',
+    questionDeadlines: '¿Existen plazos, riesgos o asuntos urgentes en mi situación que este informe no cubre?',
+    questionConflicts: (list) => `Mis registros no coinciden en: ${list}. ¿Qué registro debe prevalecer y cómo corrijo el otro?`,
+    questionUnconfirmed: (n) => `${n} valor(es) de mi información provienen de mis documentos y aún no han sido confirmados. ¿Cómo deben verificarse antes de que alguien confíe en ellos?`,
+    questionGaps: (n) => `Aún faltan ${n} elemento(s) de evidencia en mi informe. ¿Cuáles son los más importantes en mi situación y qué alternativas se aceptan si no puedo obtener los documentos habituales?`,
+    questionForm: (id) => `Antes de firmar o presentar algo para el ${id}, ¿qué debo verificar dos veces dada mi situación?`,
   },
   ZH: {
     title: '您的后续步骤 — 如何使用本报告',
@@ -237,6 +249,12 @@ const STR = {
     pktChecklistFormGeneric: '如果您准备表格草稿，请在使用前逐字段审核。',
     pktChecklistConfirm: '向官方来源（uscis.gov）或合格专业人士确认当前的表格版本、说明、费用以及任何可能适用于您的截止日期。',
     pktChecklistBring: '如果您咨询律师或认可代表，请携带本报告和您的最新草稿版本。',
+    professionalQuestionsTitle: '向合格专业人士提出的问题',
+    questionDeadlines: '在我的情况中，是否有本报告未涵盖的截止日期、风险或时间敏感问题？',
+    questionConflicts: (list) => `我的记录在以下方面不一致：${list}。应以哪份记录为准，我应如何更正另一份？`,
+    questionUnconfirmed: (n) => `我的信息中有 ${n} 个值来自我的文件，且尚未得到确认。在任何人依赖它们之前，应如何核实？`,
+    questionGaps: (n) => `我的报告中仍缺少 ${n} 项证据。在我的情况下哪些最重要？如果我无法获得常规文件，可以接受哪些替代材料？`,
+    questionForm: (id) => `在为 ${id} 签署或提交任何内容之前，根据我的情况，我应该仔细复查什么？`,
   },
   HT: {
     title: 'PWOSHEN ETAP OU YO — KIJAN POU ITILIZE RAPÒ SA A',
@@ -302,6 +320,12 @@ const STR = {
     pktChecklistFormGeneric: 'Si ou prepare yon bouyon fòm, revize li chan pa chan anvan nenpòt itilizasyon.',
     pktChecklistConfirm: 'Konfime edisyon fòm aktyèl yo, enstriksyon yo, frè yo, ak nenpòt dat limit ki ka aplike pou ou ak yon sous ofisyèl (uscis.gov) oswa yon pwofesyonèl kalifye.',
     pktChecklistBring: 'Si ou konsilte yon avoka oswa yon reprezantan akredite, pote rapò sa a ak dènye vèsyon bouyon ou a.',
+    professionalQuestionsTitle: 'Kesyon pou poze yon pwofesyonèl kalifye',
+    questionDeadlines: 'Èske gen dat limit, risk, oswa kesyon ki sansib a tan nan sitiyasyon mwen ke rapò sa a pa kouvri?',
+    questionConflicts: (list) => `Dosye mwen yo pa dakò sou: ${list}. Ki dosye ki ta dwe kontwole, epi kijan mwen korije lòt la?`,
+    questionUnconfirmed: (n) => `${n} valè nan enfòmasyon mwen soti nan dokiman mwen epi yo poko konfime. Kijan yo ta dwe verifye anvan nenpòt moun konte sou yo?`,
+    questionGaps: (n) => `${n} atik prèv toujou manke nan rapò mwen an. Kilès ki pi enpòtan nan sitiyasyon mwen, epi ki altènativ yo aksepte si mwen pa ka jwenn dokiman abityèl yo?`,
+    questionForm: (id) => `Anvan mwen siyen oswa soumèt anyen pou ${id} la, kisa mwen ta dwe verifye de fwa dapre sitiyasyon mwen?`,
   },
   AR: {
     title: 'خطواتك التالية — كيفية استخدام هذا التقرير',
@@ -367,6 +391,12 @@ const STR = {
     pktChecklistFormGeneric: 'إذا أعددت مسودة نموذج، فراجعها حقلًا بحقل قبل أي استخدام.',
     pktChecklistConfirm: 'أكّد إصدارات النماذج الحالية والتعليمات والرسوم وأي موعد نهائي قد ينطبق عليك مع مصدر رسمي (uscis.gov) أو محترف مؤهل.',
     pktChecklistBring: 'إذا استشرت محاميًا أو ممثلًا معتمدًا، فأحضر هذا التقرير وأحدث إصدار من مسودتك.',
+    professionalQuestionsTitle: 'أسئلة تطرحها على متخصص مؤهل',
+    questionDeadlines: 'هل توجد أي مواعيد نهائية أو مخاطر أو مسائل حساسة للوقت في حالتي لا يغطيها هذا التقرير؟',
+    questionConflicts: (list) => `سجلاتي غير متفقة بشأن: ${list}. أي سجل يجب أن يُعتمد، وكيف أصحح الآخر؟`,
+    questionUnconfirmed: (n) => `${n} من القيم في معلوماتي جاءت من مستنداتي ولم تُؤكد بعد. كيف ينبغي التحقق منها قبل أن يعتمد عليها أي شخص؟`,
+    questionGaps: (n) => `${n} من عناصر الأدلة ما زالت مفقودة في تقريري. أيها الأكثر أهمية في حالتي، وما البدائل المقبولة إذا لم أتمكن من الحصول على المستندات المعتادة؟`,
+    questionForm: (id) => `قبل أن أوقّع أو أقدّم أي شيء بشأن ${id}، ما الذي يجب أن أتحقق منه مرتين بالنظر إلى حالتي؟`,
   },
 };
 
@@ -378,6 +408,24 @@ export function nextStepsStrings(lang) {
 function searchPathsFor(lang) {
   const s = nextStepsStrings(lang);
   return RESOURCE_SEARCH_PATHS.map((p, i) => ({ name: p.name, url: p.url, description: s.searchPathDescriptions[i] || p.description }));
+}
+
+/**
+ * Specific questions the user can ask a qualified professional
+ * (value-upgrade directive §5 item 9), DERIVED from this applicant's
+ * actual unresolved issues — conflicts first (naming the items),
+ * then unconfirmed document values, evidence gaps, and the prepared
+ * form — plus the standing deadlines/risks question. These are
+ * questions for the professional, never legal conclusions by IRU.
+ */
+function buildProfessionalQuestions(s, { conflictLabels = [], unconfirmed = 0, gapCount = 0, formId = null } = {}) {
+  const qs = [];
+  if (conflictLabels.length > 0) qs.push(s.questionConflicts(conflictLabels.slice(0, 3).join('; ')));
+  if (unconfirmed > 0) qs.push(s.questionUnconfirmed(unconfirmed));
+  if (gapCount > 0) qs.push(s.questionGaps(gapCount));
+  if (formId) qs.push(s.questionForm(formId));
+  qs.push(s.questionDeadlines);
+  return qs;
 }
 
 /**
@@ -424,6 +472,13 @@ export function buildFormNextSteps(entry, plan, lang = 'EN') {
     understand,
     reviewForm,
     professionalHelp: [...s.professionalHelp],
+    professionalQuestionsTitle: s.professionalQuestionsTitle,
+    professionalQuestions: buildProfessionalQuestions(s, {
+      conflictLabels: conflicts.map((c) => c.label),
+      unconfirmed: needsConfirmation.length,
+      gapCount: missing.length,
+      formId: entry.id,
+    }),
     resources: {
       note: s.resourcesNote,
       searchPaths: searchPathsFor(lang),
@@ -487,6 +542,13 @@ export function buildPacketNextSteps(ctx, lang = 'EN') {
     understand,
     review,
     professionalHelp: [...s.professionalHelp],
+    professionalQuestionsTitle: s.professionalQuestionsTitle,
+    professionalQuestions: buildProfessionalQuestions(s, {
+      conflictLabels: ctx.conflictLabels || [],
+      unconfirmed,
+      gapCount: ctx.evidenceItemCount || 0,
+      formId: form ? form.id : null,
+    }),
     resourcesIntro,
     searchPaths: searchPathsFor(lang),
     checklist,

@@ -736,8 +736,16 @@ export default function App() {
    * localizedKb() in the packet gap section — see generateHtml.)
    */
   const buildPacketNextSteps = () => {
-    const conflicts = factRecord ? Object.values(factRecord.facts).filter((f: any) => f.status === 'conflicted').length : 0;
-    const unconfirmed = factRecord ? Object.values(factRecord.facts).filter((f: any) => f.status === 'reported-unconfirmed').length : 0;
+    // Fact-status strings are the canonical FACT_STATUSES from
+    // api/_lib/facts.js ('conflicting', 'extracted-unconfirmed').
+    // (Value-upgrade fix 2026-10-23: this wrapper previously counted
+    // 'conflicted' / 'reported-unconfirmed', which are not fact
+    // statuses — the packet's conflict/unconfirmed tailoring could
+    // therefore never fire in the real client flow.)
+    const conflictFacts = factRecord ? Object.values(factRecord.facts).filter((f: any) => f.status === 'conflicting') : [];
+    const conflicts = conflictFacts.length;
+    const conflictLabels = conflictFacts.map((f: any) => (ui.factLabels && ui.factLabels[f.id]) || f.id);
+    const unconfirmed = factRecord ? Object.values(factRecord.facts).filter((f: any) => f.status === 'extracted-unconfirmed').length : 0;
     const pct = assessment && typeof assessment.readinessPercent === 'number' ? assessment.readinessPercent : null;
     const verifiedOrgs = resourceResult && !resourceResult.isInternational ? (resourceResult.local || []) : [];
     return buildPacketNextStepsForLang({
@@ -753,6 +761,7 @@ export default function App() {
       } : null,
       resourcesKind: verifiedOrgs.length > 0 ? 'verified' : resourceResult && resourceResult.isInternational ? 'international' : 'none',
       localResourcesName: ui.localResources,
+      conflictLabels,
     }, lang);
   };
 
@@ -795,6 +804,7 @@ export default function App() {
         ${servicesHtml}
         ${eligibilityHtml}
         <p style="font-size: 0.8rem; color: #64748b; margin: 0 0 0.75rem 0; font-style: italic;">${escapeHtml(t('pktServiceArea', 'Service area'))}: ${escapeHtml(serviceAreaText)}${res.legalRepresentation ? ' · ' + escapeHtml(t('pktLegalRep', 'Provides legal representation')) : ''}</p>
+        ${res.lastVerified ? `<p style="font-size: 0.8rem; color: #64748b; margin: 0 0 0.75rem 0;">${escapeHtml(t('pktVerified', 'Verified'))}: ${escapeHtml(res.lastVerified)}</p>` : ''}
         ${transitHtml}
       </div>
     `;
@@ -958,6 +968,8 @@ export default function App() {
           <ul style="margin:0 0 1rem;padding-left:1.25rem;font-size:0.875rem;color:#334155;">${li(ns.review)}</ul>
           <h4 style="font-size:1rem;font-weight:700;margin:0 0 0.5rem;">${escapeHtml(t('pktNsProfessional', 'C. Preparing for professional help'))}</h4>
           <ul style="margin:0 0 1rem;padding-left:1.25rem;font-size:0.875rem;color:#334155;">${li(ns.professionalHelp)}</ul>
+          ${(ns.professionalQuestions && ns.professionalQuestions.length) ? `<p style="font-size:0.875rem;font-weight:700;color:#0f172a;margin:0 0 0.5rem;">${escapeHtml(ns.professionalQuestionsTitle)}</p>
+          <ul style="margin:0 0 1rem;padding-left:1.25rem;font-size:0.875rem;color:#334155;">${li(ns.professionalQuestions)}</ul>` : ''}
           <h4 style="font-size:1rem;font-weight:700;margin:0 0 0.5rem;">${escapeHtml(t('pktNsResources', 'D. Finding additional help'))}</h4>
           <p style="margin:0 0 0.5rem;font-size:0.875rem;color:#334155;">${escapeHtml(ns.resourcesIntro)}</p>
           <ul style="margin:0 0 1rem;padding-left:1.25rem;font-size:0.875rem;color:#334155;">
@@ -965,6 +977,30 @@ export default function App() {
           </ul>
           <h4 style="font-size:1rem;font-weight:700;margin:0 0 0.5rem;">${escapeHtml(t('pktNsChecklist', 'E. Your ordered checklist'))}</h4>
           <ol style="margin:0;padding-left:1.25rem;font-size:0.875rem;color:#334155;">${li(ns.checklist)}</ol>
+        </div>`;
+
+    // Preparation-package summary (value-upgrade directive §6): ONE
+    // place that enumerates what the customer received — report,
+    // per-form draft state with edition + version, blank official
+    // forms, and the next-steps plan — so nobody has to hunt across
+    // screens to reconstruct their package.
+    const packageFormRows = FORM_REGISTRY.map((entry: any) => {
+      const d: any = draftForForm(formDraftStore, entry.id);
+      const draftText = d
+        ? `${escapeHtml(t('pktPackageDraft', 'Prepared draft'))}: ${escapeHtml(entry.id)} — ${escapeHtml(t('formEdition', 'Edition'))} ${escapeHtml(entry.editionDate)} — ${escapeHtml(t('draftVersion', 'Draft version'))} ${d.meta.version}${d.meta.draftId ? ` (${escapeHtml(d.meta.draftId)})` : ''}${d.meta.generatedAt ? ` · ${escapeHtml(new Date(d.meta.generatedAt).toLocaleString())}` : ''}`
+        : `${escapeHtml(t('pktPackageDraft', 'Prepared draft'))}: ${escapeHtml(entry.id)} — ${escapeHtml(t('pktPackageNotGenerated', 'not generated yet'))}`;
+      const blankText = `${escapeHtml(t('blankFormBtn', 'Official Blank Form — Reference Copy'))}: ${escapeHtml(entry.id)} — ${escapeHtml(t('formEdition', 'Edition'))} ${escapeHtml(entry.editionDate)}`;
+      return `<li style="margin-bottom:0.35rem;">${draftText}<br/>${blankText}</li>`;
+    }).join('');
+    const packageHtml = `
+        <div class="section">
+          <h3 class="section-title font-serif">${escapeHtml(t('pktPackageTitle', 'Your preparation package'))}</h3>
+          <ul style="margin:0 0 1rem;padding-left:1.25rem;font-size:0.875rem;color:#334155;">
+            <li style="margin-bottom:0.35rem;">${escapeHtml(t('pktPackageReport', 'Readiness report — this document: your information on record, evidence review, and findings.'))}</li>
+            ${packageFormRows}
+            <li style="margin-bottom:0.35rem;">${escapeHtml(t('pktPackageNextSteps', 'Your Next Steps — the section below, generated from your findings.'))}</li>
+          </ul>
+          <p style="font-size:0.8rem;color:#64748b;font-style:italic;margin:0;">${escapeHtml(t('pktPackageNote', 'Drafts are for your review only — not signed and not submitted. If you correct information after generating a draft, that draft becomes stale: regenerate it and use only the latest version.'))}</p>
         </div>`;
 
     const selectedStarters = NARRATIVE_STARTERS.filter(s => answers[s.id] === 'yes').map(s => s.labels[lang as keyof typeof s.labels]);
@@ -1073,6 +1109,7 @@ export default function App() {
           ${resourcesHtml || `<p style="color: #64748b; font-style: italic;">${escapeHtml(t('pktNoResources', 'No specific resources found.'))}</p>`}
           ${nationalDirsHtml ? `<h4 style="font-size: 1rem; font-weight: 700; color: #0f172a; margin: 1.5rem 0 0.75rem 0;">${escapeHtml(t('pktNationalDirs', 'National Directories'))}</h4>${nationalDirsHtml}` : ''}
         </div>
+        ${packageHtml}
         ${nextStepsHtml}
         <div class="footer">
           ${hasAlternatives ? `<p style="font-size: 0.875rem; font-weight: 600; color: #92400e; background-color: #fef3c7; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem; text-align: left;">${ui.noteForLegalCounsel}</p>` : ''}
@@ -1888,10 +1925,23 @@ export default function App() {
                             <div><p className="font-semibold">{t('formMissing', 'Still needed for this form')}:</p>
                             <ul className="list-disc pl-5">{currentSummary.missingRequired.map((m: any, i: number) => <li key={i}>{m.label}</li>)}</ul></div>
                           )}
+                          {currentSummary.formatIssues && currentSummary.formatIssues.length > 0 && (
+                            <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                              <p className="font-semibold text-red-900">{t('formFormatIssues', 'Needs a format correction')}:</p>
+                              <ul className="list-disc pl-5 text-red-900">{currentSummary.formatIssues.map((f: any, i: number) => <li key={i}>{f.message}</li>)}</ul>
+                            </div>
+                          )}
                           <div>
                             <p className="font-semibold">{t('formConsumerSections', 'You complete these parts yourself')}:</p>
                             <ul className="list-disc pl-5">{currentSummary.consumerCompletedSections.map((c: string, i: number) => <li key={i}>{c}</li>)}</ul>
                           </div>
+                          {currentSummary.conditionalNotes && currentSummary.conditionalNotes.length > 0 && (
+                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-1.5">
+                              {currentSummary.conditionalNotes.map((n: any, i: number) => (
+                                <p key={i} className="text-sm text-amber-900"><strong>{n.section}:</strong> {n.note}</p>
+                              ))}
+                            </div>
+                          )}
                           <p className="text-xs text-slate-500">{t('formSignatureNote', 'No signature was added and nothing was submitted. Signing and filing are your responsibility, after your review.')}</p>
                           {/* Final review checklist (B2C §5.D) — the draft
                               is not presented as ready until every item

@@ -20,7 +20,7 @@
  */
 
 export const FORM_REGISTRY_VERSION = 1;
-export const REGISTRY_CHECKED_DATE = '2026-10-21';
+export const REGISTRY_CHECKED_DATE = '2026-10-23';
 
 const S589 = 'form1[0].#subform[0]';
 const S765_1 = 'form1[0].Page1[0]';
@@ -33,7 +33,7 @@ export const FORM_REGISTRY = [
     name: 'Form I-589, Application for Asylum and for Withholding of Removal',
     editionDate: '07/28/26',
     editionNote:
-      'Edition printed on the PDF USCIS serves (retrieved 2026-10-21). The I-589 web page lists 01/20/25 as the current edition; USCIS also accepts editions 01/20/25 and 09/03/24.',
+      'Edition printed on the PDF USCIS serves (retrieved 2026-10-21; re-verified against the USCIS monitor baseline 2026-10-23). The I-589 web page listed 01/20/25 as the current edition until 2026-10-22, when it moved to 07/28/26 — the page now matches the served PDF. USCIS also accepts editions 01/20/25 and 09/03/24.',
     sourceUrl: 'https://www.uscis.gov/i-589',
     pdfUrl: 'https://www.uscis.gov/sites/default/files/document/forms/i-589.pdf',
     instructionsUrl: 'https://www.uscis.gov/sites/default/files/document/forms/i-589instr.pdf',
