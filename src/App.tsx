@@ -1107,16 +1107,7 @@ export default function App() {
             <div className="text-center mb-8">
               <Globe className="w-12 h-12 text-indigo-500 mx-auto mb-4" />
               <h2 className="text-2xl font-serif font-semibold text-slate-900">{ui.selectLanguage}</h2>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8 text-left">
-              <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4">
-                <h3 className="font-bold text-indigo-900 mb-1">{t('whatWeDo', 'What IRU does')}</h3>
-                <p className="text-sm text-indigo-900/80">{t('whatWeDoText', 'IRU helps you organize your circumstances and documents, identify missing information, prepare for your next steps, find relevant resources, and fill in supported official immigration forms (currently I-589 and I-765 drafts) from information you provide.')}</p>
-              </div>
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
-                <h3 className="font-bold text-slate-800 mb-1">{t('whatWeDont', 'What IRU does not do')}</h3>
-                <p className="text-sm text-slate-600">{t('whatWeDontText', 'IRU is not a law firm and does not give legal advice, decide your eligibility, sign, or submit any form. You review and control everything.')}</p>
-              </div>
+              <p className="text-slate-600 mt-3 max-w-xl mx-auto">{t('welcomeDesc', 'Get guided help preparing your immigration forms and organizing your information.')}</p>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {LANGUAGES.map((l) => (
