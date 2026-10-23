@@ -21,7 +21,7 @@ import { buildFillPlan, splitFullName } from '../api/_lib/formmap.js';
 // chronology + issue analysis + applicant approval gate for form use.
 import { createNarrative, addNarrativeEvent, analyzeNarrative, approveNarrative, correctNarrativeEvent, confirmNarrativeEvent, narrativeForPacket } from '../api/_lib/narrative.js';
 import { readAnalyzeStream } from '../api/_lib/sse.js';
-import { selectForm, summaryForSelection } from '../api/_lib/formSelection.js';
+import { selectForm, summaryForSelection, emptyFormDraftStore, recordDraft, draftForForm, removeDraft, invalidateDrafts, withReviewChecks } from '../api/_lib/formSelection.js';
 
 // B2C pricing + next steps (2026-10-21 directive): the SAME modules the
 // server enforces with, so what the consumer is shown is what the
@@ -127,14 +127,29 @@ export default function App() {
   const [narrativeError, setNarrativeError] = useState('');
   const [narrativeDates, setNarrativeDates] = useState<Record<string, string>>({});
   const [selectedFormId, setSelectedFormId] = useState<string>('');
-  const [formSummary, setFormSummary] = useState<any>(null);
-  const [formPdfBase64, setFormPdfBase64] = useState<string>('');
+  // Per-form generated drafts (R5): each form's summary, PDF, draft
+  // metadata and final-review checklist state are retained in a store
+  // keyed by form id (api/_lib/formSelection.js), so switching forms
+  // never destroys another form's draft — switching back redisplays it
+  // without regeneration. Per-form version counters live in the same
+  // store and survive draft invalidation (R4a).
+  const [formDraftStore, setFormDraftStore] = useState<any>(() => emptyFormDraftStore());
   const [formBusy, setFormBusy] = useState(false);
   const [formError, setFormError] = useState('');
   const [formAnswers, setFormAnswers] = useState<Record<string, string>>({});
-  // Form review (B2C §5): version identification + final-review checklist.
-  const [formDraftMeta, setFormDraftMeta] = useState<{ draftId: string; generatedAt: string; version: number; formId: string } | null>(null);
-  const [reviewChecks, setReviewChecks] = useState<Record<number, boolean>>({});
+  // Facts correction editor (R4b): which fact row is being corrected.
+  const [editingFactId, setEditingFactId] = useState<string>('');
+  const [factEditValue, setFactEditValue] = useState<string>('');
+  // The visible draft is always the SELECTED form's retained draft; the
+  // render additionally gates it through summaryForSelection (D4).
+  const currentFormDraft: any = draftForForm(formDraftStore, selectedFormId);
+  const formSummary: any = currentFormDraft ? currentFormDraft.summary : null;
+  const formPdfBase64: string = currentFormDraft ? currentFormDraft.pdfBase64 : '';
+  const formDraftMeta: any = currentFormDraft ? currentFormDraft.meta : null;
+  const reviewChecks: Record<number, boolean> = currentFormDraft ? currentFormDraft.reviewChecks : {};
+  const updateReviewChecks = (checks: Record<number, boolean>) => {
+    if (selectedFormId) setFormDraftStore((prev: any) => withReviewChecks(prev, selectedFormId, checks));
+  };
   // Purchase state for the offer panel (B2C §3), refreshed from the
   // server-side entitlement status of the tokens this browser holds.
   const [purchaseState, setPurchaseState] = useState<{ hasEvaluation: boolean; ownedForms: string[] }>({ hasEvaluation: false, ownedForms: [] });
@@ -349,16 +364,15 @@ export default function App() {
     setResourceResult(null);
     setFactRecord(null);
     setSelectedFormId('');
-    setFormSummary(null);
-    setFormPdfBase64('');
     setFormError('');
     setFormAnswers({});
     setPhotoEvidenceKey('');
     setConsulate(null);
     setResources([]);
     setCopied(false);
-    setFormDraftMeta(null);
-    setReviewChecks({});
+    // Complete reset: every form's drafts AND version counters clear.
+    setFormDraftStore(emptyFormDraftStore());
+    setEditingFactId('');
     setPurchaseState({ hasEvaluation: false, ownedForms: [] });
   };
 
@@ -370,12 +384,12 @@ export default function App() {
     const next = JSON.parse(JSON.stringify(factRecord));
     mutate(next);
     setFactRecord(next);
-    // A previously generated form draft no longer matches the record:
-    // it is stale, so it is withdrawn and the review state resets.
-    setFormSummary(null);
-    setFormPdfBase64('');
-    setFormDraftMeta(null);
-    setReviewChecks({});
+    // Previously generated form drafts no longer match the record:
+    // they are stale, so every form's draft is withdrawn. The per-form
+    // version counters survive (R4a): a regenerated draft is numbered
+    // as that form's next version, never restarted at 1.
+    setFormDraftStore((prev: any) => invalidateDrafts(prev));
+    setEditingFactId('');
   };
 
   const handleConfirmFact = (factId: string) => {
@@ -418,8 +432,7 @@ export default function App() {
       const next = JSON.parse(JSON.stringify(factRecord));
       approveNarrative(next.narrative, next, new Date().toISOString());
       setFactRecord(next);
-      setFormSummary(null);
-      setFormPdfBase64('');
+      setFormDraftStore((prev: any) => invalidateDrafts(prev));
       setNarrativeError('');
     } catch (e: any) {
       setNarrativeError(String((e && e.message) || e));
@@ -441,8 +454,9 @@ export default function App() {
     if (!selectedFormId || !factRecord || formBusy) return;
     setFormBusy(true);
     setFormError('');
-    setFormSummary(null);
-    setFormPdfBase64('');
+    // Generating supersedes this form's previous draft (other forms'
+    // retained drafts are untouched — R5).
+    setFormDraftStore((prev: any) => removeDraft(prev, selectedFormId));
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       // The entitlement that covers THIS form (B2C scoped grants), with
@@ -465,17 +479,17 @@ export default function App() {
         if (resp.status === 402) throw new Error(t('errEntitlementRequired', 'A paid entitlement covering this form is required to generate its draft, or that form has already been delivered.'));
         throw new Error(t('errFormUnavailable', 'Form generation unavailable. Please try again later.'));
       }
-      setFormSummary(data.summary);
-      setFormPdfBase64(data.pdfBase64);
       // Version identification (B2C §5.C): every generation is a new,
-      // distinguishable draft; only the latest is current.
-      setFormDraftMeta((prev) => ({
+      // distinguishable draft of THIS form, numbered from the form's
+      // own surviving counter (R4a); only the latest is current. The
+      // draft is recorded under its form id, so it survives switching
+      // to another form and back (R5).
+      setFormDraftStore((prev: any) => recordDraft(prev, selectedFormId, {
+        summary: data.summary,
+        pdfBase64: data.pdfBase64,
         draftId: data.draftId || '',
         generatedAt: data.generatedAt || new Date().toISOString(),
-        version: (prev && prev.formId === selectedFormId ? prev.version : 0) + 1,
-        formId: selectedFormId,
       }));
-      setReviewChecks({});
     } catch (e: any) {
       setFormError(e && e.message ? e.message : t('errFormUnavailable', 'Form generation unavailable. Please try again later.'));
     } finally {
@@ -1605,6 +1619,26 @@ export default function App() {
                           ))}
                         </div>
                       )}
+                      {/* Correction (§8 / R4b): EVERY fact on record can be
+                          corrected by the applicant — including facts they
+                          reported themselves, which previously rendered
+                          with no control at all even though the correction
+                          handler existed. Saving routes through
+                          handleCorrectFact → upsertFact(source:
+                          'correction'), which marks outputs stale and
+                          withdraws generated drafts like any mutation. */}
+                      <div className="mt-2">
+                        {editingFactId === f.id ? (
+                          <span className="flex flex-wrap items-center gap-2">
+                            <input type="text" value={factEditValue} onChange={(e) => setFactEditValue(e.target.value)}
+                              className="flex-1 min-w-[12rem] p-2 rounded-lg border-2 border-slate-200 text-sm" />
+                            <button onClick={() => { handleCorrectFact(f.id, factEditValue); setEditingFactId(''); }} className="px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-lg hover:bg-indigo-700">{t('saveFact', 'Save')}</button>
+                            <button onClick={() => setEditingFactId('')} className="px-3 py-1.5 border border-slate-300 text-xs font-semibold rounded-lg hover:bg-slate-50">{t('cancelEdit', 'Cancel')}</button>
+                          </span>
+                        ) : (
+                          <button onClick={() => { setEditingFactId(f.id); setFactEditValue(String(f.value)); }} className="px-3 py-1.5 border border-slate-300 text-xs font-semibold rounded-lg hover:bg-slate-50">{t('correctFact', 'Correct')}</button>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1716,7 +1750,7 @@ export default function App() {
                 <p className="text-xs text-slate-500 mb-4">{t('formPrepIntro', 'IRU can fill a draft of an official USCIS form from your information on record. You choose the form — IRU does not decide what you should file. Drafts are never signed or submitted by IRU.')}</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
                   {FORM_REGISTRY.map((entry: any) => (
-                    <button key={entry.id} onClick={() => { const s = selectForm(entry.id); setSelectedFormId(s.selectedFormId); setFormSummary(s.formSummary); setFormPdfBase64(s.formPdfBase64); setFormError(s.formError); setFormDraftMeta(s.formDraftMeta); setReviewChecks(s.reviewChecks); }}
+                    <button key={entry.id} onClick={() => { const s = selectForm(entry.id); setSelectedFormId(s.selectedFormId); setFormError(s.formError); }}
                       className={`p-4 rounded-xl border-2 text-left ${selectedFormId === entry.id ? 'border-indigo-600 bg-indigo-50' : 'border-slate-200 hover:border-indigo-300'}`}>
                       <span className="block font-bold text-slate-900">{entry.id}</span>
                       <span className="block text-xs text-slate-500 mt-1">{entry.name}</span>
@@ -1839,7 +1873,7 @@ export default function App() {
                               <p className="font-semibold text-slate-900">{t('finalChecklistTitle', 'Final review checklist')}</p>
                               {currentSummary.finalReviewChecklist.map((item: string, i: number) => (
                                 <label key={i} className="flex items-start gap-2 mt-1.5 cursor-pointer">
-                                  <input type="checkbox" checked={!!reviewChecks[i]} onChange={(e) => setReviewChecks({ ...reviewChecks, [i]: e.target.checked })} className="mt-0.5" />
+                                  <input type="checkbox" checked={!!reviewChecks[i]} onChange={(e) => updateReviewChecks({ ...reviewChecks, [i]: e.target.checked })} className="mt-0.5" />
                                   <span>{item}</span>
                                 </label>
                               ))}
