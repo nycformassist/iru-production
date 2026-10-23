@@ -39,7 +39,10 @@ describe('App.tsx regression guards', () => {
   });
 
   it('client consumes the ai_unavailable stream status', () => {
-    assert.ok(app.includes("event.status === 'ai_unavailable'"));
+    // Since D2 the stream is consumed by api/_lib/sse.js; App maps its
+    // aiUnavailable result onto the failure state.
+    assert.ok(app.includes('streamAiUnavailable'), 'App must consume the SSE consumer\'s aiUnavailable flag');
+    assert.ok(app.includes('setAiUnavailable(true)'), 'ai_unavailable must set the failure state');
   });
 
   it('location is never a hard gate: ZIP step and new fact questions are optional', () => {
@@ -108,5 +111,33 @@ describe('App.tsx B2C guards (2026-10-21 directive)', () => {
   it('generation sends the token that covers the selected form', () => {
     assert.ok(app.includes('formTokens[selectedFormId]'), 'scoped form tokens must be selected per form');
     assert.ok(app.includes("sessionStorage.getItem('iru_evaluation_token')"), 'evaluation token must be kept for upgrades');
+  });
+});
+
+describe('App.tsx D5 guards (document photo upload operability)', () => {
+  it('the file input is activatable: explicit id + htmlFor, sr-only — never display:none', () => {
+    assert.ok(app.includes('id="iru-photo-input"'), 'file input must carry the explicit id');
+    assert.ok(app.includes('htmlFor="iru-photo-input"'), 'the dropzone label must be bound to the input via htmlFor');
+    const inputTag = app.slice(app.indexOf('id="iru-photo-input"'), app.indexOf('id="iru-photo-input"') + 500);
+    assert.ok(inputTag.includes('className="sr-only"'),
+      'input must be visually hidden via sr-only so it stays focusable/activatable');
+    assert.ok(!inputTag.includes('className="hidden"'),
+      'display:none made the control unreachable in a real browser (D5)');
+  });
+
+  it('a chosen photo reaches the review endpoint', () => {
+    assert.ok(app.includes('setPhotoFile(e.target.files'), 'selecting a file must set the photo state');
+    assert.ok(app.includes("fetch('/api/review-image'"), 'the review must post to /api/review-image');
+  });
+
+  it('the printed record carries the mailing facts the drafts use (display parity)', () => {
+    const start = app.indexOf('FACT_DISPLAY_NAMES');
+    const printMap = app.slice(start, start + 1600);
+    assert.ok(printMap.includes("mailing_city: 'Mailing city'"),
+      'print FACT_DISPLAY_NAMES must include mailing city (it omitted all mailing facts)');
+    assert.ok(printMap.includes("mailing_region: 'Mailing state/region'"),
+      'print FACT_DISPLAY_NAMES must include mailing region');
+    assert.ok(printMap.includes("city_of_birth: 'City of birth'"),
+      'print FACT_DISPLAY_NAMES must include city of birth');
   });
 });

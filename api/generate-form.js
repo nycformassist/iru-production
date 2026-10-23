@@ -21,6 +21,7 @@ import { entitlementStore } from './_lib/entitlement.js';
 import { sanitizeFactRecord } from './_lib/facts.js';
 import { getFormEntry, SIGNATURE_FIELD_PATTERN } from './_lib/forms/registry.js';
 import { buildFillPlan, buildCompletionSummary } from './_lib/formmap.js';
+import { isNarrativeApproved } from './_lib/narrative.js';
 
 const limiter = createLimiter({ capacity: 5, windowMs: 10 * 60 * 1000 });
 const MAX_BODY_BYTES = 256 * 1024;
@@ -41,6 +42,22 @@ export async function generateFormDraft({ formId, factRecord }) {
   if (!entry) throw Object.assign(new Error(`unknown form: ${formId}`), { status: 400 });
   const record = sanitizeFactRecord(factRecord);
   if (!record) throw Object.assign(new Error('invalid fact record'), { status: 400 });
+
+  // Narrative approval gate (successive directive §4), enforced at
+  // generation — not only per-fact inside the fill plan. When the
+  // applicant has a narrative on record, it must be reviewed and
+  // approved before ANY draft is prepared from the record: the per-fact
+  // hold in buildFillPlan keeps narrative-sourced values out of the
+  // draft, but generation itself must also refuse, so an unapproved
+  // story can never ride along inside a "successful" draft. A record
+  // with NO narrative is unaffected (the narrative is optional).
+  if (record.narrative && !isNarrativeApproved(record.narrative)) {
+    throw Object.assign(new Error('narrative-not-approved'), {
+      status: 422,
+      code: 'narrative-not-approved',
+      applicantMessage: 'Your story (personal narrative) has not been approved yet. Review and approve it in the "Your Story" section first — IRU prepares form drafts only from information you have reviewed and approved.',
+    });
+  }
 
   const plan = buildFillPlan(record, entry);
   const templatePath = path.join(templateDir(), entry.templateFile);
@@ -175,7 +192,16 @@ export default async function handler(req, res) {
   } catch (err) {
     const status = err && err.status ? err.status : 500;
     console.error('[iru] form generation error:', err && err.message ? err.message : err);
-    return res.status(status).json({ error: status === 400 ? 'Invalid submission.' : 'Form generation unavailable. Please try again later.' });
+    // Applicant-facing refusals (e.g. the narrative approval gate) carry
+    // their own clear message; everything else stays generic so internal
+    // detail never leaks.
+    const message = err && err.applicantMessage
+      ? err.applicantMessage
+      : status === 400 ? 'Invalid submission.' : 'Form generation unavailable. Please try again later.';
+    return res.status(status).json({
+      error: message,
+      ...(err && err.code ? { reason: err.code } : {}),
+    });
   }
 }
 

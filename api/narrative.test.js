@@ -18,6 +18,7 @@ import {
 } from './_lib/narrative.js';
 import { buildFillPlan } from './_lib/formmap.js';
 import { getFormEntry } from './_lib/forms/registry.js';
+import generateFormHandler from './generate-form.js';
 
 const NOW = '2026-10-21T12:00:00.000Z';
 
@@ -197,4 +198,62 @@ test('sanitizer: client narrative is re-parsed and capped; verified events canno
   });
   assert.equal(clean.events[0].origin, 'applicant-statement', 'verified origin downgraded — never accepted from input');
   assert.equal(clean.events[0].dateIso, '2023-03-14', 'date re-parsed server-side');
+});
+
+// ── D1 regression: the gate must hold at the ENDPOINT, the way the client
+// calls it (POST { formId, factRecord }) — not only inside buildFillPlan.
+// Browser E2E (2026-10-22) found generation succeeding with an unapproved
+// narrative because the endpoint never consulted approval at all.
+let d1Ip = 0;
+function d1Call(factRecord, formId = 'I-765') {
+  const req = {
+    method: 'POST',
+    headers: { 'x-forwarded-for': `10.9.1.${++d1Ip}` },
+    body: { formId, factRecord: JSON.parse(JSON.stringify(factRecord)) },
+    socket: { remoteAddress: '127.0.0.1' },
+  };
+  const res = {
+    statusCode: 0, body: null, headers: {},
+    status(c) { this.statusCode = c; return this; },
+    json(o) { this.body = o; return this; },
+    setHeader(k, v) { this.headers[k] = v; },
+  };
+  return generateFormHandler(req, res).then(() => res);
+}
+
+test('D1 endpoint gate: generation REFUSES while a narrative exists but is unapproved', async () => {
+  const rec = anaRecord();
+  rec.narrative = anaNarrative(); // entered, NOT approved
+  const res = await d1Call(rec);
+  assert.notEqual(res.statusCode, 200, 'generation must not succeed with an unapproved narrative');
+  assert.equal(res.statusCode, 422);
+  assert.ok(res.body && typeof res.body.error === 'string' && /approv/i.test(res.body.error),
+    'error must clearly name the missing approval');
+  assert.ok(!res.body.pdfBase64, 'no draft PDF may be issued');
+});
+
+test('D1 endpoint gate: correction after approval closes the endpoint gate again', async () => {
+  const rec = anaRecord();
+  const n = anaNarrative();
+  approveNarrative(n, rec, NOW);
+  rec.narrative = n;
+  correctNarrativeEvent(n, rec, 'e1', { text: 'I left my hometown after the second threat at my shop in early 2021.' }, NOW);
+  const res = await d1Call(rec);
+  assert.equal(res.statusCode, 422);
+  assert.ok(!res.body.pdfBase64);
+});
+
+test('D1 endpoint gate: approved narrative generates; no narrative keeps prior behavior', async () => {
+  const rec = anaRecord();
+  const n = anaNarrative();
+  approveNarrative(n, rec, NOW);
+  rec.narrative = n;
+  const okRes = await d1Call(rec);
+  assert.equal(okRes.statusCode, 200);
+  assert.ok(okRes.body.ok && typeof okRes.body.pdfBase64 === 'string' && okRes.body.pdfBase64.length > 100);
+
+  const bare = anaRecord(); // no narrative attached at all
+  const bareRes = await d1Call(bare);
+  assert.equal(bareRes.statusCode, 200, 'records without a narrative behave exactly as before');
+  assert.ok(bareRes.body.ok);
 });

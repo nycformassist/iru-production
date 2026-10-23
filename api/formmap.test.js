@@ -111,6 +111,27 @@ describe('fill plan (§7.3 map-first behavior)', () => {
     assert.equal(TRANSFORMS.phoneNumber('(212) 555-0147'), '555-0147');
   });
 
+  it('D6: cityCountryOfBirth never prints the country twice (I-589 Item 13)', () => {
+    const recWith = (country) => ({ facts: { country_of_birth: { value: country } } });
+    // The E2E persona's exact values: the city value already carries the
+    // country ("Port-au-Prince, Haiti" + country "Haiti").
+    assert.equal(TRANSFORMS.cityCountryOfBirth('Port-au-Prince, Haiti', recWith('Haiti')), 'Port-au-Prince, Haiti');
+    assert.equal(TRANSFORMS.cityCountryOfBirth('Port-au-Prince, haiti', recWith('Haiti')), 'Port-au-Prince, haiti',
+      'case-insensitive: still not duplicated, applicant casing preserved');
+    // City alone still gains the country.
+    assert.equal(TRANSFORMS.cityCountryOfBirth('Port-au-Prince', recWith('Haiti')), 'Port-au-Prince, Haiti');
+    // Country alone (no city) still fills the combined field.
+    assert.equal(TRANSFORMS.cityCountryOfBirth('', recWith('Haiti')), 'Haiti');
+    // Through the fill plan, exactly as the draft generator composes it:
+    const rec = syntheticRecord();
+    rec.facts.city_of_birth.value = 'Port-au-Prince, Haiti';
+    rec.facts.country_of_birth.value = 'Haiti';
+    const plan = buildFillPlan(rec, getFormEntry('I-589'));
+    const item13 = plan.fill.find((f) => f.label.includes('Item 13'));
+    assert.ok(item13, 'Item 13 is filled');
+    assert.equal(item13.value, 'Port-au-Prince, Haiti');
+  });
+
   it('splitFullName proposes parts for consumer review', () => {
     assert.deepEqual(splitFullName('Testgiven Middlename Testfamily'), {
       given_name: 'Testgiven', middle_name: 'Middlename', family_name: 'Testfamily',
