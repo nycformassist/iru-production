@@ -130,6 +130,48 @@ export function createEntitlementStore(now = () => Date.now()) {
       return processedEvents.has(eventId);
     },
 
+    /**
+     * Resolve an entitlement whose checkout session EXPIRED unpaid
+     * (defect-closure directive 2026-10-23, Priority 6): an expired
+     * session can never be paid, so the record is voided immediately
+     * instead of dangling as RESERVED until its TTL lapses. Same
+     * idempotency discipline as markPaidBySession (unknown-session
+     * events are not burned; replays are duplicates). A paid or
+     * consumed record is never touched.
+     */
+    voidByExpiredSession(sessionId, eventId) {
+      if (eventId && processedEvents.has(eventId)) return { applied: false, duplicate: true };
+      const ent = this.getBySessionId(sessionId);
+      if (!ent) return { applied: false, duplicate: false, reason: 'unknown-session' };
+      if (ent.paidAt || ent.state !== 'RESERVED') {
+        if (eventId) processedEvents.add(eventId);
+        return { applied: false, duplicate: false, reason: ent.paidAt ? 'already-paid' : `state-${ent.state}` };
+      }
+      if (eventId) processedEvents.add(eventId);
+      ent.state = 'VOID';
+      ent.voidedAt = now();
+      ent.voidReason = 'checkout-session-expired';
+      ent.lastEventId = eventId || null;
+      return { applied: true, duplicate: false, entitlement: ent };
+    },
+
+    /**
+     * Record a failed delayed payment (checkout.session.async_payment_failed)
+     * for audit WITHOUT changing entitlement state: the buyer may retry
+     * payment on the same still-open session, and a later
+     * async_payment_succeeded for it must still mark the record paid.
+     */
+    notePaymentFailedBySession(sessionId, eventId) {
+      if (eventId && processedEvents.has(eventId)) return { applied: false, duplicate: true };
+      const ent = this.getBySessionId(sessionId);
+      if (!ent) return { applied: false, duplicate: false, reason: 'unknown-session' };
+      if (eventId) processedEvents.add(eventId);
+      ent.failedPaymentEvents = (ent.failedPaymentEvents || 0) + 1;
+      ent.lastPaymentFailureAt = now();
+      ent.lastEventId = eventId || null;
+      return { applied: true, duplicate: false, entitlement: ent };
+    },
+
     /** Consume a PAID entitlement for delivery. Atomic within the process. */
     consumeByToken(token) {
       const ent = this.getByToken(token);
