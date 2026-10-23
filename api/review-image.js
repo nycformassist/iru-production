@@ -60,10 +60,14 @@ function getVisionClient(apiKey) {
   };
 }
 
-function buildVisionPrompt(relatedEvidenceKey) {
+function buildVisionPrompt(relatedEvidenceKey, lang = 'EN') {
   const related = relatedEvidenceKey
     ? `The applicant believes this image relates to: ${relatedEvidenceKey}.`
     : 'The applicant did not specify which checklist item this relates to.';
+  const langName = { EN: 'English', ES: 'Spanish', HT: 'Haitian Creole', AR: 'Arabic', ZH: 'Simplified Chinese' }[lang] || 'English';
+  const languageRule = lang && lang !== 'EN'
+    ? `\n- LANGUAGE: write the human-readable text values — "documentCategory", "inconsistencies", and "limitations" — in ${langName}. Keep "legibility", "appearsComplete", and "relatedReadinessItem" exactly as the English codes specified below. "fieldsVisible" lists labels as they appear on the document itself. "extractedFields" values are transcribed exactly as they appear on the document — never translate them.`
+    : '';
   return `
 You are a document-image triage assistant. ${related}
 Examine the image ONCE and return a single JSON object with exactly these keys:
@@ -81,7 +85,7 @@ HARD RULES:
 - NEVER claim the document is authentic, genuine, verified, or legally sufficient. Looking plausible proves nothing.
 - "fieldsVisible" lists LABELS only. Separately, "extractedFields" transcribes values ONLY for the allowlisted fields above, ONLY when the value is actually legible on the document. These values are unverified document contents for the applicant's own review — never present them as established facts anywhere else in your output.
 - If a value is not legible or not present, omit that field. Do not guess, infer, or complete partial values.
-- If you cannot determine something, say so. Do not guess.
+- If you cannot determine something, say so. Do not guess.${languageRule}
 `.trim();
 }
 
@@ -120,7 +124,10 @@ export default async function handler(req, res) {
   const body = typeof rawBody === 'string' ? safeParse(rawBody) : (rawBody || {});
   if (!body) return res.status(400).json({ error: 'Invalid submission.' });
 
-  const { imageBase64, mimeType, relatedEvidenceKey } = body;
+  const { imageBase64, mimeType, relatedEvidenceKey, lang } = body;
+  // Applicant language for the review's human-readable text. Unknown
+  // or absent values fall back to English (the historical behavior).
+  const reviewLang = ['EN', 'ES', 'ZH', 'HT', 'AR'].includes(lang) ? lang : 'EN';
   if (typeof imageBase64 !== 'string' || imageBase64.length === 0) {
     return res.status(400).json({ error: 'Invalid submission.', details: ['imageBase64 is required'] });
   }
@@ -168,6 +175,13 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Invalid submission.', details: ['encrypted PDFs are not supported'] });
     }
   }
+  // Image signature validation (WS5 anti-abuse audit): PDFs were
+  // signature-checked above, but declared image types were trusted on
+  // the client's word. Verify the magic bytes match the declared MIME
+  // type so mislabeled content is refused before any provider call.
+  if (!isPdf && !imageSignatureMatches(imageBytes, mimeType)) {
+    return res.status(400).json({ error: 'Invalid submission.', details: ['file signature does not match declared type'] });
+  }
   // Drop the decoded buffer reference as early as possible; only the
   // original base64 string is forwarded to the provider in this request.
   imageBytes = null;
@@ -175,7 +189,7 @@ export default async function handler(req, res) {
   try {
     const client = getVisionClient(apiKey);
     const text = await withTimeout(
-      client.reviewImage({ imageBase64, mimeType, prompt: buildVisionPrompt(relatedEvidenceKey) }),
+      client.reviewImage({ imageBase64, mimeType, prompt: buildVisionPrompt(relatedEvidenceKey, reviewLang) }),
       50000
     );
     const cleaned = String(text || '').replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
@@ -186,7 +200,7 @@ export default async function handler(req, res) {
       console.log('[iru] image review: vision output was not valid JSON');
       return res.status(502).json({ error: 'Review unavailable. Please try again later.' });
     }
-    const sanitized = sanitizeVisionReview(parsed);
+    const sanitized = sanitizeVisionReview(parsed, reviewLang);
     if (!sanitized.ok) {
       console.log(`[iru] image review: schema validation failed (${sanitized.error})`);
       return res.status(502).json({ error: 'Review unavailable. Please try again later.' });
@@ -200,6 +214,27 @@ export default async function handler(req, res) {
   }
   // NOTE: no finally-block retention — the image existed only in request
   // memory. See PRIVACY_REVIEW.md for provider-side retention limits.
+}
+
+/** Magic-byte signatures for the allowed image types. Never throws. */
+function imageSignatureMatches(bytes, mimeType) {
+  if (!bytes || bytes.length < 4) return false;
+  switch (mimeType) {
+    case 'image/jpeg':
+      return bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+    case 'image/png':
+      return bytes.length >= 8
+        && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47
+        && bytes[4] === 0x0d && bytes[5] === 0x0a && bytes[6] === 0x1a && bytes[7] === 0x0a;
+    case 'image/gif':
+      return bytes.subarray(0, 4).toString('ascii') === 'GIF8';
+    case 'image/webp':
+      return bytes.length >= 12
+        && bytes.subarray(0, 4).toString('ascii') === 'RIFF'
+        && bytes.subarray(8, 12).toString('ascii') === 'WEBP';
+    default:
+      return false;
+  }
 }
 
 function safeParse(s) {

@@ -10,11 +10,13 @@ submits them.
 | I-765 | templates/i-765.pdf | 08/21/25 | https://www.uscis.gov/sites/default/files/document/forms/i-765.pdf | 2026-10-21 | 9ac0eae287749d4c2dfa0a591f464cc2124c18647c10e999b59484f090e0dc7d |
 
 Notes:
-- The I-589 web page lists edition 01/20/25 as the current edition (checked
-  2026-10-21); the PDF USCIS actually serves carries Edition 07/28/26
-  (USCIS pre-posts announced editions). IRU generates from the served PDF
-  and records its printed edition in the registry. Older I-589 editions
-  01/20/25 and 09/03/24 remain accepted by USCIS per the form page.
+- The I-589 web page listed edition 01/20/25 as the current edition when
+  checked 2026-10-21; the PDF USCIS actually serves carries Edition
+  07/28/26. On 2026-10-22 the web page moved to 07/28/26 (verified by the
+  USCIS monitor, ~/workspace/uscis-monitor/state.json), so the page now
+  matches the served PDF. IRU generates from the served PDF and records
+  its printed edition in the registry. Older I-589 editions 01/20/25 and
+  09/03/24 remain accepted by USCIS per the form page.
 - USCIS serves these PDFs encrypted with an EMPTY user password. The
   stored templates are the identical documents with that encryption
   wrapper removed (decrypted with the empty user password) so standard
