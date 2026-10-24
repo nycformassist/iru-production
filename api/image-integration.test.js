@@ -186,11 +186,13 @@ describe('independently-verified is unreachable from image review', () => {
     assert.ok(!Object.values(EVIDENCE_STATES).includes('image-verified'));
   });
 
-  it('validateModelOutput rejects "independently verified" claims', () => {
+  it('validateModelOutput sanitizes "independently verified" claims instead of rejecting the assessment (2026-10-24 fix)', () => {
     const out = JSON.stringify({ ...GOOD_ASSESSMENT, readinessSummary: 'The passport is independently verified.' });
     const r = validateModelOutput(out);
-    assert.equal(r.ok, false);
-    assert.match(r.error, /independent verification/);
+    assert.equal(r.ok, true);
+    assert.equal(r.sanitized, true);
+    assert.equal(r.data.readinessSummary, 'The passport is shown in the material provided.');
+    assert.ok(!/independently[- ]verified/i.test(JSON.stringify(r.data)), 'no verification claim remains');
   });
 });
 

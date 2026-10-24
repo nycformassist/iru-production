@@ -811,6 +811,75 @@ export default function App() {
     return { score, total: total || 1 };
   };
 
+  /**
+   * Priority Action Table rows — the SAME triage builder the printable
+   * packet document uses (generateHtml), extracted to component scope
+   * (2026-10-24 fix) so the on-screen packet can render the identical
+   * rows as JSX. Each row carries both the raw text (on-screen) and
+   * the escaped HTML fragment (printable document) so neither
+   * rendering changes the other's bytes.
+   * Honest evidence states (mirrors api/_lib/evidence.js resolveState):
+   * - "yes" → reported, NOT verified (amber — never green "ready")
+   * - "no" → action required; self-reported alternatives listed as
+   *   alternatives, never as verification
+   * - "unknown" → unknown
+   * Nothing the system has not reviewed is ever styled as ready.
+   */
+  const buildTriageRows = () => {
+    const rows: Array<{ item: string; statusText: string; statusKind: 'green' | 'red' | 'amber' | 'gray'; nextStepText: string; nextStepHtml: string; legalNoteText: string }> = [];
+    let hasAlternatives = false;
+    const addRow = (item: string, key: string, nextStepYes: string, nextStepNo: string) => {
+      if (!answers[key]) return;
+      const ans = answers[key];
+      const st = ui.evidenceStates || {};
+      let statusText: string;
+      let statusKind: 'green' | 'red' | 'amber' | 'gray';
+      let nextStepText: string;
+      let nextStepHtml: string;
+      if (ans === 'yes') {
+        statusText = st.reportedNotVerified || 'Reported — not verified';
+        statusKind = 'amber';
+        nextStepText = nextStepYes;
+        nextStepHtml = nextStepYes;
+      } else if (ans === 'unknown') {
+        statusText = st.unknown || 'Unknown';
+        statusKind = 'gray';
+        nextStepText = nextStepNo;
+        nextStepHtml = nextStepNo;
+      } else {
+        statusText = st.actionRequired || 'Action required';
+        statusKind = 'red';
+        const selectedProxies = (PROXIES[key]?.items || []).filter((i: any) => answers[i.id] === 'yes');
+        if (selectedProxies.length > 0) {
+          hasAlternatives = true;
+          const altLabel = st.alternativeIdentified || ui.alternativesReported || 'Alternatives reported';
+          const proxyNames = selectedProxies.map((i: any) => i.label[lang]).join(', ');
+          const notReviewed = ui.alternativesNotReviewed || '';
+          nextStepText = `${altLabel}: ${proxyNames}. ${notReviewed}`;
+          nextStepHtml = `${escapeHtml(altLabel)}: ${selectedProxies.map((i: any) => escapeHtml(i.label[lang])).join(', ')}. ${escapeHtml(notReviewed)}`;
+        } else {
+          nextStepText = nextStepNo;
+          nextStepHtml = nextStepNo;
+        }
+      }
+      const legalNoteText = requiresLegalReview(key)
+        ? `⚖️ ${st.legalReviewRequired || 'Needs qualified legal review'}`
+        : '';
+      rows.push({ item, statusText, statusKind, nextStepText, nextStepHtml, legalNoteText });
+    };
+
+    addRow((ui.evidenceItemNames && ui.evidenceItemNames['has_passport']) || 'Passport', 'has_passport', t('pktStepVault', 'Photo-Vault & Email to self'), consulate ? t('pktStepConsulate', 'Visit {name} at {address}').replace('{name}', consulate.name).replace('{address}', consulate.address) : t('pktStepAltId', 'Locate alternative ID'));
+    addRow((ui.evidenceItemNames && ui.evidenceItemNames['has_i94']) || 'I-94 Record', 'has_i94', t('pktStepVault', 'Photo-Vault & Email to self'), t('pktStepI94', 'Retrieve digitally at i94.cbp.dhs.gov'));
+    addRow((ui.evidenceItemNames && ui.evidenceItemNames['has_lease']) || 'Formal Lease', 'has_lease', t('pktStepVault', 'Photo-Vault & Email to self'), t('pktStepAltResidence', 'Gather alternative residence documents'));
+    addRow((ui.evidenceItemNames && ui.evidenceItemNames['has_persecution_proof']) || 'Proof of Persecution', 'has_persecution_proof', t('pktStepVault', 'Photo-Vault & Email to self'), t('pktStepPersecution', 'Begin gathering photos, reports, or witness letters'));
+    addRow((ui.evidenceItemNames && ui.evidenceItemNames['has_green_card']) || 'Green Card', 'has_green_card', t('pktStepVault', 'Photo-Vault & Email to self'), t('pktStepGreenCard', 'Locate or request replacement'));
+    addRow((ui.evidenceItemNames && ui.evidenceItemNames['has_tax_transcripts']) || 'Tax Transcripts', 'has_tax_transcripts', t('pktStepVault', 'Photo-Vault & Email to self'), t('pktStepTax', 'Request from IRS.gov'));
+    addRow((ui.evidenceItemNames && ui.evidenceItemNames['has_marriage_cert']) || 'Marriage/Divorce Certs', 'has_marriage_cert', t('pktStepVault', 'Photo-Vault & Email to self'), t('pktStepMarriage', 'Request from vital records'));
+    addRow((ui.evidenceItemNames && ui.evidenceItemNames['has_proof_of_relationship']) || 'Proof of Relationship', 'has_proof_of_relationship', t('pktStepVault', 'Photo-Vault & Email to self'), t('pktStepRelationship', 'Gather photos, joint accounts'));
+    addRow((ui.evidenceItemNames && ui.evidenceItemNames['has_arrests']) || 'Certificates of Disposition', 'has_arrests', t('pktStepVault', 'Photo-Vault & Email to self'), t('pktStepDisposition', 'Request from criminal court'));
+    return { rows, hasAlternatives };
+  };
+
   const getProgress = () => {
     if (stage === 'PHASE1') return 20;
     if (stage === 'TRIAGE') return 40;
@@ -918,8 +987,10 @@ export default function App() {
       </div>
     `).join('');
 
-    const triageRows: string[] = [];
-    let hasAlternatives = false;
+    // Priority Action Table rows come from the shared builder
+    // (buildTriageRows, component scope) so the printable document and
+    // the on-screen packet render identical rows.
+    const { rows: triageRowData, hasAlternatives } = buildTriageRows();
     const badge = (text: string, kind: 'green' | 'red' | 'amber' | 'gray') => {
       const styles: Record<string, string> = {
         green: 'background-color: #dcfce7; color: #166534;',
@@ -929,59 +1000,13 @@ export default function App() {
       };
       return `<span class="status-green" style="${styles[kind]}">${escapeHtml(text)}</span>`;
     };
-    /**
-     * Honest evidence states (mirrors api/_lib/evidence.js resolveState):
-     * - "yes" → reported, NOT verified (amber — never green "ready")
-     * - "no" → action required; self-reported alternatives listed as
-     *   alternatives, never as verification
-     * - "unknown" → unknown
-     * Nothing the system has not reviewed is ever styled as ready.
-     */
-    const addRow = (item: string, key: string, nextStepYes: string, nextStepNo: string) => {
-      if (!answers[key]) return;
-      const ans = answers[key];
-      const st = ui.evidenceStates || {};
-      let statusHtml: string;
-      let nextStepHtml: string;
-      if (ans === 'yes') {
-        statusHtml = badge(st.reportedNotVerified || 'Reported — not verified', 'amber');
-        nextStepHtml = nextStepYes;
-      } else if (ans === 'unknown') {
-        statusHtml = badge(st.unknown || 'Unknown', 'gray');
-        nextStepHtml = nextStepNo;
-      } else {
-        statusHtml = badge(st.actionRequired || 'Action required', 'red');
-        const selectedProxies = (PROXIES[key]?.items || []).filter((i: any) => answers[i.id] === 'yes');
-        if (selectedProxies.length > 0) {
-          hasAlternatives = true;
-          const proxyNames = selectedProxies.map((i: any) => escapeHtml(i.label[lang])).join(', ');
-          nextStepHtml = `${escapeHtml(st.alternativeIdentified || ui.alternativesReported || 'Alternatives reported')}: ${proxyNames}. ${escapeHtml(ui.alternativesNotReviewed || '')}`;
-        } else {
-          nextStepHtml = nextStepNo;
-        }
-      }
-      const legalNote = requiresLegalReview(key)
-        ? `<div style="margin-top:0.5rem;font-size:0.75rem;color:#92400e;font-weight:600;">⚖️ ${escapeHtml(st.legalReviewRequired || 'Needs qualified legal review')}</div>`
-        : '';
-
-      triageRows.push(`
+    const triageRows: string[] = triageRowData.map(r => `
           <tr>
-            <td style="font-weight: 500;">${escapeHtml(item)}</td>
-            <td>${statusHtml}</td>
-            <td style="color: #64748b;">${nextStepHtml}${legalNote}</td>
+            <td style="font-weight: 500;">${escapeHtml(r.item)}</td>
+            <td>${badge(r.statusText, r.statusKind)}</td>
+            <td style="color: #64748b;">${r.nextStepHtml}${r.legalNoteText ? `<div style="margin-top:0.5rem;font-size:0.75rem;color:#92400e;font-weight:600;">${escapeHtml(r.legalNoteText)}</div>` : ''}</td>
           </tr>
         `);
-    };
-
-    addRow((ui.evidenceItemNames && ui.evidenceItemNames['has_passport']) || 'Passport', 'has_passport', t('pktStepVault', 'Photo-Vault & Email to self'), consulate ? t('pktStepConsulate', 'Visit {name} at {address}').replace('{name}', consulate.name).replace('{address}', consulate.address) : t('pktStepAltId', 'Locate alternative ID'));
-    addRow((ui.evidenceItemNames && ui.evidenceItemNames['has_i94']) || 'I-94 Record', 'has_i94', t('pktStepVault', 'Photo-Vault & Email to self'), t('pktStepI94', 'Retrieve digitally at i94.cbp.dhs.gov'));
-    addRow((ui.evidenceItemNames && ui.evidenceItemNames['has_lease']) || 'Formal Lease', 'has_lease', t('pktStepVault', 'Photo-Vault & Email to self'), t('pktStepAltResidence', 'Gather alternative residence documents'));
-    addRow((ui.evidenceItemNames && ui.evidenceItemNames['has_persecution_proof']) || 'Proof of Persecution', 'has_persecution_proof', t('pktStepVault', 'Photo-Vault & Email to self'), t('pktStepPersecution', 'Begin gathering photos, reports, or witness letters'));
-    addRow((ui.evidenceItemNames && ui.evidenceItemNames['has_green_card']) || 'Green Card', 'has_green_card', t('pktStepVault', 'Photo-Vault & Email to self'), t('pktStepGreenCard', 'Locate or request replacement'));
-    addRow((ui.evidenceItemNames && ui.evidenceItemNames['has_tax_transcripts']) || 'Tax Transcripts', 'has_tax_transcripts', t('pktStepVault', 'Photo-Vault & Email to self'), t('pktStepTax', 'Request from IRS.gov'));
-    addRow((ui.evidenceItemNames && ui.evidenceItemNames['has_marriage_cert']) || 'Marriage/Divorce Certs', 'has_marriage_cert', t('pktStepVault', 'Photo-Vault & Email to self'), t('pktStepMarriage', 'Request from vital records'));
-    addRow((ui.evidenceItemNames && ui.evidenceItemNames['has_proof_of_relationship']) || 'Proof of Relationship', 'has_proof_of_relationship', t('pktStepVault', 'Photo-Vault & Email to self'), t('pktStepRelationship', 'Gather photos, joint accounts'));
-    addRow((ui.evidenceItemNames && ui.evidenceItemNames['has_arrests']) || 'Certificates of Disposition', 'has_arrests', t('pktStepVault', 'Photo-Vault & Email to self'), t('pktStepDisposition', 'Request from criminal court'));
 
     // Evidence Gaps & Alternatives section — rendered from the server-side KB.
     // Alternatives are per-item with supports/limitations; nothing is marked ready.
@@ -1723,6 +1748,25 @@ export default function App() {
             <p className="text-lg text-slate-600 mb-8">
               {ui.packetDesc}
             </p>
+
+            {/* ── Readiness Score + Readiness Review (2026-10-24 fix):
+                the same score heuristic (calculateReadinessScore) and
+                the same assessment text (renderAssessmentText) the
+                printable packet carries, rendered on screen so the
+                header's promise above holds on this page too. ── */}
+            {(() => {
+              const { score, total } = calculateReadinessScore();
+              const readinessPercent = Math.round((score / total) * 100);
+              return (
+                <div className="mt-8 mb-8 text-left">
+                  <div className="inline-block bg-indigo-50 text-indigo-700 px-4 py-2 rounded-full font-bold text-sm">
+                    {ui.readinessScore}: {readinessPercent}% <span className="font-normal text-xs">{t('pktHeuristicNote', '(approximate document-completeness heuristic — not a validated metric)')}</span>
+                  </div>
+                  <h3 className="text-lg font-serif font-bold text-slate-900 mb-2 mt-6">{ui.readinessReview || 'Readiness Review'}</h3>
+                  <p className="text-base text-slate-800 italic bg-slate-50 border border-slate-200 rounded-xl p-4" style={{ whiteSpace: 'pre-wrap' }}>{renderAssessmentText(assessment)}</p>
+                </div>
+              );
+            })()}
             
             {/* USCIS Required Forms \u2014 data from USCIS_FORMS (fees verified as of FEE_SCHEDULE_AS_OF) */}
             {(() => {
@@ -1862,6 +1906,43 @@ export default function App() {
                       {t('approveNarrative', 'I reviewed my story — approve it for form preparation')}
                     </button>
                   )}
+                </div>
+              );
+            })()}
+
+            {/* ── Priority Action Table (2026-10-24 fix): the same triage
+                builder the printable packet uses (buildTriageRows),
+                rendered on screen. ── */}
+            {(() => {
+              const { rows } = buildTriageRows();
+              if (rows.length === 0) return null;
+              const badgeClass: Record<string, string> = {
+                green: 'bg-green-100 text-green-800',
+                red: 'bg-red-100 text-red-800',
+                amber: 'bg-amber-100 text-amber-800',
+                gray: 'bg-slate-100 text-slate-600',
+              };
+              return (
+                <div className="mt-8 mb-8 text-left">
+                  <h3 className="text-lg font-serif font-bold text-slate-900 mb-2">{ui.triageTable}</h3>
+                  <table className="w-full border border-slate-200 rounded-lg overflow-hidden">
+                    <thead>
+                      <tr>
+                        <th className="bg-slate-50 text-left px-4 py-2 text-xs font-medium text-slate-500 uppercase tracking-wide border-b border-slate-200">{ui.item}</th>
+                        <th className="bg-slate-50 text-left px-4 py-2 text-xs font-medium text-slate-500 uppercase tracking-wide border-b border-slate-200">{ui.status}</th>
+                        <th className="bg-slate-50 text-left px-4 py-2 text-xs font-medium text-slate-500 uppercase tracking-wide border-b border-slate-200">{ui.nextStep}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((r: any, i: number) => (
+                        <tr key={i} className="border-b border-slate-200">
+                          <td className="px-4 py-3 text-sm font-medium">{r.item}</td>
+                          <td className="px-4 py-3"><span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${badgeClass[r.statusKind] || badgeClass.gray}`}>{r.statusText}</span></td>
+                          <td className="px-4 py-3 text-sm text-slate-500">{r.nextStepText}{r.legalNoteText ? <div className="mt-1 text-xs text-amber-800 font-semibold">{r.legalNoteText}</div> : null}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               );
             })()}
@@ -2091,6 +2172,68 @@ export default function App() {
                 })()}
               </div>
             )}
+
+            {/* ── Safe-Landing Hub (2026-10-24 fix): the same
+                location-matched organizations the printable packet
+                renders (resources state: local + statewide), shown on
+                screen so the Next Steps text below — "the organizations
+                under Safe-Landing Hub above" — points at a section that
+                actually exists on this page. National directories are
+                not duplicated here; they already render in Next Steps. ── */}
+            <div className="mt-8 mb-8 text-left">
+              <h3 className="text-lg font-serif font-bold text-slate-900 mb-2">{ui.localResources}</h3>
+              {resourceResult?.isInternational ? (
+                <div className="bg-blue-50 border border-blue-400 rounded-lg p-4 mb-4">
+                  <p className="text-sm text-blue-900 font-semibold m-0">{t('intlResourcesNote', "You are located outside the United States. IRU's verified local directory covers parts of the U.S. only, so no local provider is shown — the U.S. national directories below can still help you find immigration legal help.")}</p>
+                </div>
+              ) : resourceResult?.fallback ? (
+                <div className="bg-amber-50 border border-amber-400 rounded-lg p-4 mb-4">
+                  <p className="text-sm text-amber-900 font-semibold m-0">
+                    {answers.zip_code
+                      ? t('pktNoProvidersZip', "No verified local providers found for ZIP {zip} in IRU's curated directory yet.").replace('{zip}', answers.zip_code)
+                      : t('pktNoProvidersArea', "No verified local providers found for your area in IRU's curated directory yet.")}
+                    {' '}{t('pktNoProvidersTail', 'The national directories below can help you find immigration legal aid in your area.')}
+                  </p>
+                </div>
+              ) : null}
+              {resources.length > 0 ? (
+                <div className="space-y-3">
+                  {resources.map((res: any) => {
+                    const layerLabel = res.layer === 'statewide' ? t('pktLayerStatewide', 'Statewide') : (res.borough || t('pktLayerLocal', 'Local'));
+                    const eligibilityText = localizedResourceText(res, 'eligibility', lang);
+                    const servicesText = localizedResourceText(res, 'servicesOffered', lang);
+                    const serviceAreaText = localizedResourceText(res, 'serviceArea', lang);
+                    const transitText = localizedResourceText(res, 'transit', lang);
+                    const exitText = localizedResourceText(res, 'exit', lang);
+                    return (
+                      <div key={res.name} className="relative p-5 border-2 border-indigo-100 bg-indigo-50 rounded-xl">
+                        <span className="absolute top-0 right-0 bg-indigo-600 text-white text-xs font-bold px-3 py-1 rounded-bl-lg uppercase">{layerLabel}</span>
+                        <h4 className="text-lg font-bold text-slate-900 mb-1 pr-16">{res.name}</h4>
+                        <p className="text-slate-700 font-medium mb-1">{res.address}</p>
+                        <p className="text-slate-700 font-medium mb-3"><span dir="ltr">{res.phone}</span></p>
+                        {res.website && <p className="mb-3"><a href={res.website} target="_blank" rel="noreferrer" className="text-blue-700 underline text-sm">{res.website.replace(/^https?:\/\//, '')}</a></p>}
+                        {servicesText && <p className="text-sm text-slate-700 mb-3"><strong>{t('pktServices', 'Services')}:</strong> {servicesText}</p>}
+                        {eligibilityText && <p className="text-sm text-amber-900 bg-amber-100 px-3 py-2 rounded-md mb-3"><strong>{t('pktEligibility', 'Eligibility')}:</strong> {eligibilityText}</p>}
+                        <p className="text-xs text-slate-500 italic mb-3">{t('pktServiceArea', 'Service area')}: {serviceAreaText}{res.legalRepresentation ? ` · ${t('pktLegalRep', 'Provides legal representation')}` : ''}</p>
+                        {(res.lastVerified || res.sourceOfVerification) && (
+                          <p className="text-xs text-slate-500 mb-3">
+                            {res.lastVerified ? `${t('pktVerified', 'Verified')}: ${res.lastVerified}` : ''}{res.lastVerified && res.sourceOfVerification ? ' · ' : ''}{res.sourceOfVerification ? `${t('pktVerifiedSource', 'Source')}: ${res.sourceOfVerification}` : ''}
+                          </p>
+                        )}
+                        {(transitText || exitText) && (
+                          <div className="bg-white p-3 rounded-lg border border-indigo-200">
+                            {transitText && <p className="text-sm font-semibold text-indigo-900 mb-1">🚇 {transitText}</p>}
+                            {exitText && <p className="text-sm font-medium text-slate-600 m-0">🚶 {ui.subwayExit}: {exitText}</p>}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-slate-500 italic text-sm">{t('pktNoResources', 'No specific resources found.')}</p>
+              )}
+            </div>
 
             {/* ── Your preparation package (defect-closure P3B): the
                 on-screen counterpart of the packet's package section.

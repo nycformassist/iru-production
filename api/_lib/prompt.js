@@ -151,6 +151,12 @@ ${legalHardRules().split('\n').map(l => '  * ' + l).join('\n')}
   nothing: not authenticity, not legal sufficiency, not eligibility. Never
   present an observation as a fact, and never mark any item verified,
   authenticated, or ready because of an image review.
+- DOCUMENT VERIFICATION — YOU CANNOT VERIFY DOCUMENTS: never claim a
+  document is verified, authenticated, genuine, or officially validated,
+  even if it appears complete and legible. Describe only what a document
+  appears to show, and always note what remains unverified and must be
+  confirmed by a qualified human. A document's presence in the file is
+  never proof of authenticity, legal sufficiency, or eligibility.
 - Keep the tone supportive and plain. Avoid jargon where possible.
 - LANGUAGE: write all string VALUES in ${targetLang}. The JSON KEYS must stay
   exactly as specified (English keys), but every human-readable value should
@@ -211,8 +217,11 @@ Respond with a single JSON object and nothing else, using exactly these keys:
 }
 
 /**
- * Validate model output against the schema. Returns { ok, data } or
- * { ok: false, error }. Never throws on malformed model output.
+ * Validate model output against the schema. Returns { ok, data,
+ * sanitized } or { ok: false, error }. Never throws on malformed model
+ * output. Verification claims ("verified"/"authenticated" documents) are
+ * sanitized to neutral language instead of rejecting the output; the
+ * `sanitized` flag reports whether any claim was rewritten.
  */
 export function validateModelOutput(text) {
   if (!text || typeof text !== 'string') return { ok: false, error: 'empty model output' };
@@ -236,9 +245,72 @@ export function validateModelOutput(text) {
   for (const key of ['factsProvided', 'missingInformation', 'contradictions', 'inferences', 'suggestedQuestions', 'uncertaintyNotes', 'evidenceGaps']) {
     if (!Array.isArray(data[key])) return { ok: false, error: `${key} must be an array` };
   }
+  // Verification-claim sanitizer (2026-10-24 fix): the model sometimes
+  // asserts documents were "verified" or "authenticated". IRU never
+  // verifies documents, so such a claim must never reach the applicant —
+  // but the claim alone must not discard an otherwise valid assessment:
+  // that fail-closed behavior silently replaced real AI findings with
+  // rule-based fallback output whenever the model's wording tripped it
+  // (log event iru_analyze_validation_failure, Oct 2026). Sanitize the
+  // claim to neutral "appears to show" / "provided" language and
+  // continue validation. Only genuinely invalid output is still
+  // rejected below. Patterns are scoped to verification-claim shapes
+  // (document nouns + verification verbs/adjectives) so negated or
+  // unrelated uses ("not verified", "must be verified by counsel") are
+  // left untouched. Runs over every string value in the parsed output
+  // (including nested arrays/objects); keys are untouched.
+  const DN = String.raw`(?:document|evidence|passport|certificate|record|ids?|identification)s?`;
+  const VERIFICATION_REPLACEMENTS = [
+    // English — most specific first.
+    [String.raw`independently[- ]verified`, 'gi', 'shown in the material provided'],
+    [String.raw`officially\s+(?:validated|verified|authenticated)`, 'gi', 'provided'],
+    [String.raw`(?:verified|authenticated)\s+the\s+(${DN})`, 'gi', 'reviewed the $1'],
+    [String.raw`(?:verified|authenticated)\s+(${DN})`, 'gi', 'provided $1'],
+    [String.raw`(${DN})\s+(is|are|has been|have been|was|were)\s+(?:verified|authenticated)`, 'gi', '$1 $2 shown'],
+    [String.raw`genuine\s+(${DN})`, 'gi', 'provided $1'],
+    [String.raw`(${DN})\s+is\s+genuine`, 'gi', '$1 appears as provided'],
+    // Spanish — phrases first, then the claim adjectives in verb phrases.
+    [String.raw`verificado\s+independientemente`, 'gi', 'mostrado en el material proporcionado'],
+    [String.raw`verificada\s+independientemente`, 'gi', 'mostrada en el material proporcionado'],
+    [String.raw`(documento|evidencia|pasaporte|certificado|registro)s?\s+(está|están|ha sido|fue|fueron)\s+verificado`, 'gi', '$1 $2 mostrado'],
+    [String.raw`(documento|evidencia|pasaporte|certificado|registro)s?\s+(está|están|ha sido|fue|fueron)\s+verificada`, 'gi', '$1 $2 mostrada'],
+    [String.raw`(documento|evidencia|pasaporte|certificado|registro)s?\s+(está|están|ha sido|fue|fueron)\s+autenticado`, 'gi', '$1 $2 mostrado'],
+    [String.raw`(documento|evidencia|pasaporte|certificado|registro)s?\s+(está|están|ha sido|fue|fueron)\s+autenticada`, 'gi', '$1 $2 mostrada'],
+    // Haitian Creole.
+    [String.raw`verifye\s+endepandamman`, 'gi', 'montre nan dokiman yo bay'],
+    [String.raw`(dokiman|prèv|paspò|sètifika)\s+verifye`, 'gi', '$1 bay'],
+    [String.raw`(dokiman|prèv|paspò|sètifika)\s+otantike`, 'gi', '$1 bay'],
+    // Simplified Chinese.
+    [String.raw`(文档|证据|护照|证书|证件)(?:已|已经)?(?:被)?(?:核实|验证|认证)`, 'g', '$1已提供'],
+    [String.raw`独立核实`, 'g', '在提供的材料中显示'],
+    // Arabic — standalone phrases exclude the negated form (لم …).
+    [String.raw`(?<!لم\s)تم التحقق منه بشكل مستقل`, 'g', 'تم عرضه في المواد المقدمة'],
+    [String.raw`(?<!لم\s)تم التحقق منه`, 'g', 'تم تقديمه'],
+    [String.raw`(?<!لم\s)تمت المصادقة عليه`, 'g', 'تم تقديمه'],
+    [String.raw`(المستند|الدليل|جواز السفر|الشهادة)\s+موثّق`, 'g', '$1 مقدَّم'],
+  ];
+  let sanitizedCount = 0;
+  const sanitizeValue = (value) => {
+    if (typeof value === 'string') {
+      let out = value;
+      for (const [pattern, flags, replacement] of VERIFICATION_REPLACEMENTS) {
+        const next = out.replace(new RegExp(pattern, flags), replacement);
+        if (next !== out) { sanitizedCount++; out = next; }
+      }
+      return out;
+    }
+    if (Array.isArray(value)) return value.map(sanitizeValue);
+    if (value && typeof value === 'object') {
+      const copy = {};
+      for (const [k, v] of Object.entries(value)) copy[k] = sanitizeValue(v);
+      return copy;
+    }
+    return value;
+  };
+  const sanitizedData = sanitizeValue(data);
   // Refuse legal-certainty language leaking through the schema.
   const banned = /(case is strong|will (win|succeed|be approved)|guaranteed|definitely eligible)/i;
-  const haystack = JSON.stringify(data);
+  const haystack = JSON.stringify(sanitizedData);
   if (banned.test(haystack)) {
     return { ok: false, error: 'model output contained legal-certainty language' };
   }
@@ -251,32 +323,11 @@ export function validateModelOutput(text) {
   if (bannedLocalized.test(haystack)) {
     return { ok: false, error: 'model output contained legal-certainty language' };
   }
-  // Refuse false verification claims about documents/evidence. IRU never
-  // verifies documents, so the model must never claim it did.
-  const bannedVerification =
-    /((document|evidence|passport|certificate|record|id|identification)s?\s+(is|are|has been|have been|was|were)\s+(verified|authenticated))|(verified|authenticated)\s+(document|evidence|passport|certificate|record)/i;
-  if (bannedVerification.test(haystack)) {
-    return { ok: false, error: 'model output claimed documents were verified/authenticated' };
-  }
-  // Verification claims in the other supported languages (additive).
-  const bannedVerificationLocalized =
-    /((documento|evidencia|pasaporte|certificado|registro)s?\s+(está|están|ha sido|fue|fueron)\s+(verificado|verificada|autenticado|autenticada))|((dokiman|prèv|paspò|sètifika)\s+(verifye|otantike))|((文档|证据|护照|证书|证件)(已|已经)?(被)?(核实|验证|认证))|((المستند|الدليل|جواز السفر|الشهادة)\s+(موثّق|تم التحقق منه|تمت المصادقة عليه))/i;
-  if (bannedVerificationLocalized.test(haystack)) {
-    return { ok: false, error: 'model output claimed documents were verified/authenticated' };
-  }
   if (/legally sufficient/i.test(haystack)) {
     return { ok: false, error: 'model output claimed legal sufficiency' };
   }
   if (/(legalmente suficiente|sifizan legalman|legalman sifi|法律上充分|كافٍ قانونيًا|كافية قانونيًا)/i.test(haystack)) {
     return { ok: false, error: 'model output claimed legal sufficiency' };
-  }
-  // An image review can never independently verify anything. Reject any
-  // claim that evidence was independently verified on that basis.
-  if (/independently[- ]verified/i.test(haystack)) {
-    return { ok: false, error: 'model output claimed independent verification' };
-  }
-  if (/(verificado independientemente|verifye endepandamman|独立核实|تم التحقق منه بشكل مستقل)/i.test(haystack)) {
-    return { ok: false, error: 'model output claimed independent verification' };
   }
   // The model must not declare anything "ready" as a case-status claim.
   if (/(case|application|requirement)\s+is\s+ready/i.test(haystack)) {
@@ -285,7 +336,7 @@ export function validateModelOutput(text) {
   if (/(el caso está listo|la solicitud está lista|ka a pare|طلبك جاهز|案件已准备就绪)/i.test(haystack)) {
     return { ok: false, error: 'model output declared the case ready' };
   }
-  return { ok: true, data };
+  return { ok: true, data: sanitizedData, sanitized: sanitizedCount > 0 };
 }
 
 /**

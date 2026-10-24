@@ -34,6 +34,11 @@ describe('buildPrompt', () => {
     assert.ok(/ignore.*instructions.*note/i.test(p));
   });
 
+  it('forbids document-verification claims outright (2026-10-24 fix)', () => {
+    assert.ok(/YOU CANNOT VERIFY DOCUMENTS/.test(p));
+    assert.ok(/never claim a\s+document is verified, authenticated, genuine, or officially validated/i.test(p));
+  });
+
   it('contains no direct identifiers', () => {
     assert.ok(!p.includes('A123'));
     assert.ok(!/full legal name/i.test(p));
@@ -128,13 +133,63 @@ describe('validateModelOutput', () => {
     assert.equal(validateModelOutput(JSON.stringify(o)).ok, false);
   });
 
-  it('rejects false document-verification claims', () => {
+  it('sanitizes false document-verification claims instead of rejecting the assessment (2026-10-24 fix)', () => {
+    // The old fail-closed behavior discarded the ENTIRE assessment when
+    // the model's wording claimed verification, silently replacing real
+    // AI findings with rule-based fallback output. A verification claim
+    // is now rewritten to neutral language and the rest is kept.
+    const cases = [
+      ['Your passport has been verified.', 'Your passport has been shown.'],
+      ['The evidence is authenticated.', 'The evidence is shown.'],
+      ['The verified document supports your case.', 'The provided document supports your case.'],
+      ['This was independently verified.', 'This was shown in the material provided.'],
+      ['A genuine passport was provided.', 'A provided passport was provided.'],
+      ['The document was officially validated.', 'The document was provided.'],
+    ];
+    for (const [input, expected] of cases) {
+      const o = JSON.parse(good);
+      o.readinessSummary = input;
+      const v = validateModelOutput(JSON.stringify(o));
+      assert.equal(v.ok, true, `claim must be sanitized, not rejected: ${input}`);
+      assert.equal(v.sanitized, true);
+      assert.equal(v.data.readinessSummary, expected);
+      assert.ok(!/verified|authenticated/i.test(JSON.stringify(v.data)), 'no verification claim remains');
+    }
+  });
+
+  it('sanitizes localized verification claims', () => {
     const o = JSON.parse(good);
-    o.readinessSummary = 'Your passport has been verified.';
-    assert.equal(validateModelOutput(JSON.stringify(o)).ok, false);
+    o.readinessSummary = 'El documento fue verificado.';
+    const v = validateModelOutput(JSON.stringify(o));
+    assert.equal(v.ok, true);
+    assert.equal(v.data.readinessSummary, 'El documento fue mostrado.');
+    assert.ok(!/verificado/i.test(JSON.stringify(v.data)));
+  });
+
+  it('leaves output without verification claims unchanged', () => {
+    const v = validateModelOutput(good);
+    assert.equal(v.ok, true);
+    assert.equal(v.sanitized, false);
+    assert.deepEqual(v.data, JSON.parse(good));
+  });
+
+  it('leaves negated or unrelated uses of "verified" untouched', () => {
+    const o = JSON.parse(good);
+    o.uncertaintyNotes = ['Automated observation (NOT verified): the photo appears to show a birth certificate.'];
+    o.suggestedQuestions = ['What remains to be verified by counsel?'];
+    const v = validateModelOutput(JSON.stringify(o));
+    assert.equal(v.ok, true);
+    assert.equal(v.sanitized, false);
+    assert.ok(/NOT verified/.test(v.data.uncertaintyNotes[0]));
+  });
+
+  it('sanitization does not launder other refusals', () => {
+    const o = JSON.parse(good);
+    o.readinessSummary = 'Your passport has been verified and your case is strong.';
+    assert.equal(validateModelOutput(JSON.stringify(o)).ok, false, 'legal-certainty language still rejected');
     const o2 = JSON.parse(good);
-    o2.inferences = ['The evidence is authenticated.'];
-    assert.equal(validateModelOutput(JSON.stringify(o2)).ok, false);
+    o2.readinessSummary = 'The verified documents are legally sufficient.';
+    assert.equal(validateModelOutput(JSON.stringify(o2)).ok, false, 'legal-sufficiency claims still rejected');
   });
 
   it('rejects "legally sufficient" claims (fail-closed, even in question form)', () => {
