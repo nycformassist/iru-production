@@ -223,6 +223,12 @@ export default async function handler(req, res) {
 
     const validated = validateModelOutput(fullText);
     const assessment = validated.ok ? validated.data : fallbackAssessment(min, gapsForFallback, validatedReviews.reviews, lang);
+    if (validated.sanitized) {
+      // Privacy-safe observability only: no model text, no intake data.
+      // A verification claim was rewritten to neutral language instead
+      // of discarding the assessment (2026-10-24 fix).
+      console.log(JSON.stringify({ event: 'iru_analyze_verification_sanitized', requestId }));
+    }
     if (!validated.ok) {
       const durationMs = Date.now() - startTime;
       console.error(JSON.stringify({
