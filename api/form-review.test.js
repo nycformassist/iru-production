@@ -1,4 +1,4 @@
-import { describe, it, after } from 'node:test';
+import { describe, it, after, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -10,6 +10,12 @@ import { generateFormDraft, default as generateHandler } from './generate-form.j
 import blankFormHandler from './blank-form.js';
 import { entitlementStore } from './_lib/entitlement.js';
 import { createNarrative, addNarrativeEvent } from './_lib/narrative.js';
+
+// Payment-hardening gate: paid handlers require an explicit store backend.
+before(() => {
+  process.env.IRU_STORE_BACKEND = 'memory';
+  process.env.IRU_ALLOW_EPHEMERAL_STORE = 'true';
+});
 
 // B2C directive §5 — form review, blank official form, corrections,
 // regeneration, version identification, and preserved approval gates.

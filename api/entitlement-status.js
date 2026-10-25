@@ -9,6 +9,7 @@
 
 import { entitlementStore } from './_lib/entitlement.js';
 import { createLimiter, clientIp } from './_lib/ratelimit.js';
+import { assertPaidStoreAvailable } from './_lib/paymentStore.js';
 
 const limiter = createLimiter({ capacity: 10, windowMs: 10 * 60 * 1000 });
 
@@ -21,6 +22,13 @@ export default async function handler(req, res) {
     res.setHeader('Retry-After', Math.ceil(rl.retryAfterMs / 1000));
     return res.status(429).json({ error: 'Too many requests. Please try again later.' });
   }
+  // Fail closed: with no durable backend configured, a lookup against
+  // an empty in-process store would falsely report a paid purchase as
+  // "not found". Refuse instead of lying (see lib/paymentStore.js).
+  const storeGate = assertPaidStoreAvailable();
+  if (!storeGate.ok) {
+    return res.status(503).json({ error: 'Entitlement lookup is not configured.' });
+  }
   const body = typeof req.body === 'string' ? safeParse(req.body) : (req.body || {});
   const token = body && typeof body.token === 'string' ? body.token : '';
   if (!token) return res.status(400).json({ error: 'Invalid submission.' });
@@ -30,7 +38,7 @@ export default async function handler(req, res) {
   // Usable = paid, still RESERVED, and (for scoped form grants) at
   // least one covered form has not been delivered yet. Legacy grants
   // keep their original whole-token semantics.
-  let usable = !!ent.paidAt && ent.state === 'RESERVED';
+  let usable = ent.paidAt != null && ent.state === 'RESERVED';
   if (usable && ent.scope && ent.scope.kind === 'forms') {
     const forms = Array.isArray(ent.scope.forms) ? ent.scope.forms : [];
     usable = forms.some((f) => !(ent.consumedForms || []).includes(f));

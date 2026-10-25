@@ -30,34 +30,36 @@ import { entitlementStore } from './_lib/entitlement.js';
 import { createLimiter, clientIp } from './_lib/ratelimit.js';
 import { PRICING, SKUS, FORM_IDS } from './_lib/pricing.js';
 import { getFormEntry } from './_lib/forms/registry.js';
+import { resolveAppOrigin, checkPaywallAgreement } from './_lib/paymentConfig.js';
+import { assertPaidStoreAvailable } from './_lib/paymentStore.js';
 
 const limiter = createLimiter({ capacity: 5, windowMs: 10 * 60 * 1000 });
 const MAX_BODY_BYTES = 256 * 1024;
+const MAX_INTENT_KEY_CHARS = 128;
 
 export const SKU = SKUS.LEGACY;
 
-function appOrigin() {
-  return process.env.IRU_APP_ORIGIN || 'http://localhost:5173';
-}
-
 /** Real Stripe call (test keys only — enforced by the handler guard). */
-async function stripeCreateSession({ secretKey, amountCents, entitlementId, productName }) {
+async function stripeCreateSession({ secretKey, amountCents, entitlementId, productName, idempotencyKey, expiresAt, origin }) {
   const params = new URLSearchParams();
   params.set('mode', 'payment');
   params.set('line_items[0][quantity]', '1');
   params.set('line_items[0][price_data][currency]', 'usd');
   params.set('line_items[0][price_data][unit_amount]', String(amountCents));
   params.set('line_items[0][price_data][product_data][name]', productName || 'IRU Readiness Assessment & Form Draft');
-  params.set('success_url', `${appOrigin()}/?checkout=success&entitlement=${entitlementId}`);
-  params.set('cancel_url', `${appOrigin()}/?checkout=cancelled`);
+  params.set('success_url', `${origin}/?checkout=success&entitlement=${entitlementId}`);
+  params.set('cancel_url', `${origin}/?checkout=cancelled`);
   params.set('client_reference_id', entitlementId);
   params.set('metadata[entitlementId]', entitlementId);
+  if (expiresAt) params.set('expires_at', String(expiresAt));
+  const headers = {
+    Authorization: `Bearer ${secretKey}`,
+    'Content-Type': 'application/x-www-form-urlencoded',
+  };
+  if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
   const resp = await fetch('https://api.stripe.com/v1/checkout/sessions', {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${secretKey}`,
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
+    headers,
     body: params.toString(),
   });
   const data = await resp.json().catch(() => ({}));
@@ -65,6 +67,47 @@ async function stripeCreateSession({ secretKey, amountCents, entitlementId, prod
     throw new Error(`stripe checkout failed (${resp.status})`);
   }
   return { id: data.id, url: data.url };
+}
+
+/** Real Stripe session expiration (test keys only — enforced by the handler guard). */
+async function stripeExpireSession({ secretKey, sessionId }) {
+  const resp = await fetch(`https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(sessionId)}/expire`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${secretKey}` },
+  });
+  if (!resp.ok) {
+    throw new Error(`stripe session expire failed (${resp.status})`);
+  }
+  return resp.json().catch(() => ({}));
+}
+
+/**
+ * Best-effort expiration of Stripe sessions superseded by a newer
+ * checkout. Failure-tolerant by design: every failure is logged and
+ * swallowed — it never undoes the local void, the family rule, or
+ * late-payment adjudication. Only sessions voided by this request's
+ * guard sweep are attempted (unpaid RESERVED children only — never
+ * paid or consumed sessions). When an injected gateway provides
+ * expireCheckoutSession it is used (mocked tests); otherwise the real
+ * Stripe call is used; a gateway without an expire method is a no-op.
+ * Sessions expired lazily (TTL read paths) or already expired at Stripe
+ * (checkout.session.expired) are NOT attempted here: lazy expiry must
+ * stay side-effect free, and an already-expired session needs nothing.
+ */
+async function expireSupersededSessions(sessionIds, secretKey) {
+  const gateway = globalThis.__IRU_STRIPE_GATEWAY__;
+  for (const sessionId of sessionIds) {
+    if (!sessionId) continue;
+    try {
+      if (gateway && typeof gateway.expireCheckoutSession === 'function') {
+        await gateway.expireCheckoutSession({ sessionId });
+      } else if (!gateway) {
+        await stripeExpireSession({ secretKey, sessionId });
+      }
+    } catch (err) {
+      console.error('[iru] superseded session expiration failed (continuing):', err && err.message ? err.message : err);
+    }
+  }
 }
 
 /**
@@ -77,7 +120,7 @@ async function stripeCreateSession({ secretKey, amountCents, entitlementId, prod
 function verifyPrerequisite(token, { kind, formsCount = null }) {
   if (!token || typeof token !== 'string') return null;
   const ent = entitlementStore.getByToken(token);
-  if (!ent || !ent.paidAt) return null;
+  if (!ent || ent.paidAt == null) return null;
   if (ent.state === 'VOID' || ent.state === 'EXPIRED') return null;
   if (!ent.scope || ent.scope.kind !== kind) return null;
   if (formsCount !== null) {
@@ -90,19 +133,32 @@ function verifyPrerequisite(token, { kind, formsCount = null }) {
 /**
  * Duplicate-upgrade protection: refuse when a PAID child of the same
  * upgrade family already exists; void abandoned unpaid attempts of the
- * same SKU so a retry never stacks charges.
+ * same SKU so a retry never stacks charges. Returns the Stripe session
+ * ids of the children voided by this call, so the handler can
+ * best-effort expire them at Stripe (see expireSupersededSessions).
+ *
+ * excludeEntitlementId (defect-closure 2026-10-24): the purchase-intent
+ * retry fix. The guard runs during plan resolution, BEFORE the intent
+ * block below; without the exclusion it voids the intent's own
+ * original, the intent then reads as stale, and the retry mints a
+ * second payable session. Exempting that one entitlement from the
+ * void sweep — and nothing else — lets a valid matching intent resolve
+ * to its original session. The paid-conflict check and the void sweep
+ * for other abandoned attempts are unchanged.
  */
-function guardDuplicateUpgrade(parent, sku) {
+function guardDuplicateUpgrade(parent, sku, excludeEntitlementId) {
   const children = entitlementStore.childrenOf(parent.id);
-  const paidUpgrade = children.find((c) => c.paidAt
+  const paidUpgrade = children.find((c) => c.paidAt != null
     && (c.sku === SKUS.ONE_FORM || c.sku === SKUS.BUNDLE || c.sku === SKUS.SECOND_FORM));
-  if (paidUpgrade) return { conflict: true };
+  if (paidUpgrade) return { conflict: true, supersededSessionIds: [] };
+  const supersededSessionIds = [];
   for (const c of children) {
-    if (!c.paidAt && c.sku === sku && c.state === 'RESERVED') {
+    if (c.paidAt == null && c.sku === sku && c.state === 'RESERVED' && c.id !== excludeEntitlementId) {
+      if (c.sessionId) supersededSessionIds.push(c.sessionId);
       entitlementStore.void(c.id, 'superseded-by-new-checkout');
     }
   }
-  return { conflict: false };
+  return { conflict: false, supersededSessionIds };
 }
 
 export default async function handler(req, res) {
@@ -136,7 +192,36 @@ export default async function handler(req, res) {
 
   const body = typeof req.body === 'string' ? safeParse(req.body) : (req.body || {});
   if (!body) return res.status(400).json({ error: 'Invalid submission.' });
+  // Paywall flags must not disagree silently (client build flag vs
+  // server flag). A request that declares no flag is an old client and
+  // passes; current builds always declare (see lib/paymentConfig.js).
+  const agreement = checkPaywallAgreement(body);
+  if (!agreement.ok) {
+    return res.status(503).json({ error: 'Paywall configuration mismatch. Please reload and try again.', reason: 'paywall-mismatch' });
+  }
+  // Fail closed when no durable backend is configured: never create a
+  // paid purchase state the app cannot persist (see lib/paymentStore.js).
+  const storeGate = assertPaidStoreAvailable();
+  if (!storeGate.ok) {
+    return res.status(503).json({ error: 'Checkout is not configured.' });
+  }
   const requestedSku = typeof body.sku === 'string' ? body.sku : '';
+
+  // Checkout idempotency key, parsed BEFORE plan resolution so the
+  // duplicate-upgrade guard can exempt the intent's own entitlement
+  // from its void sweep (see guardDuplicateUpgrade). The intent block
+  // after plan resolution reuses this value.
+  const intentKey = typeof body.purchaseIntentKey === 'string'
+    && body.purchaseIntentKey.length > 0
+    && body.purchaseIntentKey.length <= MAX_INTENT_KEY_CHARS
+    ? body.purchaseIntentKey
+    : null;
+  const intentEntitlementId = intentKey
+    ? (entitlementStore.getIntent(intentKey)?.entitlementId || null)
+    : null;
+  // Stripe session ids voided by this request's guard sweep, for
+  // best-effort expiration after plan resolution.
+  let supersededSessionIds = [];
 
   // ── Resolve what is being bought — amounts come ONLY from the
   // server-side pricing table (or, for the legacy product, the server
@@ -156,7 +241,9 @@ export default async function handler(req, res) {
     if (!parent) {
       return res.status(402).json({ error: 'The $1 evaluation purchase is required first — its payment is credited toward this total.', reason: 'evaluation-required' });
     }
-    if (guardDuplicateUpgrade(parent, requestedSku).conflict) {
+    const guard = guardDuplicateUpgrade(parent, requestedSku, intentEntitlementId);
+    supersededSessionIds = guard.supersededSessionIds;
+    if (guard.conflict) {
       return res.status(409).json({ error: 'This purchase has already been completed. A second charge would duplicate it.', reason: 'already-purchased' });
     }
     if (requestedSku === SKUS.ONE_FORM) {
@@ -175,7 +262,9 @@ export default async function handler(req, res) {
     if (!parent) {
       return res.status(402).json({ error: 'The second-form add-on requires your completed one-form purchase.', reason: 'one-form-required' });
     }
-    if (guardDuplicateUpgrade(parent, requestedSku).conflict) {
+    const guard = guardDuplicateUpgrade(parent, requestedSku, intentEntitlementId);
+    supersededSessionIds = guard.supersededSessionIds;
+    if (guard.conflict) {
       return res.status(409).json({ error: 'This purchase has already been completed. A second charge would duplicate it.', reason: 'already-purchased' });
     }
     const owned = parent.scope.forms[0];
@@ -184,6 +273,57 @@ export default async function handler(req, res) {
     plan = { sku: row.sku, amountCents: row.chargeCents, scope: { kind: 'forms', forms: [other] }, parentId: parent.id, creditedCents: 0, totalCents: row.totalCents, productName: `${row.name} (${other})` };
   } else {
     return res.status(400).json({ error: 'Unknown product.', reason: 'unknown-sku' });
+  }
+
+  // Best-effort Stripe expiration for sessions superseded by this
+  // request's guard sweep (never for paid/consumed sessions — the sweep
+  // only voids unpaid RESERVED children). Failure-tolerant: a failed
+  // expiration never undoes the local void, the family rule, or
+  // late-payment adjudication; paying a superseded session later still
+  // fulfills late or becomes an exception exactly as before.
+  if (supersededSessionIds.length > 0) {
+    await expireSupersededSessions(supersededSessionIds, secretKey);
+  }
+
+  // Checkout idempotency: a client-generated purchase-intent key names
+  // ONE logical purchase. A retry with the same key, sku, form and
+  // parent returns the original session instead of minting a second
+  // payable obligation; the same key with a different purchase shape
+  // is a conflict. The raw token is issued exactly once (first
+  // response only) — a retry returns the session URL + entitlement id
+  // but never the token, because the server keeps only its hash.
+  // Intent keys must be client-generated random values; the key itself
+  // is a bearer reference to the checkout, never to the entitlement.
+  // (intentKey was parsed before plan resolution for the guard
+  // exclusion; see above.)
+  const planFormId = plan.scope && plan.scope.kind === 'forms' && Array.isArray(plan.scope.forms) && plan.scope.forms.length === 1
+    ? plan.scope.forms[0]
+    : null;
+  if (intentKey) {
+    const prior = entitlementStore.getIntent(intentKey);
+    if (prior) {
+      const priorEnt = entitlementStore.getById(prior.entitlementId);
+      if (priorEnt && priorEnt.state === 'RESERVED' && priorEnt.paidAt == null
+        && prior.sku === plan.sku && (prior.formId || null) === planFormId
+        && (prior.parentId || null) === (plan.parentId || null)) {
+        return res.status(200).json({
+          ok: true, retried: true,
+          checkoutUrl: prior.checkoutUrl,
+          entitlementId: prior.entitlementId,
+          sku: prior.sku, scope: plan.scope,
+          amountCents: prior.amountCents,
+          creditedCents: plan.creditedCents,
+          totalCents: prior.totalCents,
+          currency: 'usd', mode: 'test',
+        });
+      }
+      if (priorEnt && priorEnt.state === 'RESERVED' && priorEnt.paidAt == null) {
+        return res.status(409).json({ error: 'This purchase request conflicts with an earlier one using the same reference.', reason: 'intent-conflict' });
+      }
+      // Stale intent (void, expired, paid, or consumed original):
+      // drop it and mint a fresh checkout below.
+      entitlementStore.deleteIntent(intentKey);
+    }
   }
 
   const { entitlement, token } = entitlementStore.create({
@@ -195,12 +335,49 @@ export default async function handler(req, res) {
     creditedCents: plan.creditedCents,
     totalCents: plan.totalCents,
   });
+  // Stripe requires expires_at to be at least 30 minutes after SESSION
+  // CREATION (not entitlement creation). The previous code used
+  // entitlement.createdAt + 30 min, which is always under 30 minutes
+  // out by the time Stripe receives the request (creation strictly
+  // precedes the call, and the value is floored to seconds). Compute
+  // from the Stripe call time with headroom (~31 minutes). The small
+  // overhang past the local 30-min TTL is covered by late fulfillment:
+  // a verified payment for an expired/voided unpaid record fulfills
+  // late with a fresh claim window (see lib/entitlement.js).
+  // NOTE: this validates application-generated parameters only; a real
+  // Stripe test-mode call is still required to prove platform
+  // acceptance of the value.
+  // Use a stable Stripe idempotency key tied to the logical purchase
+  // (the intent key when the client supplied one, else the entitlement
+  // id) so a retried Stripe call cannot create a second session for
+  // one purchase.
+  const STRIPE_EXPIRES_HEADROOM_MS = 31 * 60 * 1000;
+  const stripeCallStartedAt = Date.now();
+  const expiresAt = Math.floor((stripeCallStartedAt + STRIPE_EXPIRES_HEADROOM_MS) / 1000);
+  const idempotencyKey = intentKey ? `iru-intent-${intentKey}` : `iru-checkout-${entitlement.id}`;
   try {
     const gateway = globalThis.__IRU_STRIPE_GATEWAY__;
-    const session = gateway && typeof gateway.createCheckoutSession === 'function'
-      ? await gateway.createCheckoutSession({ amountCents: plan.amountCents, entitlementId: entitlement.id, sku: plan.sku })
-      : await stripeCreateSession({ secretKey, amountCents: plan.amountCents, entitlementId: entitlement.id, productName: plan.productName });
+    let session;
+    if (gateway && typeof gateway.createCheckoutSession === 'function') {
+      session = await gateway.createCheckoutSession({ amountCents: plan.amountCents, entitlementId: entitlement.id, sku: plan.sku, idempotencyKey, expiresAt });
+    } else {
+      // Real Stripe path only: the origin is validated here, fail
+      // closed — there is no localhost fallback anywhere in this file.
+      const origin = resolveAppOrigin();
+      if (!origin.ok) {
+        entitlementStore.void(entitlement.id, 'checkout-origin-invalid');
+        return res.status(503).json({ error: 'Checkout is not configured.' });
+      }
+      session = await stripeCreateSession({ secretKey, amountCents: plan.amountCents, entitlementId: entitlement.id, productName: plan.productName, idempotencyKey, expiresAt, origin: origin.origin });
+    }
     entitlementStore.attachSession(entitlement.id, session.id);
+    if (intentKey) {
+      entitlementStore.saveIntent(intentKey, {
+        entitlementId: entitlement.id, sessionId: session.id, sku: plan.sku,
+        formId: planFormId, parentId: plan.parentId || null,
+        checkoutUrl: session.url, amountCents: plan.amountCents, totalCents: plan.totalCents,
+      });
+    }
     // The token is the buyer's recovery credential (shown once here; the
     // client keeps it). It is stored server-side only as a SHA-256 hash.
     return res.status(200).json({

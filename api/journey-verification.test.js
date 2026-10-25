@@ -533,6 +533,9 @@ describe('P5 journey — EN, $1 evaluation → one-form upgrade → add-on', () 
 
   before(() => {
     process.env.STRIPE_SECRET_KEY = 'sk_test_local_only';
+    // Payment-hardening gate: paid handlers require an explicit store backend.
+    process.env.IRU_STORE_BACKEND = 'memory';
+    process.env.IRU_ALLOW_EPHEMERAL_STORE = 'true';
     process.env.STRIPE_WEBHOOK_SECRET = 'whsec_test_local';
     globalThis.__IRU_STRIPE_GATEWAY__ = {
       async createCheckoutSession({ entitlementId }) {

@@ -114,6 +114,9 @@ describe('checkout → webhook → status → delivery flow (handlers, injected 
   before(() => {
     savedEnv = { ...process.env };
     process.env.STRIPE_SECRET_KEY = 'sk_test_local_only';
+    // Payment-hardening gate: paid handlers require an explicit store backend.
+    process.env.IRU_STORE_BACKEND = 'memory';
+    process.env.IRU_ALLOW_EPHEMERAL_STORE = 'true';
     process.env.STRIPE_WEBHOOK_SECRET = 'whsec_test_local';
     process.env.IRU_ASSESSMENT_PRICE_CENTS = '4995';
     globalThis.__IRU_STRIPE_GATEWAY__ = {
@@ -225,6 +228,9 @@ describe('paywall gate on form generation (§11 no double consumption)', () => {
     process.env.PAYWALL_ENABLED = 'true';
     process.env.STRIPE_SECRET_KEY = 'sk_test_local_only';
     process.env.IRU_ASSESSMENT_PRICE_CENTS = '4995';
+    // Payment-hardening gate: paid handlers require an explicit store backend.
+    process.env.IRU_STORE_BACKEND = 'memory';
+    process.env.IRU_ALLOW_EPHEMERAL_STORE = 'true';
     globalThis.__IRU_STRIPE_GATEWAY__ = {
       async createCheckoutSession({ entitlementId }) {
         return { id: `sess_gate_${entitlementId}`, url: 'https://checkout.stripe.test/pay' };

@@ -551,7 +551,7 @@ export default function App() {
       const resp = await fetch('/api/generate-form', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ formId: selectedFormId, factRecord, lang, expectedSnapshotHash }),
+        body: JSON.stringify({ formId: selectedFormId, factRecord, lang, expectedSnapshotHash, paywallClientEnabled: PAYWALL_UI_ON() }),
       });
       const data = await resp.json().catch(() => null);
       if (!resp.ok || !data || !data.ok) {
@@ -599,6 +599,24 @@ export default function App() {
       if (sku) body.sku = sku;
       if (opts && opts.formId) body.formId = opts.formId;
       if (opts && opts.prerequisiteToken) body.entitlementToken = opts.prerequisiteToken;
+      // Checkout idempotency (payment-hardening 2026-10-24): one random
+      // purchase-intent key per logical purchase, kept in sessionStorage
+      // so a retried click replays the SAME purchase instead of minting
+      // a second payable checkout. The key names the checkout attempt
+      // only — it is never the entitlement credential.
+      const intentSlot = `iru_purchase_intent_${sku || 'legacy'}_${(opts && opts.formId) || 'none'}`;
+      let intentKey = '';
+      try { intentKey = sessionStorage.getItem(intentSlot) || ''; } catch { /* storage unavailable: fall through to a fresh key */ }
+      if (!intentKey) {
+        const bytes = new Uint8Array(16);
+        crypto.getRandomValues(bytes);
+        intentKey = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+        try { sessionStorage.setItem(intentSlot, intentKey); } catch { /* ignore */ }
+      }
+      body.purchaseIntentKey = intentKey;
+      // Declare this build's paywall flag so the server can refuse on
+      // a client/server flag disagreement instead of gating silently.
+      body.paywallClientEnabled = PAYWALL_UI_ON();
       const resp = await fetch('/api/checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const data = await resp.json().catch(() => null);
       if (!resp.ok || !data || !data.checkoutUrl) {
@@ -1174,6 +1192,11 @@ export default function App() {
             ${ui.readinessScore}: ${readinessPercent}% <span style="font-weight:400;font-size:0.75rem;">${escapeHtml(t('pktHeuristicNote', '(approximate document-completeness heuristic — not a validated metric)'))}</span>
           </div>
         </div>
+        ${factRecord && factRecord.outputsStale ? `
+        <div class="section" style="background-color: #fffbeb; border: 1px solid #f59e0b; border-radius: 0.5rem; padding: 1rem 1.5rem;">
+          <p style="margin: 0; font-size: 0.875rem; font-weight: 600; color: #92400e;">${escapeHtml(t('factsChanged', 'Your information changed. Re-run the analysis or regenerate your form draft so everything stays consistent.'))}</p>
+        </div>
+        ` : ''}
         <div class="section">
           <h3 class="section-title font-serif">${escapeHtml(ui.readinessReview || 'Readiness Review')}</h3>
           <p class="exec-summary font-serif" style="white-space: pre-wrap;">${escapeHtml(renderAssessmentText(assessment))}</p>
@@ -2031,7 +2054,7 @@ export default function App() {
                         </div>
                       )}
                       {plan.conflicts.length > 0 && (
-                        <p className="text-sm font-semibold text-red-700">{t('formConflicts', 'Conflicting values — resolve above')}: {plan.conflicts.map((c: any) => c.label).join('; ')}</p>
+                        <p className="text-sm font-semibold text-red-700">{t('formConflicts', 'Conflicting values — resolve above')}: {plan.conflicts.map((c: any) => (c.values && c.values.length > 1 ? `${c.label} (“${c.values.map((v: any) => String(v)).join('” vs “')}”)` : c.label)).join('; ')}</p>
                       )}
                       {plan.missing.length > 0 && (
                         <div>

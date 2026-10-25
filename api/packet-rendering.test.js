@@ -37,3 +37,28 @@ describe('on-screen packet sections (2026-10-24 fix)', () => {
     assert.ok(app.includes('resources.map((res: any)'), 'Hub cards must render from the location-matched resources state');
   });
 });
+
+describe('printed packet carries a stale-outputs notice (value-upgrade gap 4, 2026-10-24)', () => {
+  // The on-screen banner (factRecord.outputsStale + Re-run analysis)
+  // previously did not travel with the printed document: a corrected
+  // record printed the OLD assessment text with no stale signal, while
+  // drafts were withdrawn/stale-labeled. The durable deliverable must
+  // carry the same warning. Source guard on generateHtml (component
+  // scope), which builds the printable packet document.
+  const genStart = app.indexOf('const generateHtml = ()');
+  const genEnd = app.indexOf('const openPrintablePacket = ()');
+  const gen = genStart > 0 && genEnd > genStart ? app.slice(genStart, genEnd) : '';
+
+  it('generateHtml renders a stale notice when the record is outputsStale', () => {
+    assert.ok(gen.length > 0, 'generateHtml must exist in App.tsx');
+    assert.ok(gen.includes('factRecord.outputsStale'), 'printable packet must check outputsStale');
+    assert.ok(gen.includes("t('factsChanged'"), 'stale notice must reuse the localized factsChanged wording');
+  });
+
+  it('the stale notice precedes the Readiness Review section in the packet', () => {
+    const noticeAt = gen.indexOf('factRecord.outputsStale');
+    const reviewAt = gen.indexOf("ui.readinessReview || 'Readiness Review'");
+    assert.ok(noticeAt > 0 && reviewAt > 0 && noticeAt < reviewAt,
+      'stale notice must print above the Readiness Review findings it qualifies');
+  });
+});

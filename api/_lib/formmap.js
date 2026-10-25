@@ -289,6 +289,7 @@ export function buildFillPlan(record, entry, lang = 'EN') {
   const seenMissingFacts = new Set();
   const seenConfirmFacts = new Set();
   const seenFormatFacts = new Set();
+  const seenConflictFacts = new Set();
 
   for (const field of entry.fields) {
     const fact = record?.facts?.[field.factId];
@@ -309,11 +310,20 @@ export function buildFillPlan(record, entry, lang = 'EN') {
     }
 
     if (fact.status === 'conflicting') {
-      conflicts.push({
-        factId: field.factId,
-        label: field.label,
-        values: [fact.value, ...(fact.alternatives || []).map((a) => a.value)],
-      });
+      // One entry per conflicting FACT, not per registry field: a fact
+      // mapped to a checkbox group (e.g. gender → Male/Female boxes)
+      // previously produced one entry per option, and the panel line
+      // rendered the option labels as if they were the conflicting
+      // values (phantom "Male" — 2026-10-24). The values array carries
+      // the actual conflicting values for the UI to display.
+      if (!seenConflictFacts.has(field.factId)) {
+        seenConflictFacts.add(field.factId);
+        conflicts.push({
+          factId: field.factId,
+          label: field.label,
+          values: [fact.value, ...(fact.alternatives || []).map((a) => a.value)],
+        });
+      }
       continue;
     }
 

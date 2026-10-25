@@ -23,6 +23,8 @@ import { getFormEntry, SIGNATURE_FIELD_PATTERN } from './_lib/forms/registry.js'
 import { buildFillPlan, buildCompletionSummary } from './_lib/formmap.js';
 import { isNarrativeApproved } from './_lib/narrative.js';
 import { computeDraftSnapshotHash, snapshotShort } from './_lib/draftIntegrity.js';
+import { checkPaywallAgreement } from './_lib/paymentConfig.js';
+import { assertPaidStoreAvailable } from './_lib/paymentStore.js';
 
 const limiter = createLimiter({ capacity: 5, windowMs: 10 * 60 * 1000 });
 const MAX_BODY_BYTES = 256 * 1024;
@@ -179,6 +181,14 @@ export default async function handler(req, res) {
   const body = typeof rawBody === 'string' ? safeParse(rawBody) : (rawBody || {});
   if (!body) return res.status(400).json({ error: 'Invalid submission.' });
 
+  // Paywall flag agreement (see lib/paymentConfig.js): a declared
+  // client flag that disagrees with the server flag refuses, so a
+  // mismatched deployment can never silently gate (or ungate) delivery.
+  const agreement = checkPaywallAgreement(body);
+  if (!agreement.ok) {
+    return res.status(503).json({ error: 'Paywall configuration mismatch. Please reload and try again.', reason: 'paywall-mismatch' });
+  }
+
   // Entitlement gate (directive §11; B2C §3/§4 scope enforcement):
   // active ONLY when PAYWALL_ENABLED=true. Default off — the readiness
   // flow is unchanged. When on, authorization is checked HERE, on the
@@ -191,6 +201,12 @@ export default async function handler(req, res) {
   const paywallOn = process.env.PAYWALL_ENABLED === 'true';
   let entitlementToken = '';
   if (paywallOn) {
+    // Fail closed: delivery decisions must read from a configured
+    // store, never from an empty in-process store after a restart.
+    const storeGate = assertPaidStoreAvailable();
+    if (!storeGate.ok) {
+      return res.status(503).json({ error: 'Form generation is not configured.' });
+    }
     entitlementToken = (req.headers && req.headers['x-entitlement-token']) || body.entitlementToken || '';
     const peek = entitlementStore.peekForForm(entitlementToken, body.formId);
     if (!peek.ok) {
