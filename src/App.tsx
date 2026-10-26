@@ -2,6 +2,16 @@ import React, { useState, useEffect } from 'react';
 import { Shield, Globe, Printer, ArrowRight, ArrowLeft, CheckCircle2, Copy, Info, ChevronRight } from 'lucide-react';
 import { motion } from 'framer-motion';
 
+// Mobile repair 2026-10-26: upload validation + error messages (pure,
+// unit-tested) and the stage-content error boundary (no white screen).
+import { ErrorBoundary } from './ErrorBoundary';
+import {
+  validatePhotoFile,
+  messageForReviewStatus,
+  MESSAGE_PHOTO_READ_FAILURE,
+  MESSAGE_PHOTO_BAD_RESPONSE,
+} from './photoValidation';
+
 import { LANGUAGES, UI_LABELS, PHASE_1_QUESTIONS, TRIAGE_QUESTION, PHASE_2_QUESTIONS, PHASE_3_QUESTIONS, NYC_RESOURCES, CONSULATES, PROXIES, NARRATIVE_STARTERS, USCIS_FORMS, FEE_SCHEDULE_AS_OF, buildExecutiveSummary } from './constants';
 
 // Nationwide layered resource model (local → statewide → national → fallback).
@@ -382,11 +392,18 @@ export default function App() {
     if (!photoFile || reviewing) return;
     setReviewError('');
     setImageReview(null);
-    if (photoFile.size > 4 * 1024 * 1024) {
-      setReviewError(ui.photoError || 'Review unavailable.');
+    // Mobile repair 2026-10-26: validate BEFORE any FileReader read or
+    // network submission. HEIC/empty/unknown types and files whose
+    // base64 payload would exceed the ~4.5 MB platform body limit are
+    // refused here with a specific message, instead of a request the
+    // server (or the platform) would reject with a generic error.
+    const validation = validatePhotoFile(photoFile);
+    if (validation.ok === false) {
+      setReviewError(validation.message);
       return;
     }
     setReviewing(true);
+    let phase: 'read' | 'fetch' | 'parse' = 'read';
     try {
       const dataUrl: string = await new Promise((resolve, reject) => {
         const r = new FileReader();
@@ -395,6 +412,7 @@ export default function App() {
         r.readAsDataURL(photoFile);
       });
       const imageBase64 = dataUrl.split(',')[1] || '';
+      phase = 'fetch';
       const response = await fetch('/api/review-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -405,16 +423,26 @@ export default function App() {
           lang,
         }),
       });
-      if (!response.ok) throw new Error(`Server error: ${response.status}`);
+      if (!response.ok) {
+        // Distinguishable, recoverable message per failure class; the
+        // user can retry, pick another file, or skip this step.
+        setReviewError(messageForReviewStatus(response.status));
+        return;
+      }
+      phase = 'parse';
       const data = await response.json();
       if (data && data.ok && data.review) {
         setImageReview(data.review);
       } else {
-        throw new Error('Bad review response');
+        setReviewError(MESSAGE_PHOTO_BAD_RESPONSE);
       }
     } catch (e) {
       console.error('Photo review error:', e);
-      setReviewError(ui.photoError || 'Review unavailable. You can continue without it.');
+      setReviewError(
+        phase === 'read'
+          ? MESSAGE_PHOTO_READ_FAILURE
+          : (ui.photoError || 'Review unavailable. You can continue without it.'),
+      );
     } finally {
       setReviewing(false);
     }
@@ -1316,6 +1344,11 @@ export default function App() {
       )}
 
       <div className={`max-w-3xl w-full rounded-2xl overflow-hidden relative z-10 border ${stage === 'LANG' ? 'bg-transparent border-transparent shadow-none' : 'bg-white shadow-sm border-slate-200'}`}>
+        {/* Mobile repair 2026-10-26: any render-time exception inside stage
+            content becomes a recoverable fallback (retry / start over)
+            instead of a full white-screen loss. Happy-path DOM is
+            unchanged: the boundary renders children directly. */}
+        <ErrorBoundary onStartOver={handleStartOver}>
         {stage === 'LANG' && (
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
@@ -1617,7 +1650,7 @@ export default function App() {
         {stage === 'PHOTO' && (
           <motion.div
             initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, y: 0 }}
+            animate={{ opacity: 1, x: 0, y: 0 }}
             transition={{ duration: 0.3 }}
             className="p-8 sm:p-12"
           >
@@ -1694,22 +1727,22 @@ export default function App() {
                 )}
               </div>
 
-              <div className="flex justify-between pt-6 border-t border-slate-100">
-                <button onClick={handlePrevQuestion} className="px-6 py-3 text-slate-600 font-medium hover:text-slate-900 transition-colors flex items-center space-x-2">
+              <div className="flex flex-col gap-3 pt-6 border-t border-slate-100 sm:flex-row sm:items-center sm:justify-between">
+                <button onClick={handlePrevQuestion} className="px-6 py-3 text-slate-600 font-medium hover:text-slate-900 transition-colors flex items-center justify-center sm:justify-start space-x-2 w-full sm:w-auto">
                   <ArrowLeft className="w-4 h-4" />
                   <span>{ui.back}</span>
                 </button>
-                <div className="flex gap-3">
+                <div className="flex flex-col gap-3 sm:flex-row">
                   <button
                     onClick={handlePhotoReview}
                     disabled={!photoFile || reviewing}
-                    className="px-6 py-3 border-2 border-indigo-600 text-indigo-700 font-medium rounded-xl hover:bg-indigo-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="px-6 py-3 border-2 border-indigo-600 text-indigo-700 font-medium rounded-xl hover:bg-indigo-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed w-full sm:w-auto"
                   >
                     {reviewing ? (ui.photoReviewing || 'Reviewing…') : (ui.photoReview || 'Review photo')}
                   </button>
                   <button
                     onClick={handleNextQuestion}
-                    className="px-8 py-3 bg-indigo-600 text-white font-medium rounded-xl hover:bg-indigo-700 transition-colors flex items-center space-x-2"
+                    className="px-8 py-3 bg-indigo-600 text-white font-medium rounded-xl hover:bg-indigo-700 transition-colors flex items-center justify-center space-x-2 w-full sm:w-auto"
                   >
                     <span>{ui.photoSkip || ui.next}</span>
                     <ArrowRight className="w-4 h-4" />
@@ -2307,6 +2340,7 @@ export default function App() {
             </div>
           </motion.div>
         )}
+        </ErrorBoundary>
       </div>
       
       {stage === 'PACKET' && (
