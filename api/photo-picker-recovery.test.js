@@ -57,7 +57,7 @@ test('file-change handling resets the input and never resets stage', () => {
   const fnEnd = appSrc.indexOf('/** One-time document photo review', fnStart);
   const fnBody = appSrc.slice(fnStart, fnEnd);
   assert.ok(fnBody.includes("diag.record('picker-change'"), 'change must record a diagnostic');
-  assert.ok(fnBody.includes('setPhotoFile(file)'), 'change must store the selected file');
+  assert.ok(fnBody.includes('setPhotoFile(e.target.files'), 'change must set the photo state from the selected file');
   assert.ok(fnBody.includes("e.target.value = ''"), 'input value must reset so the same file can be re-selected');
   assert.ok(!fnBody.includes('setStage'), 'change handler must never reset stage');
   assert.ok(photo.includes('onChange={handlePhotoChange}'), 'input must use handlePhotoChange');

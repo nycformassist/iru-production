@@ -15,7 +15,7 @@ import {
 // Android recovery diagnostics (?debug=1 overlay only; see src/diagnostics.ts).
 import {
   createDiagnostics,
-  isDiagnosticsEnabled,
+  isDiagnosticsEnabledFromLocation,
   incrementCounter,
   getNavigationInfo,
   installDiagnosticListeners,
@@ -282,8 +282,7 @@ export default function App() {
       cleanups.push(installDiagnosticListeners(document, diag.record, ['visibilitychange']));
     } catch { /* diagnostics must never break the app */ }
     try {
-      const search = window.location.search || '';
-      if (isDiagnosticsEnabled(search)) diag.mountOverlay();
+      if (isDiagnosticsEnabledFromLocation()) diag.mountOverlay();
     } catch { /* ignore */ }
     return () => {
       for (const c of cleanups) {
@@ -573,9 +572,8 @@ export default function App() {
   const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     try {
       const diag = diagnosticsRef.current;
-      const file = e.target.files && e.target.files[0] ? e.target.files[0] : null;
-      if (diag) diag.record('picker-change', { stage, hasFile: file !== null });
-      setPhotoFile(file);
+      if (diag) diag.record('picker-change', { stage, hasFile: !!(e.target.files && e.target.files[0]) });
+      setPhotoFile(e.target.files && e.target.files[0] ? e.target.files[0] : null);
       setImageReview(null);
       setReviewError('');
       // Reset the input so re-selecting the same file fires change again.

@@ -14,6 +14,7 @@ import {
   incrementCounter,
   installDiagnosticListeners,
   isDiagnosticsEnabled,
+  isDiagnosticsEnabledFromLocation,
   safeStorage,
   DIAGNOSTIC_EVENT_LIMIT,
 } from '../src/diagnostics.ts';
@@ -142,11 +143,23 @@ const appSrc = fs.readFileSync(
   'utf8',
 );
 
+test('isDiagnosticsEnabledFromLocation is false without a browser location', () => {
+  assert.equal(isDiagnosticsEnabledFromLocation(), false);
+});
+
 test('App diagnostics wiring exists and records no sensitive identifiers', () => {
   assert.ok(appSrc.includes("from './diagnostics'"), 'App must import the diagnostics module');
-  assert.ok(appSrc.includes('isDiagnosticsEnabled(search)'), 'overlay must be gated on ?debug=1');
+  assert.ok(appSrc.includes('isDiagnosticsEnabledFromLocation()'), 'overlay must be gated on ?debug=1 via the diagnostics module');
   assert.ok(appSrc.includes("diag.record('boot'"), 'boot event must be recorded');
   assert.ok(appSrc.includes("diag.record('stage'"), 'stage transitions must be recorded');
+  // Standing entitlement guards (see also language-completion +
+  // pricing-acceptance source guards): App.tsx itself must never read
+  // the return URL query or parse URL parameters, so ?checkout=success
+  // cannot grant anything. The ?debug=1 read lives in the diagnostics
+  // module, which only gates the debug overlay.
+  assert.ok(!appSrc.includes('location.search'), 'App.tsx must not read location.search');
+  assert.ok(!appSrc.includes('URLSearchParams'), 'App.tsx must not parse URL parameters');
+  assert.ok(!appSrc.includes('checkout=success'), 'App.tsx must not handle checkout=success');
   const recordLines = appSrc.split('\n').filter((l) => l.includes('.record('));
   assert.ok(recordLines.length >= 2, `expected diagnostics record calls, found ${recordLines.length}`);
   const forbidden = ['answers', 'photoFile', 'full_name', 'token', 'imageReview', 'fileName', 'reviewError', 'factRecord'];

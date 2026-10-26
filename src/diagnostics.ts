@@ -65,6 +65,26 @@ export function isDiagnosticsEnabled(search: string): boolean {
 }
 
 /**
+ * Debug-overlay gating from the live URL. Lives HERE (not in App.tsx)
+ * deliberately: App.tsx carries standing structural guards proving it
+ * never reads the return URL query and never parses URL parameters
+ * (those guards exist so ?checkout=success cannot grant entitlement).
+ * This helper only decides whether the debug overlay shows; it cannot
+ * grant, read, or alter any entitlement, payment, or assessment state.
+ * Returns false wherever no browser location exists (e.g. node tests).
+ */
+export function isDiagnosticsEnabledFromLocation(): boolean {
+  try {
+    const loc = (globalThis as unknown as { location?: { search?: unknown } })
+      .location;
+    const search = loc && typeof loc.search === 'string' ? loc.search : '';
+    return isDiagnosticsEnabled(search);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Build commit SHA, injected by Vite at build time (see vite.config.ts
  * define for __IRU_BUILD_SHA__, sourced from VERCEL_GIT_COMMIT_SHA or
  * GIT_COMMIT_SHA). Under the node test harness the define is absent, so
