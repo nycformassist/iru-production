@@ -24,6 +24,15 @@ import {
   DIAGNOSTIC_BOOT_TOTAL_KEY,
 } from './diagnostics';
 
+// Android recovery: session-scoped restore (see src/assessmentRecovery.ts).
+import {
+  saveRecovery,
+  loadRecovery,
+  clearRecovery,
+  loadPickerMarker,
+  sessionStore,
+} from './assessmentRecovery';
+
 import { LANGUAGES, UI_LABELS, PHASE_1_QUESTIONS, TRIAGE_QUESTION, PHASE_2_QUESTIONS, PHASE_3_QUESTIONS, NYC_RESOURCES, CONSULATES, PROXIES, NARRATIVE_STARTERS, USCIS_FORMS, FEE_SCHEDULE_AS_OF, buildExecutiveSummary } from './constants';
 
 // Nationwide layered resource model (local → statewide → national → fallback).
@@ -171,6 +180,11 @@ export default function App() {
   const [imageReview, setImageReview] = useState<any>(null);
   const [reviewing, setReviewing] = useState(false);
   const [reviewError, setReviewError] = useState('');
+  // Android recovery: one-time boot-restore notice, non-fatal global
+  // error notice, and the stable PHOTO file-input ref (see below).
+  const [restoredNotice, setRestoredNotice] = useState('');
+  const [globalNotice, setGlobalNotice] = useState('');
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
   // Canonical fact record + form preparation (directives §4/§7/§8).
   const [factRecord, setFactRecord] = useState<any>(null);
   const [narrativeError, setNarrativeError] = useState('');
@@ -216,7 +230,13 @@ export default function App() {
   // Purchase state is refreshed from the server whenever the packet
   // (and its offer/form panels) is shown.
   useEffect(() => {
-    if (stage === 'PACKET') { refreshPurchaseState(); }
+    if (stage === 'PACKET') {
+      refreshPurchaseState();
+      // Assessment complete: clear ONLY the recovery key (never payment
+      // keys — clearRecovery removes exactly one namespaced key).
+      clearRecovery(sessionStore());
+      setRestoredNotice('');
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stage]);
 
@@ -310,6 +330,84 @@ export default function App() {
   // UI strings are translated for every supported language (EN/ES/ZH/HT/AR);
   // t() falls back to the given English string only if a key is ever missing.
   const t = (key: string, fallback: string) => (ui[key] as string) || fallback;
+
+  // ── Android recovery: session-scoped restore + save ──────────────────
+  // Boot restore runs once, AFTER the diagnostics boot effect (so boot is
+  // recorded before any restore). A restore lands at the saved stage's
+  // first question with saved answers intact; the user advances with
+  // Continue. currentQ is intentionally NOT persisted (directive field
+  // list). The picker-opened marker is consumed on restore: the snapshot
+  // is re-saved with pickerOpened=false so a later reload does not
+  // repeat the picker message.
+  const recoveryStateRef = useRef<any>({ stage: 'LANG', lang: 'EN', answers: {}, docType: '' });
+  useEffect(() => {
+    recoveryStateRef.current = { stage, lang, answers, docType: photoEvidenceKey };
+  });
+  useEffect(() => {
+    const store = sessionStore();
+    const restored = loadRecovery(store, { allowedLangs: SUPPORTED_LANGS });
+    if (restored) {
+      diagReasonRef.current = 'restore';
+      setLang(restored.language);
+      setAnswers((prev: Record<string, string>) => ({ ...prev, ...restored.answers }));
+      setPhotoEvidenceKey(restored.docType);
+      setCurrentQ(0);
+      setStage(restored.stage);
+      if (restored.pickerOpened && restored.stage === 'PHOTO') {
+        setRestoredNotice(t('recoveryPicker', 'Your assessment progress was restored. Please select the document again.'));
+      } else {
+        setRestoredNotice(t('recoveryRestored', 'Your assessment progress was restored.'));
+      }
+      const diag = diagnosticsRef.current;
+      if (diag) diag.record('restore', { stage: restored.stage, pickerOpened: restored.pickerOpened });
+      // Consume the picker marker so it does not repeat on later reloads.
+      saveRecovery(store, { stage: restored.stage, language: restored.language, answers: restored.answers, docType: restored.docType, pickerOpened: false });
+    }
+    // Save on hide/pagehide from the latest-state ref (an effect closure
+    // would otherwise capture stale state). The picker marker is
+    // preserved while the saved stage is PHOTO (it is only meaningful
+    // there); leaving PHOTO clears it.
+    const saveFromRef = () => {
+      const s = recoveryStateRef.current;
+      const marker = s.stage === 'PHOTO' ? loadPickerMarker(sessionStore()) : false;
+      saveRecovery(sessionStore(), { stage: s.stage, language: s.lang, answers: s.answers, docType: s.docType, pickerOpened: marker });
+    };
+    const onVis = () => {
+      try {
+        if (document.visibilityState === 'hidden') saveFromRef();
+      } catch { /* ignore */ }
+    };
+    const onHide = () => { saveFromRef(); };
+    try {
+      document.addEventListener('visibilitychange', onVis);
+      window.addEventListener('pagehide', onHide);
+    } catch { /* listeners are best-effort */ }
+    // Non-fatal user message for otherwise-unhandled errors. Recording is
+    // done by the diagnostics listeners; this pair only shows the banner.
+    let bannerCleanup: (() => void) | null = null;
+    try {
+      bannerCleanup = installDiagnosticListeners(window, () => {}, ['error', 'unhandledrejection'], () => {
+        setGlobalNotice(t('globalError', 'Something went wrong, but your progress is safe. You can continue.'));
+      });
+    } catch { /* ignore */ }
+    return () => {
+      try { document.removeEventListener('visibilitychange', onVis); } catch { /* ignore */ }
+      try { window.removeEventListener('pagehide', onHide); } catch { /* ignore */ }
+      try { if (bannerCleanup) bannerCleanup(); } catch { /* ignore */ }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // Debounced save on every eligible change (300 ms). saveRecovery itself
+  // refuses non-restorable stages (LANG/ANALYZING/PACKET), so no snapshot
+  // is ever written for Welcome or completed assessments. The picker
+  // marker is preserved while on PHOTO, cleared when leaving it.
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      const marker = stage === 'PHOTO' ? loadPickerMarker(sessionStore()) : false;
+      saveRecovery(sessionStore(), { stage, language: lang, answers, docType: photoEvidenceKey, pickerOpened: marker });
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [stage, answers, photoEvidenceKey, lang]);
 
   /**
    * Build the canonical fact record from the interview answers and any
@@ -467,6 +565,29 @@ export default function App() {
     }
   };
 
+  /** PHOTO file selection (Android recovery). Cancellation — including a
+   * change event with no files — never touches stage, language, answers,
+   * or document type. The input value is reset after handling so the same
+   * file can be selected again. Any failure here stays on PHOTO with a
+   * recoverable message; it never resets the assessment. */
+  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    try {
+      const diag = diagnosticsRef.current;
+      const file = e.target.files && e.target.files[0] ? e.target.files[0] : null;
+      if (diag) diag.record('picker-change', { stage, hasFile: file !== null });
+      setPhotoFile(file);
+      setImageReview(null);
+      setReviewError('');
+      // Reset the input so re-selecting the same file fires change again.
+      // The File object lives in state; clearing the input value does not
+      // affect review, which reads from state.
+      e.target.value = '';
+    } catch (err) {
+      console.error('Photo selection error:', err);
+      setReviewError(t('photoError', 'Review unavailable. You can continue without it.'));
+    }
+  };
+
   /** One-time document photo review. The image is sent once and never stored by IRU. */
   const handlePhotoReview = async () => {
     if (!photoFile || reviewing) return;
@@ -531,6 +652,11 @@ export default function App() {
   // ── Complete reset ───────────────────────────────────────────────────────
   const handleStartOver = () => {
     diagReasonRef.current = 'start-over';
+    // Android recovery: start over clears ONLY the recovery key (never
+    // payment keys — clearRecovery removes exactly one namespaced key).
+    clearRecovery(sessionStore());
+    setRestoredNotice('');
+    setGlobalNotice('');
     setStage('LANG');
     setAnswers({});
     setCurrentQ(0);
@@ -1450,6 +1576,18 @@ export default function App() {
       )}
 
       <div className={`max-w-3xl w-full rounded-2xl overflow-hidden relative z-10 border ${stage === 'LANG' ? 'bg-transparent border-transparent shadow-none' : 'bg-white shadow-sm border-slate-200'}`}>
+        {restoredNotice && (
+          <div className="m-4 mb-0 p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-sm text-emerald-900 flex items-start justify-between gap-3">
+            <span>{restoredNotice}</span>
+            <button onClick={() => setRestoredNotice('')} className="font-medium shrink-0" aria-label="Dismiss">×</button>
+          </div>
+        )}
+        {globalNotice && (
+          <div className="m-4 mb-0 p-3 rounded-xl bg-amber-50 border border-amber-200 text-sm text-amber-900 flex items-start justify-between gap-3">
+            <span>{globalNotice}</span>
+            <button onClick={() => setGlobalNotice('')} className="font-medium shrink-0" aria-label="Dismiss">×</button>
+          </div>
+        )}
         {/* Mobile repair 2026-10-26: any render-time exception inside stage
             content becomes a recoverable fallback (retry / start over)
             instead of a full white-screen loss. Happy-path DOM is
@@ -1784,10 +1922,28 @@ export default function App() {
                 <label htmlFor="iru-photo-input" className="block w-full p-6 rounded-xl border-2 border-dashed border-slate-300 hover:border-indigo-400 focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-300 transition-colors cursor-pointer text-center">
                   <input
                     id="iru-photo-input"
+                    ref={photoInputRef}
                     type="file"
                     accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,.pdf"
                     className="sr-only"
-                    onChange={(e) => { setPhotoFile(e.target.files && e.target.files[0] ? e.target.files[0] : null); setImageReview(null); setReviewError(''); }}
+                    onClick={() => {
+                      // Save synchronously BEFORE the picker opens, so a
+                      // page discard while the picker is foreground still
+                      // restores progress. The picker-opened marker tells
+                      // boot restore to ask for the document again.
+                      saveRecovery(sessionStore(), { stage, language: lang, answers, docType: photoEvidenceKey, pickerOpened: true });
+                      const diag = diagnosticsRef.current;
+                      if (diag) diag.record('picker-open', { stage });
+                    }}
+                    onCancel={() => {
+                      // Cancellation is a no-op for assessment state by
+                      // design: it must never reset stage, language,
+                      // answers, or document type. (Do not depend on this
+                      // event firing — recovery covers the no-event case.)
+                      const diag = diagnosticsRef.current;
+                      if (diag) diag.record('picker-cancel', { stage });
+                    }}
+                    onChange={handlePhotoChange}
                   />
                   <span className="text-slate-600 font-medium">
                     {photoFile ? photoFile.name : (ui.photoChoose || 'Choose a photo…')}
@@ -1811,7 +1967,32 @@ export default function App() {
                 </p>
 
                 {reviewError && (
-                  <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl p-3">{reviewError}</p>
+                  <div className="space-y-3">
+                    <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl p-3">{reviewError}</p>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                      {photoFile && (
+                        <button
+                          onClick={handlePhotoReview}
+                          disabled={reviewing}
+                          className="px-4 py-2 border-2 border-indigo-600 text-indigo-700 text-sm font-medium rounded-xl hover:bg-indigo-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {t('photoRetry', 'Retry')}
+                        </button>
+                      )}
+                      <button
+                        onClick={() => { if (photoInputRef.current) photoInputRef.current.click(); }}
+                        className="px-4 py-2 border-2 border-indigo-600 text-indigo-700 text-sm font-medium rounded-xl hover:bg-indigo-50 transition-colors"
+                      >
+                        {t('photoChooseAnother', 'Choose another document')}
+                      </button>
+                      <button
+                        onClick={handleNextQuestion}
+                        className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-xl hover:bg-indigo-700 transition-colors"
+                      >
+                        {t('photoContinueWithout', 'Continue without the document')}
+                      </button>
+                    </div>
+                  </div>
                 )}
 
                 {imageReview && (
