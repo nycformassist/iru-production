@@ -125,6 +125,24 @@ function assertSource(source) {
 }
 
 /**
+ * Agreement comparison for conflict detection (phantom-conflict fix
+ * 2026-10-24): two sources stating the same value with different
+ * casing or surrounding whitespace AGREE — a questionnaire radio value
+ * "female" and a document extraction "Female" are the same answer, not
+ * a conflict. Stored values are never rewritten by this comparison;
+ * only the equality test is normalized. Case is not a meaningful
+ * distinction for any IRU fact value (names, places, enumerated
+ * answers, dates), so folding it cannot merge two genuinely different
+ * values.
+ */
+export function sameFactValue(a, b) {
+  if (typeof a === 'string' && typeof b === 'string') {
+    return a.trim().toLowerCase() === b.trim().toLowerCase();
+  }
+  return String(a) === String(b);
+}
+
+/**
  * Insert or update a fact. Conflict semantics:
  * - New value from a DIFFERENT source that disagrees with the current
  *   value → status 'conflicting'; the existing value stays primary and
@@ -163,9 +181,10 @@ export function upsertFact(record, input, nowIso) {
     fact.type = input.type || fact.type || 'string';
     fact.status = incoming.source === 'document' ? 'extracted-unconfirmed' : 'reported';
     fact.needsConfirmation = incoming.source === 'document';
-  } else if (String(fact.value) === String(incoming.value)) {
+  } else if (sameFactValue(fact.value, incoming.value)) {
     // Agreement: record provenance, change nothing about status.
     // Agreement between sources is corroboration, NOT verification.
+    // (Normalized: a case/whitespace-only difference is agreement.)
   } else if (incoming.source === 'correction') {
     // Consumer correction wins; conflict resolved by the consumer.
     fact.history.push(snapshotOf(fact));
@@ -179,7 +198,11 @@ export function upsertFact(record, input, nowIso) {
     record.outputsStale = true;
   } else if (fact.status === 'conflicting') {
     // Already conflicted: keep candidates traceable, primary unchanged.
-    fact.alternatives.push(incoming);
+    // A case/whitespace variant of the primary or of an existing
+    // candidate is agreement with that candidate, not a new one.
+    const alreadyKnown = sameFactValue(fact.value, incoming.value)
+      || (fact.alternatives || []).some((a) => sameFactValue(a.value, incoming.value));
+    if (!alreadyKnown) fact.alternatives.push(incoming);
   } else {
     // Genuine conflict between sources.
     fact.history.push(snapshotOf(fact));

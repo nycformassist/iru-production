@@ -77,6 +77,9 @@ before(() => {
   savedEnv = { ...process.env };
   process.env.STRIPE_SECRET_KEY = 'sk_test_local_only';
   process.env.IRU_ASSESSMENT_PRICE_CENTS = '4995';
+  // Payment-hardening gate: paid handlers require an explicit store backend.
+  process.env.IRU_STORE_BACKEND = 'memory';
+  process.env.IRU_ALLOW_EPHEMERAL_STORE = 'true';
   globalThis.__IRU_STRIPE_GATEWAY__ = {
     async createCheckoutSession({ entitlementId }) {
       return { id: `sess_${entitlementId}`, url: 'https://checkout.stripe.test/pay' };

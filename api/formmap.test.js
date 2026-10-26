@@ -199,3 +199,46 @@ describe('PDF draft generation (§7.5)', () => {
     assert.ok(summary.missingRequired.some((m) => m.factId === 'family_name'));
   });
 });
+
+describe('phantom-conflict fix 2026-10-24: form-panel conflict rendering', () => {
+  it('no sex value is invented when the source provides none', () => {
+    const r = syntheticRecord();
+    delete r.facts.gender;
+    const plan = buildFillPlan(r, getFormEntry('I-589'));
+    assert.ok(!plan.fill.some((f) => f.factId === 'gender'));
+    assert.ok(!plan.conflicts.some((c) => c.factId === 'gender'));
+    assert.ok(plan.missing.some((m) => m.factId === 'gender')); // required, still needed
+  });
+
+  it('a single supported value does not become a conflict with a case-variant', () => {
+    const r = syntheticRecord();
+    upsertFact(r, { id: 'gender', value: 'Female', source: 'document', sourceRef: { documentType: 'birth_record', page: 1 } }, T);
+    const plan = buildFillPlan(r, getFormEntry('I-589'));
+    assert.ok(!plan.conflicts.some((c) => c.factId === 'gender'));
+    // The female box fills; the male box correctly stays unchecked.
+    assert.ok(plan.fill.some((f) => f.pdfField.endsWith('PartALine9Sex[1]')));
+    assert.ok(!plan.fill.some((f) => f.pdfField.endsWith('PartALine9Sex[0]')));
+  });
+
+  it('one conflicting fact mapped to two checkbox fields surfaces exactly once, with values', () => {
+    const r = syntheticRecord();
+    upsertFact(r, { id: 'gender', value: 'male', source: 'document', sourceRef: { documentType: 'passport', page: 1 } }, T);
+    const plan = buildFillPlan(r, getFormEntry('I-589'));
+    const genderConflicts = plan.conflicts.filter((c) => c.factId === 'gender');
+    assert.equal(genderConflicts.length, 1); // not one per checkbox option
+    assert.deepEqual(genderConflicts[0].values, ['female', 'male']); // actual values, not option labels
+    assert.ok(!plan.fill.some((f) => f.factId === 'gender')); // never filled while conflicting
+  });
+
+  it('form switching does not leak facts or conflicts between assessments', () => {
+    const r = syntheticRecord();
+    // nationality is mapped by I-589 only, not by I-765.
+    upsertFact(r, { id: 'nationality', value: 'Testlandia', source: 'answer' }, T);
+    upsertFact(r, { id: 'nationality', value: 'Otherland', source: 'document' }, T);
+    const plan589 = buildFillPlan(r, getFormEntry('I-589'));
+    const plan765 = buildFillPlan(r, getFormEntry('I-765'));
+    assert.ok(plan589.conflicts.some((c) => c.factId === 'nationality'));
+    assert.ok(!plan765.conflicts.some((c) => c.factId === 'nationality'));
+    assert.ok(!plan765.fill.some((f) => f.factId === 'nationality'));
+  });
+});

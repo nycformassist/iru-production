@@ -567,6 +567,9 @@ describe('P6: webhook resolves failed and expired checkouts (mocks)', () => {
 
   beforeEach(async () => {
     process.env.STRIPE_SECRET_KEY = 'sk_test_defect_closure';
+    // Payment-hardening gate: paid handlers require an explicit store backend.
+    process.env.IRU_STORE_BACKEND = 'memory';
+    process.env.IRU_ALLOW_EPHEMERAL_STORE = 'true';
     process.env.STRIPE_WEBHOOK_SECRET = SECRET;
     sessions.length = 0;
     globalThis.__IRU_STRIPE_GATEWAY__ = {
@@ -607,7 +610,13 @@ describe('P6: webhook resolves failed and expired checkouts (mocks)', () => {
   }
   const evt = (id, type, sessionId, extra = {}) => ({ id, type, data: { object: { id: sessionId, ...extra } } });
 
-  it('an expired session voids the entitlement terminally; a late paid event cannot resurrect it; replays are duplicates', async () => {
+  it('an expired session voids the entitlement terminally; a late paid event fulfills safely (never silently dropped); replays are duplicates', async () => {
+    // SUPERSEDED 2026-10-24 (payment-hardening directive §4): the old
+    // "a late paid event cannot resurrect it" rule left confirmed
+    // payments silently unfulfilled. A verified late payment for a
+    // record whose session and family check out is now fulfilled late
+    // (fresh claim window from payment); a mismatched one becomes a
+    // durable exception instead (see the next test).
     const co = await createEvaluationCheckout();
     const expiredEvt = evt('evt_dc_exp_1', 'checkout.session.expired', co.sessionId);
     const r1 = await sendWebhook(expiredEvt);
@@ -619,8 +628,23 @@ describe('P6: webhook resolves failed and expired checkouts (mocks)', () => {
     assert.equal(r2.body.duplicate, true, 'replayed event id is a duplicate, not reapplied');
 
     const r3 = await sendWebhook(evt('evt_dc_exp_2', 'checkout.session.completed', co.sessionId, { payment_status: 'paid' }));
-    assert.equal(r3.body.applied, false, 'a voided entitlement is never marked paid');
+    assert.equal(r3.body.applied, true, 'a verified late payment fulfills instead of being silently dropped');
+    assert.equal(r3.body.lateFulfilled, true);
+    assert.notEqual(entitlementStore.getById(co.entitlementId).paidAt, null);
+    assert.equal(entitlementStore.getById(co.entitlementId).state, 'RESERVED');
+  });
+
+  it('a late paid event with a mismatched amount becomes a durable exception, never a grant', async () => {
+    const co = await createEvaluationCheckout();
+    const expiredEvt = evt('evt_dc_exp_3', 'checkout.session.expired', co.sessionId);
+    const r1 = await sendWebhook(expiredEvt);
+    assert.equal(r1.body.applied, true);
+    const r2 = await sendWebhook(evt('evt_dc_exp_4', 'checkout.session.completed', co.sessionId, { payment_status: 'paid', amount_total: 999999, currency: 'usd' }));
+    assert.equal(r2.body.applied, false);
+    assert.equal(r2.body.exception, true);
     assert.equal(entitlementStore.getById(co.entitlementId).paidAt, null);
+    assert.ok(entitlementStore.listExceptions().some((e) => e.entitlementId === co.entitlementId),
+      'the mismatched late payment is recorded as a durable exception');
   });
 
   it('an expired event for an unknown session is acknowledged without burning the event id', async () => {

@@ -124,3 +124,56 @@ describe('canonical fact record', () => {
     assert.equal(sanitizeFactRecord('nope'), null);
   });
 });
+
+describe('phantom-conflict fix 2026-10-24: case-only agreement', () => {
+  it('questionnaire "female" + document "Female" is agreement, not a conflict', () => {
+    const r = createFactRecord(T);
+    upsertFact(r, { id: 'gender', value: 'female', source: 'answer' }, T);
+    const f = upsertFact(r, { id: 'gender', value: 'Female', source: 'document', sourceRef: { documentType: 'birth_record', page: 1 } }, T);
+    assert.equal(f.status, 'reported'); // unchanged — same value, different case
+    assert.equal(f.value, 'female'); // primary preserved verbatim
+    assert.equal(f.alternatives.length, 0);
+    assert.equal(f.needsConfirmation, false);
+  });
+
+  it('surrounding-whitespace-only difference is also agreement', () => {
+    const r = createFactRecord(T);
+    upsertFact(r, { id: 'gender', value: 'female', source: 'answer' }, T);
+    const f = upsertFact(r, { id: 'gender', value: ' Female ', source: 'document' }, T);
+    assert.equal(f.status, 'reported');
+    assert.equal(f.alternatives.length, 0);
+  });
+
+  it('genuine contradiction still conflicts with provenance intact', () => {
+    const r = createFactRecord(T);
+    upsertFact(r, { id: 'gender', value: 'female', source: 'answer' }, T);
+    const f = upsertFact(r, { id: 'gender', value: 'male', source: 'document', sourceRef: { documentType: 'passport', page: 1 } }, T);
+    assert.equal(f.status, 'conflicting');
+    assert.equal(f.value, 'female');
+    assert.equal(f.alternatives.length, 1);
+    assert.equal(f.alternatives[0].value, 'male');
+    assert.equal(f.alternatives[0].source, 'document');
+    assert.equal(f.history.length, 1);
+  });
+
+  it('already-conflicting fact does not accumulate a case-variant duplicate alternative', () => {
+    const r = createFactRecord(T);
+    upsertFact(r, { id: 'gender', value: 'female', source: 'answer' }, T);
+    upsertFact(r, { id: 'gender', value: 'male', source: 'document' }, T);
+    const f = upsertFact(r, { id: 'gender', value: 'Male', source: 'document' }, T);
+    assert.equal(f.status, 'conflicting');
+    assert.equal(f.alternatives.length, 1);
+    assert.equal(f.alternatives[0].value, 'male');
+  });
+
+  it('correction after case-agreement still wins and marks outputs stale', () => {
+    const r = createFactRecord(T);
+    upsertFact(r, { id: 'gender', value: 'female', source: 'answer' }, T);
+    upsertFact(r, { id: 'gender', value: 'Female', source: 'document' }, T);
+    const f = upsertFact(r, { id: 'gender', value: 'male', source: 'correction' }, T);
+    assert.equal(f.status, 'reported');
+    assert.equal(f.value, 'male');
+    assert.equal(f.alternatives.length, 0);
+    assert.equal(r.outputsStale, true);
+  });
+});
