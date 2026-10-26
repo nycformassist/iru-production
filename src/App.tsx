@@ -2,6 +2,16 @@ import React, { useState, useEffect } from 'react';
 import { Shield, Globe, Printer, ArrowRight, ArrowLeft, CheckCircle2, Copy, Info, ChevronRight } from 'lucide-react';
 import { motion } from 'framer-motion';
 
+// Mobile repair 2026-10-26: upload validation + error messages (pure,
+// unit-tested) and the stage-content error boundary (no white screen).
+import { ErrorBoundary } from './ErrorBoundary';
+import {
+  validatePhotoFile,
+  messageForReviewStatus,
+  MESSAGE_PHOTO_READ_FAILURE,
+  MESSAGE_PHOTO_BAD_RESPONSE,
+} from './photoValidation';
+
 import { LANGUAGES, UI_LABELS, PHASE_1_QUESTIONS, TRIAGE_QUESTION, PHASE_2_QUESTIONS, PHASE_3_QUESTIONS, NYC_RESOURCES, CONSULATES, PROXIES, NARRATIVE_STARTERS, USCIS_FORMS, FEE_SCHEDULE_AS_OF, buildExecutiveSummary } from './constants';
 
 // Nationwide layered resource model (local → statewide → national → fallback).
@@ -382,11 +392,18 @@ export default function App() {
     if (!photoFile || reviewing) return;
     setReviewError('');
     setImageReview(null);
-    if (photoFile.size > 4 * 1024 * 1024) {
-      setReviewError(ui.photoError || 'Review unavailable.');
+    // Mobile repair 2026-10-26: validate BEFORE any FileReader read or
+    // network submission. HEIC/empty/unknown types and files whose
+    // base64 payload would exceed the ~4.5 MB platform body limit are
+    // refused here with a specific message, instead of a request the
+    // server (or the platform) would reject with a generic error.
+    const validation = validatePhotoFile(photoFile);
+    if (validation.ok === false) {
+      setReviewError(validation.message);
       return;
     }
     setReviewing(true);
+    let phase: 'read' | 'fetch' | 'parse' = 'read';
     try {
       const dataUrl: string = await new Promise((resolve, reject) => {
         const r = new FileReader();
@@ -395,6 +412,7 @@ export default function App() {
         r.readAsDataURL(photoFile);
       });
       const imageBase64 = dataUrl.split(',')[1] || '';
+      phase = 'fetch';
       const response = await fetch('/api/review-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -405,16 +423,26 @@ export default function App() {
           lang,
         }),
       });
-      if (!response.ok) throw new Error(`Server error: ${response.status}`);
+      if (!response.ok) {
+        // Distinguishable, recoverable message per failure class; the
+        // user can retry, pick another file, or skip this step.
+        setReviewError(messageForReviewStatus(response.status));
+        return;
+      }
+      phase = 'parse';
       const data = await response.json();
       if (data && data.ok && data.review) {
         setImageReview(data.review);
       } else {
-        throw new Error('Bad review response');
+        setReviewError(MESSAGE_PHOTO_BAD_RESPONSE);
       }
     } catch (e) {
       console.error('Photo review error:', e);
-      setReviewError(ui.photoError || 'Review unavailable. You can continue without it.');
+      setReviewError(
+        phase === 'read'
+          ? MESSAGE_PHOTO_READ_FAILURE
+          : (ui.photoError || 'Review unavailable. You can continue without it.'),
+      );
     } finally {
       setReviewing(false);
     }
@@ -551,7 +579,7 @@ export default function App() {
       const resp = await fetch('/api/generate-form', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ formId: selectedFormId, factRecord, lang, expectedSnapshotHash, paywallClientEnabled: PAYWALL_UI_ON() }),
+        body: JSON.stringify({ formId: selectedFormId, factRecord, lang, expectedSnapshotHash }),
       });
       const data = await resp.json().catch(() => null);
       if (!resp.ok || !data || !data.ok) {
@@ -599,24 +627,6 @@ export default function App() {
       if (sku) body.sku = sku;
       if (opts && opts.formId) body.formId = opts.formId;
       if (opts && opts.prerequisiteToken) body.entitlementToken = opts.prerequisiteToken;
-      // Checkout idempotency (payment-hardening 2026-10-24): one random
-      // purchase-intent key per logical purchase, kept in sessionStorage
-      // so a retried click replays the SAME purchase instead of minting
-      // a second payable checkout. The key names the checkout attempt
-      // only — it is never the entitlement credential.
-      const intentSlot = `iru_purchase_intent_${sku || 'legacy'}_${(opts && opts.formId) || 'none'}`;
-      let intentKey = '';
-      try { intentKey = sessionStorage.getItem(intentSlot) || ''; } catch { /* storage unavailable: fall through to a fresh key */ }
-      if (!intentKey) {
-        const bytes = new Uint8Array(16);
-        crypto.getRandomValues(bytes);
-        intentKey = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
-        try { sessionStorage.setItem(intentSlot, intentKey); } catch { /* ignore */ }
-      }
-      body.purchaseIntentKey = intentKey;
-      // Declare this build's paywall flag so the server can refuse on
-      // a client/server flag disagreement instead of gating silently.
-      body.paywallClientEnabled = PAYWALL_UI_ON();
       const resp = await fetch('/api/checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const data = await resp.json().catch(() => null);
       if (!resp.ok || !data || !data.checkoutUrl) {
@@ -1192,11 +1202,6 @@ export default function App() {
             ${ui.readinessScore}: ${readinessPercent}% <span style="font-weight:400;font-size:0.75rem;">${escapeHtml(t('pktHeuristicNote', '(approximate document-completeness heuristic — not a validated metric)'))}</span>
           </div>
         </div>
-        ${factRecord && factRecord.outputsStale ? `
-        <div class="section" style="background-color: #fffbeb; border: 1px solid #f59e0b; border-radius: 0.5rem; padding: 1rem 1.5rem;">
-          <p style="margin: 0; font-size: 0.875rem; font-weight: 600; color: #92400e;">${escapeHtml(t('factsChanged', 'Your information changed. Re-run the analysis or regenerate your form draft so everything stays consistent.'))}</p>
-        </div>
-        ` : ''}
         <div class="section">
           <h3 class="section-title font-serif">${escapeHtml(ui.readinessReview || 'Readiness Review')}</h3>
           <p class="exec-summary font-serif" style="white-space: pre-wrap;">${escapeHtml(renderAssessmentText(assessment))}</p>
@@ -1339,6 +1344,11 @@ export default function App() {
       )}
 
       <div className={`max-w-3xl w-full rounded-2xl overflow-hidden relative z-10 border ${stage === 'LANG' ? 'bg-transparent border-transparent shadow-none' : 'bg-white shadow-sm border-slate-200'}`}>
+        {/* Mobile repair 2026-10-26: any render-time exception inside stage
+            content becomes a recoverable fallback (retry / start over)
+            instead of a full white-screen loss. Happy-path DOM is
+            unchanged: the boundary renders children directly. */}
+        <ErrorBoundary onStartOver={handleStartOver}>
         {stage === 'LANG' && (
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
@@ -1640,7 +1650,7 @@ export default function App() {
         {stage === 'PHOTO' && (
           <motion.div
             initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, y: 0 }}
+            animate={{ opacity: 1, x: 0, y: 0 }}
             transition={{ duration: 0.3 }}
             className="p-8 sm:p-12"
           >
@@ -1717,22 +1727,22 @@ export default function App() {
                 )}
               </div>
 
-              <div className="flex justify-between pt-6 border-t border-slate-100">
-                <button onClick={handlePrevQuestion} className="px-6 py-3 text-slate-600 font-medium hover:text-slate-900 transition-colors flex items-center space-x-2">
+              <div className="flex flex-col gap-3 pt-6 border-t border-slate-100 sm:flex-row sm:items-center sm:justify-between">
+                <button onClick={handlePrevQuestion} className="px-6 py-3 text-slate-600 font-medium hover:text-slate-900 transition-colors flex items-center justify-center sm:justify-start space-x-2 w-full sm:w-auto">
                   <ArrowLeft className="w-4 h-4" />
                   <span>{ui.back}</span>
                 </button>
-                <div className="flex gap-3">
+                <div className="flex flex-col gap-3 sm:flex-row">
                   <button
                     onClick={handlePhotoReview}
                     disabled={!photoFile || reviewing}
-                    className="px-6 py-3 border-2 border-indigo-600 text-indigo-700 font-medium rounded-xl hover:bg-indigo-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="px-6 py-3 border-2 border-indigo-600 text-indigo-700 font-medium rounded-xl hover:bg-indigo-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed w-full sm:w-auto"
                   >
                     {reviewing ? (ui.photoReviewing || 'Reviewing…') : (ui.photoReview || 'Review photo')}
                   </button>
                   <button
                     onClick={handleNextQuestion}
-                    className="px-8 py-3 bg-indigo-600 text-white font-medium rounded-xl hover:bg-indigo-700 transition-colors flex items-center space-x-2"
+                    className="px-8 py-3 bg-indigo-600 text-white font-medium rounded-xl hover:bg-indigo-700 transition-colors flex items-center justify-center space-x-2 w-full sm:w-auto"
                   >
                     <span>{ui.photoSkip || ui.next}</span>
                     <ArrowRight className="w-4 h-4" />
@@ -2054,7 +2064,7 @@ export default function App() {
                         </div>
                       )}
                       {plan.conflicts.length > 0 && (
-                        <p className="text-sm font-semibold text-red-700">{t('formConflicts', 'Conflicting values — resolve above')}: {plan.conflicts.map((c: any) => (c.values && c.values.length > 1 ? `${c.label} (“${c.values.map((v: any) => String(v)).join('” vs “')}”)` : c.label)).join('; ')}</p>
+                        <p className="text-sm font-semibold text-red-700">{t('formConflicts', 'Conflicting values — resolve above')}: {plan.conflicts.map((c: any) => c.label).join('; ')}</p>
                       )}
                       {plan.missing.length > 0 && (
                         <div>
@@ -2330,6 +2340,7 @@ export default function App() {
             </div>
           </motion.div>
         )}
+        </ErrorBoundary>
       </div>
       
       {stage === 'PACKET' && (
