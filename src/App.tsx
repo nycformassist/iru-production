@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Shield, Globe, Printer, ArrowRight, ArrowLeft, CheckCircle2, Copy, Info, ChevronRight } from 'lucide-react';
 import { motion } from 'framer-motion';
 
@@ -11,6 +11,18 @@ import {
   MESSAGE_PHOTO_READ_FAILURE,
   MESSAGE_PHOTO_BAD_RESPONSE,
 } from './photoValidation';
+
+// Android recovery diagnostics (?debug=1 overlay only; see src/diagnostics.ts).
+import {
+  createDiagnostics,
+  isDiagnosticsEnabled,
+  incrementCounter,
+  getNavigationInfo,
+  installDiagnosticListeners,
+  safeStorage,
+  DIAGNOSTIC_BOOT_SESSION_KEY,
+  DIAGNOSTIC_BOOT_TOTAL_KEY,
+} from './diagnostics';
 
 import { LANGUAGES, UI_LABELS, PHASE_1_QUESTIONS, TRIAGE_QUESTION, PHASE_2_QUESTIONS, PHASE_3_QUESTIONS, NYC_RESOURCES, CONSULATES, PROXIES, NARRATIVE_STARTERS, USCIS_FORMS, FEE_SCHEDULE_AS_OF, buildExecutiveSummary } from './constants';
 
@@ -208,6 +220,72 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stage]);
 
+  // ── Android recovery diagnostics (?debug=1 overlay only) ─────────────
+  // The diagnostics handle is created once (no DOM/storage touched at
+  // creation). The boot effect fills in counters + navigation data,
+  // installs lifecycle/global listeners, and mounts the overlay only
+  // when the URL contains ?debug=1. Normal users never see it, and no
+  // fix in this pass depends on debug mode. Recorded details are
+  // non-sensitive by construction (stage names, event names, booleans,
+  // counters) — see src/diagnostics.ts privacy contract.
+  const diagnosticsRef = useRef<any>(null);
+  if (diagnosticsRef.current === null) {
+    diagnosticsRef.current = createDiagnostics();
+  }
+  const diagReasonRef = useRef('navigation');
+  const diagBootDoneRef = useRef(false);
+  const diagFirstStageRef = useRef(true);
+  useEffect(() => {
+    if (diagBootDoneRef.current) return;
+    diagBootDoneRef.current = true;
+    const diag = diagnosticsRef.current;
+    if (!diag) return;
+    const sessionStore = safeStorage((() => { try { return sessionStorage; } catch { return null; } })());
+    const localStore = safeStorage((() => { try { return localStorage; } catch { return null; } })());
+    diag.bootSessionCount = incrementCounter(sessionStore, DIAGNOSTIC_BOOT_SESSION_KEY);
+    diag.bootTotalCount = incrementCounter(localStore, DIAGNOSTIC_BOOT_TOTAL_KEY);
+    let navType: unknown = 'unknown';
+    let wasDiscarded: unknown = false;
+    try {
+      const entries = performance.getEntriesByType('navigation');
+      if (entries && entries[0]) navType = (entries[0] as any).type || 'unknown';
+    } catch { /* navigation data unavailable */ }
+    try { wasDiscarded = (document as any).wasDiscarded === true; } catch { /* ignore */ }
+    const nav = getNavigationInfo(navType, wasDiscarded);
+    diag.navigationType = nav.type;
+    diag.wasDiscarded = nav.wasDiscarded;
+    diag.record('boot', { stage, navigationType: nav.type, wasDiscarded: nav.wasDiscarded, bootSession: diag.bootSessionCount });
+    const cleanups: Array<() => void> = [];
+    try {
+      cleanups.push(installDiagnosticListeners(window, diag.record, ['pagehide', 'pageshow', 'focus', 'blur', 'popstate']));
+      cleanups.push(installDiagnosticListeners(window, diag.record, ['error', 'unhandledrejection']));
+      cleanups.push(installDiagnosticListeners(document, diag.record, ['visibilitychange']));
+    } catch { /* diagnostics must never break the app */ }
+    try {
+      const search = window.location.search || '';
+      if (isDiagnosticsEnabled(search)) diag.mountOverlay();
+    } catch { /* ignore */ }
+    return () => {
+      for (const c of cleanups) {
+        try { c(); } catch { /* ignore */ }
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // Stage transitions with reason. The reason ref is set by navigation
+  // handlers before they change stage ('next' / 'back' / 'start-over' /
+  // 'complete'); anything else records as 'navigation'. The first run
+  // (mount) is skipped — boot already recorded the initial stage.
+  useEffect(() => {
+    if (diagFirstStageRef.current) {
+      diagFirstStageRef.current = false;
+      return;
+    }
+    const diag = diagnosticsRef.current;
+    if (diag) diag.record('stage', { stage, reason: diagReasonRef.current });
+    diagReasonRef.current = 'navigation';
+  }, [stage]);
+
   /** Plain-text rendering of the structured assessment for the packet. */
   const renderAssessmentText = (a: any): string => {
     if (aiUnavailable) {
@@ -338,6 +416,7 @@ export default function App() {
   const question = questions[currentQ];
 
   const handleNextQuestion = () => {
+    diagReasonRef.current = 'next';
     if (currentQ < questions.length - 1) {
       setCurrentQ(currentQ + 1);
     } else {
@@ -363,6 +442,7 @@ export default function App() {
   };
 
   const handlePrevQuestion = () => {
+    diagReasonRef.current = 'back';
     if (stage === 'PHOTO') {
       setStage('PHASE4');
       setCurrentQ(0);
@@ -450,6 +530,7 @@ export default function App() {
 
   // ── Complete reset ───────────────────────────────────────────────────────
   const handleStartOver = () => {
+    diagReasonRef.current = 'start-over';
     setStage('LANG');
     setAnswers({});
     setCurrentQ(0);
@@ -718,6 +799,7 @@ export default function App() {
   };
 
   const handleInterviewComplete = async () => {
+    diagReasonRef.current = 'complete';
     setStage('ANALYZING');
     // One canonical fact record for the packet and form preparation (§4).
     // A rebuild must never discard consumer state (defect-closure
@@ -813,6 +895,7 @@ export default function App() {
       setAssessment(null);
     }
 
+    diagReasonRef.current = 'complete';
     setStage('PACKET');
   };
 

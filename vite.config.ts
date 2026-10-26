@@ -10,6 +10,10 @@ export default defineConfig(({mode}) => {
     define: {
       // API key is NOT injected into bundle — lives only in Vercel env vars
       'process.env.GEMINI_API_KEY': JSON.stringify(undefined),
+      // Android recovery diagnostics: build commit SHA for the ?debug=1
+      // overlay. Vercel sets VERCEL_GIT_COMMIT_SHA at build time; local
+      // builds fall back to 'local-dev'. Never a secret.
+      '__IRU_BUILD_SHA__': JSON.stringify(process.env.VERCEL_GIT_COMMIT_SHA || process.env.GIT_COMMIT_SHA || 'local-dev'),
     },
     resolve: {
       alias: {
