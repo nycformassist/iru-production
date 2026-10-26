@@ -66,10 +66,38 @@ const AUTHENTICITY_DISCLAIMER =
   'A qualified human reviewer must examine the original document.';
 
 /**
+ * The same disclaimer in every supported language (language-continuity
+ * directive 2026-10-22). The sanitizer appends the disclaimer in the
+ * applicant's language and recognizes it in ANY supported language —
+ * a review produced for a Spanish speaker carries the Spanish text,
+ * and re-sanitizing it (e.g. via /api/analyze) must not stack an
+ * English copy on top.
+ */
+export const VISION_DISCLAIMERS = {
+  EN: AUTHENTICITY_DISCLAIMER,
+  ES: 'Esta revisión automatizada no establece autenticidad ni suficiencia legal. Un revisor humano calificado debe examinar el documento original.',
+  ZH: '此自动审核不确立真实性或法律充分性。合格的人工审核员必须检查原始文件。',
+  HT: 'Revizyon otomatik sa a pa etabli otantisite oswa sifizans legal. Yon revizè imen kalifye dwe egzamine dokiman orijinal la.',
+  AR: 'لا تثبت هذه المراجعة الآلية الأصالة أو الكفاية القانونية. يجب على مراجع بشري مؤهل فحص المستند الأصلي.',
+};
+
+const DISCLAIMER_MARKERS = [
+  /authenticity|legal sufficiency/i,
+  /autenticidad|suficiencia legal/i,
+  /真实性|法律充分性/,
+  /otantisite|sifizans legal/i,
+  /الأصالة|الكفاية القانونية/,
+];
+
+export function visionDisclaimer(lang) {
+  return VISION_DISCLAIMERS[lang] || AUTHENTICITY_DISCLAIMER;
+}
+
+/**
  * Strip authenticity/sufficiency/verification claims; enforce the disclaimer.
  * Returns { ok, data } or { ok: false, error }. Never throws.
  */
-export function sanitizeVisionReview(obj) {
+export function sanitizeVisionReview(obj, lang = 'EN') {
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
     return { ok: false, error: 'vision output was not an object' };
   }
@@ -105,8 +133,8 @@ export function sanitizeVisionReview(obj) {
     relatedReadinessItem: (EVIDENCE_KEYS.includes(related) || related === 'none') ? related : 'none',
     limitations: obj.limitations.filter(f => typeof f === 'string').map(f => strip(f).slice(0, 300)).slice(0, 20),
   };
-  if (!data.limitations.some(l => /authenticity|legal sufficiency/i.test(l))) {
-    data.limitations.push(AUTHENTICITY_DISCLAIMER);
+  if (!data.limitations.some(l => DISCLAIMER_MARKERS.some(m => m.test(l)))) {
+    data.limitations.push(visionDisclaimer(lang));
   }
   // Optional structured extraction (directive §5). Absent = labels-only
   // review (the long-standing default); present = strictly allowlisted.
@@ -126,7 +154,7 @@ export function sanitizeVisionReview(obj) {
  * - undefined/null → { ok: true, reviews: [] } (questionnaire-only flow)
  * - non-array, over-limit, or any invalid entry → rejected
  */
-export function validateImageReviews(raw) {
+export function validateImageReviews(raw, lang = 'EN') {
   if (raw === undefined || raw === null) return { ok: true, reviews: [] };
   if (!Array.isArray(raw)) return { ok: false, error: 'imageReviews must be an array' };
   if (raw.length > MAX_IMAGE_REVIEWS_PER_REQUEST) {
@@ -134,7 +162,7 @@ export function validateImageReviews(raw) {
   }
   const reviews = [];
   for (let i = 0; i < raw.length; i++) {
-    const s = sanitizeVisionReview(raw[i]);
+    const s = sanitizeVisionReview(raw[i], lang);
     if (!s.ok) return { ok: false, error: `imageReviews[${i}]: ${s.error}` };
     reviews.push(s.data);
   }

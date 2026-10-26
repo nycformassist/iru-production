@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Shield, Globe, Printer, ArrowRight, ArrowLeft, CheckCircle2, Copy, Info, ChevronRight } from 'lucide-react';
 import { motion } from 'framer-motion';
 
@@ -11,6 +11,27 @@ import {
   MESSAGE_PHOTO_READ_FAILURE,
   MESSAGE_PHOTO_BAD_RESPONSE,
 } from './photoValidation';
+
+// Android recovery diagnostics (?debug=1 overlay only; see src/diagnostics.ts).
+import {
+  createDiagnostics,
+  isDiagnosticsEnabledFromLocation,
+  incrementCounter,
+  getNavigationInfo,
+  installDiagnosticListeners,
+  safeStorage,
+  DIAGNOSTIC_BOOT_SESSION_KEY,
+  DIAGNOSTIC_BOOT_TOTAL_KEY,
+} from './diagnostics';
+
+// Android recovery: session-scoped restore (see src/assessmentRecovery.ts).
+import {
+  saveRecovery,
+  loadRecovery,
+  clearRecovery,
+  loadPickerMarker,
+  sessionStore,
+} from './assessmentRecovery';
 
 import { LANGUAGES, UI_LABELS, PHASE_1_QUESTIONS, TRIAGE_QUESTION, PHASE_2_QUESTIONS, PHASE_3_QUESTIONS, NYC_RESOURCES, CONSULATES, PROXIES, NARRATIVE_STARTERS, USCIS_FORMS, FEE_SCHEDULE_AS_OF, buildExecutiveSummary } from './constants';
 
@@ -159,6 +180,11 @@ export default function App() {
   const [imageReview, setImageReview] = useState<any>(null);
   const [reviewing, setReviewing] = useState(false);
   const [reviewError, setReviewError] = useState('');
+  // Android recovery: one-time boot-restore notice, non-fatal global
+  // error notice, and the stable PHOTO file-input ref (see below).
+  const [restoredNotice, setRestoredNotice] = useState('');
+  const [globalNotice, setGlobalNotice] = useState('');
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
   // Canonical fact record + form preparation (directives §4/§7/§8).
   const [factRecord, setFactRecord] = useState<any>(null);
   const [narrativeError, setNarrativeError] = useState('');
@@ -204,8 +230,79 @@ export default function App() {
   // Purchase state is refreshed from the server whenever the packet
   // (and its offer/form panels) is shown.
   useEffect(() => {
-    if (stage === 'PACKET') { refreshPurchaseState(); }
+    if (stage === 'PACKET') {
+      refreshPurchaseState();
+      // Assessment complete: clear ONLY the recovery key (never payment
+      // keys — clearRecovery removes exactly one namespaced key).
+      clearRecovery(sessionStore());
+      setRestoredNotice('');
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stage]);
+
+  // ── Android recovery diagnostics (?debug=1 overlay only) ─────────────
+  // The diagnostics handle is created once (no DOM/storage touched at
+  // creation). The boot effect fills in counters + navigation data,
+  // installs lifecycle/global listeners, and mounts the overlay only
+  // when the URL contains ?debug=1. Normal users never see it, and no
+  // fix in this pass depends on debug mode. Recorded details are
+  // non-sensitive by construction (stage names, event names, booleans,
+  // counters) — see src/diagnostics.ts privacy contract.
+  const diagnosticsRef = useRef<any>(null);
+  if (diagnosticsRef.current === null) {
+    diagnosticsRef.current = createDiagnostics();
+  }
+  const diagReasonRef = useRef('navigation');
+  const diagBootDoneRef = useRef(false);
+  const diagFirstStageRef = useRef(true);
+  useEffect(() => {
+    if (diagBootDoneRef.current) return;
+    diagBootDoneRef.current = true;
+    const diag = diagnosticsRef.current;
+    if (!diag) return;
+    const sessionStore = safeStorage((() => { try { return sessionStorage; } catch { return null; } })());
+    const localStore = safeStorage((() => { try { return localStorage; } catch { return null; } })());
+    diag.bootSessionCount = incrementCounter(sessionStore, DIAGNOSTIC_BOOT_SESSION_KEY);
+    diag.bootTotalCount = incrementCounter(localStore, DIAGNOSTIC_BOOT_TOTAL_KEY);
+    let navType: unknown = 'unknown';
+    let wasDiscarded: unknown = false;
+    try {
+      const entries = performance.getEntriesByType('navigation');
+      if (entries && entries[0]) navType = (entries[0] as any).type || 'unknown';
+    } catch { /* navigation data unavailable */ }
+    try { wasDiscarded = (document as any).wasDiscarded === true; } catch { /* ignore */ }
+    const nav = getNavigationInfo(navType, wasDiscarded);
+    diag.navigationType = nav.type;
+    diag.wasDiscarded = nav.wasDiscarded;
+    diag.record('boot', { stage, navigationType: nav.type, wasDiscarded: nav.wasDiscarded, bootSession: diag.bootSessionCount });
+    const cleanups: Array<() => void> = [];
+    try {
+      cleanups.push(installDiagnosticListeners(window, diag.record, ['pagehide', 'pageshow', 'focus', 'blur', 'popstate']));
+      cleanups.push(installDiagnosticListeners(window, diag.record, ['error', 'unhandledrejection']));
+      cleanups.push(installDiagnosticListeners(document, diag.record, ['visibilitychange']));
+    } catch { /* diagnostics must never break the app */ }
+    try {
+      if (isDiagnosticsEnabledFromLocation()) diag.mountOverlay();
+    } catch { /* ignore */ }
+    return () => {
+      for (const c of cleanups) {
+        try { c(); } catch { /* ignore */ }
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // Stage transitions with reason. The reason ref is set by navigation
+  // handlers before they change stage ('next' / 'back' / 'start-over' /
+  // 'complete'); anything else records as 'navigation'. The first run
+  // (mount) is skipped — boot already recorded the initial stage.
+  useEffect(() => {
+    if (diagFirstStageRef.current) {
+      diagFirstStageRef.current = false;
+      return;
+    }
+    const diag = diagnosticsRef.current;
+    if (diag) diag.record('stage', { stage, reason: diagReasonRef.current });
+    diagReasonRef.current = 'navigation';
   }, [stage]);
 
   /** Plain-text rendering of the structured assessment for the packet. */
@@ -232,6 +329,84 @@ export default function App() {
   // UI strings are translated for every supported language (EN/ES/ZH/HT/AR);
   // t() falls back to the given English string only if a key is ever missing.
   const t = (key: string, fallback: string) => (ui[key] as string) || fallback;
+
+  // ── Android recovery: session-scoped restore + save ──────────────────
+  // Boot restore runs once, AFTER the diagnostics boot effect (so boot is
+  // recorded before any restore). A restore lands at the saved stage's
+  // first question with saved answers intact; the user advances with
+  // Continue. currentQ is intentionally NOT persisted (directive field
+  // list). The picker-opened marker is consumed on restore: the snapshot
+  // is re-saved with pickerOpened=false so a later reload does not
+  // repeat the picker message.
+  const recoveryStateRef = useRef<any>({ stage: 'LANG', lang: 'EN', answers: {}, docType: '' });
+  useEffect(() => {
+    recoveryStateRef.current = { stage, lang, answers, docType: photoEvidenceKey };
+  });
+  useEffect(() => {
+    const store = sessionStore();
+    const restored = loadRecovery(store, { allowedLangs: SUPPORTED_LANGS });
+    if (restored) {
+      diagReasonRef.current = 'restore';
+      setLang(restored.language);
+      setAnswers((prev: Record<string, string>) => ({ ...prev, ...restored.answers }));
+      setPhotoEvidenceKey(restored.docType);
+      setCurrentQ(0);
+      setStage(restored.stage);
+      if (restored.pickerOpened && restored.stage === 'PHOTO') {
+        setRestoredNotice(t('recoveryPicker', 'Your assessment progress was restored. Please select the document again.'));
+      } else {
+        setRestoredNotice(t('recoveryRestored', 'Your assessment progress was restored.'));
+      }
+      const diag = diagnosticsRef.current;
+      if (diag) diag.record('restore', { stage: restored.stage, pickerOpened: restored.pickerOpened });
+      // Consume the picker marker so it does not repeat on later reloads.
+      saveRecovery(store, { stage: restored.stage, language: restored.language, answers: restored.answers, docType: restored.docType, pickerOpened: false });
+    }
+    // Save on hide/pagehide from the latest-state ref (an effect closure
+    // would otherwise capture stale state). The picker marker is
+    // preserved while the saved stage is PHOTO (it is only meaningful
+    // there); leaving PHOTO clears it.
+    const saveFromRef = () => {
+      const s = recoveryStateRef.current;
+      const marker = s.stage === 'PHOTO' ? loadPickerMarker(sessionStore()) : false;
+      saveRecovery(sessionStore(), { stage: s.stage, language: s.lang, answers: s.answers, docType: s.docType, pickerOpened: marker });
+    };
+    const onVis = () => {
+      try {
+        if (document.visibilityState === 'hidden') saveFromRef();
+      } catch { /* ignore */ }
+    };
+    const onHide = () => { saveFromRef(); };
+    try {
+      document.addEventListener('visibilitychange', onVis);
+      window.addEventListener('pagehide', onHide);
+    } catch { /* listeners are best-effort */ }
+    // Non-fatal user message for otherwise-unhandled errors. Recording is
+    // done by the diagnostics listeners; this pair only shows the banner.
+    let bannerCleanup: (() => void) | null = null;
+    try {
+      bannerCleanup = installDiagnosticListeners(window, () => {}, ['error', 'unhandledrejection'], () => {
+        setGlobalNotice(t('globalError', 'Something went wrong, but your progress is safe. You can continue.'));
+      });
+    } catch { /* ignore */ }
+    return () => {
+      try { document.removeEventListener('visibilitychange', onVis); } catch { /* ignore */ }
+      try { window.removeEventListener('pagehide', onHide); } catch { /* ignore */ }
+      try { if (bannerCleanup) bannerCleanup(); } catch { /* ignore */ }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // Debounced save on every eligible change (300 ms). saveRecovery itself
+  // refuses non-restorable stages (LANG/ANALYZING/PACKET), so no snapshot
+  // is ever written for Welcome or completed assessments. The picker
+  // marker is preserved while on PHOTO, cleared when leaving it.
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      const marker = stage === 'PHOTO' ? loadPickerMarker(sessionStore()) : false;
+      saveRecovery(sessionStore(), { stage, language: lang, answers, docType: photoEvidenceKey, pickerOpened: marker });
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [stage, answers, photoEvidenceKey, lang]);
 
   /**
    * Build the canonical fact record from the interview answers and any
@@ -338,6 +513,7 @@ export default function App() {
   const question = questions[currentQ];
 
   const handleNextQuestion = () => {
+    diagReasonRef.current = 'next';
     if (currentQ < questions.length - 1) {
       setCurrentQ(currentQ + 1);
     } else {
@@ -363,6 +539,7 @@ export default function App() {
   };
 
   const handlePrevQuestion = () => {
+    diagReasonRef.current = 'back';
     if (stage === 'PHOTO') {
       setStage('PHASE4');
       setCurrentQ(0);
@@ -384,6 +561,28 @@ export default function App() {
       } else if (stage === 'PHASE1') {
         setStage('LANG');
       }
+    }
+  };
+
+  /** PHOTO file selection (Android recovery). Cancellation — including a
+   * change event with no files — never touches stage, language, answers,
+   * or document type. The input value is reset after handling so the same
+   * file can be selected again. Any failure here stays on PHOTO with a
+   * recoverable message; it never resets the assessment. */
+  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    try {
+      const diag = diagnosticsRef.current;
+      if (diag) diag.record('picker-change', { stage, hasFile: !!(e.target.files && e.target.files[0]) });
+      setPhotoFile(e.target.files && e.target.files[0] ? e.target.files[0] : null);
+      setImageReview(null);
+      setReviewError('');
+      // Reset the input so re-selecting the same file fires change again.
+      // The File object lives in state; clearing the input value does not
+      // affect review, which reads from state.
+      e.target.value = '';
+    } catch (err) {
+      console.error('Photo selection error:', err);
+      setReviewError(t('photoError', 'Review unavailable. You can continue without it.'));
     }
   };
 
@@ -450,6 +649,12 @@ export default function App() {
 
   // ── Complete reset ───────────────────────────────────────────────────────
   const handleStartOver = () => {
+    diagReasonRef.current = 'start-over';
+    // Android recovery: start over clears ONLY the recovery key (never
+    // payment keys — clearRecovery removes exactly one namespaced key).
+    clearRecovery(sessionStore());
+    setRestoredNotice('');
+    setGlobalNotice('');
     setStage('LANG');
     setAnswers({});
     setCurrentQ(0);
@@ -579,7 +784,7 @@ export default function App() {
       const resp = await fetch('/api/generate-form', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ formId: selectedFormId, factRecord, lang, expectedSnapshotHash }),
+        body: JSON.stringify({ formId: selectedFormId, factRecord, lang, expectedSnapshotHash, paywallClientEnabled: PAYWALL_UI_ON() }),
       });
       const data = await resp.json().catch(() => null);
       if (!resp.ok || !data || !data.ok) {
@@ -627,6 +832,24 @@ export default function App() {
       if (sku) body.sku = sku;
       if (opts && opts.formId) body.formId = opts.formId;
       if (opts && opts.prerequisiteToken) body.entitlementToken = opts.prerequisiteToken;
+      // Checkout idempotency (payment-hardening 2026-10-24): one random
+      // purchase-intent key per logical purchase, kept in sessionStorage
+      // so a retried click replays the SAME purchase instead of minting
+      // a second payable checkout. The key names the checkout attempt
+      // only — it is never the entitlement credential.
+      const intentSlot = `iru_purchase_intent_${sku || 'legacy'}_${(opts && opts.formId) || 'none'}`;
+      let intentKey = '';
+      try { intentKey = sessionStorage.getItem(intentSlot) || ''; } catch { /* storage unavailable: fall through to a fresh key */ }
+      if (!intentKey) {
+        const bytes = new Uint8Array(16);
+        crypto.getRandomValues(bytes);
+        intentKey = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+        try { sessionStorage.setItem(intentSlot, intentKey); } catch { /* ignore */ }
+      }
+      body.purchaseIntentKey = intentKey;
+      // Declare this build's paywall flag so the server can refuse on
+      // a client/server flag disagreement instead of gating silently.
+      body.paywallClientEnabled = PAYWALL_UI_ON();
       const resp = await fetch('/api/checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const data = await resp.json().catch(() => null);
       if (!resp.ok || !data || !data.checkoutUrl) {
@@ -700,6 +923,7 @@ export default function App() {
   };
 
   const handleInterviewComplete = async () => {
+    diagReasonRef.current = 'complete';
     setStage('ANALYZING');
     // One canonical fact record for the packet and form preparation (§4).
     // A rebuild must never discard consumer state (defect-closure
@@ -795,6 +1019,7 @@ export default function App() {
       setAssessment(null);
     }
 
+    diagReasonRef.current = 'complete';
     setStage('PACKET');
   };
 
@@ -1202,6 +1427,11 @@ export default function App() {
             ${ui.readinessScore}: ${readinessPercent}% <span style="font-weight:400;font-size:0.75rem;">${escapeHtml(t('pktHeuristicNote', '(approximate document-completeness heuristic — not a validated metric)'))}</span>
           </div>
         </div>
+        ${factRecord && factRecord.outputsStale ? `
+        <div class="section" style="background-color: #fffbeb; border: 1px solid #f59e0b; border-radius: 0.5rem; padding: 1rem 1.5rem;">
+          <p style="margin: 0; font-size: 0.875rem; font-weight: 600; color: #92400e;">${escapeHtml(t('factsChanged', 'Your information changed. Re-run the analysis or regenerate your form draft so everything stays consistent.'))}</p>
+        </div>
+        ` : ''}
         <div class="section">
           <h3 class="section-title font-serif">${escapeHtml(ui.readinessReview || 'Readiness Review')}</h3>
           <p class="exec-summary font-serif" style="white-space: pre-wrap;">${escapeHtml(renderAssessmentText(assessment))}</p>
@@ -1344,6 +1574,18 @@ export default function App() {
       )}
 
       <div className={`max-w-3xl w-full rounded-2xl overflow-hidden relative z-10 border ${stage === 'LANG' ? 'bg-transparent border-transparent shadow-none' : 'bg-white shadow-sm border-slate-200'}`}>
+        {restoredNotice && (
+          <div className="m-4 mb-0 p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-sm text-emerald-900 flex items-start justify-between gap-3">
+            <span>{restoredNotice}</span>
+            <button onClick={() => setRestoredNotice('')} className="font-medium shrink-0" aria-label="Dismiss">×</button>
+          </div>
+        )}
+        {globalNotice && (
+          <div className="m-4 mb-0 p-3 rounded-xl bg-amber-50 border border-amber-200 text-sm text-amber-900 flex items-start justify-between gap-3">
+            <span>{globalNotice}</span>
+            <button onClick={() => setGlobalNotice('')} className="font-medium shrink-0" aria-label="Dismiss">×</button>
+          </div>
+        )}
         {/* Mobile repair 2026-10-26: any render-time exception inside stage
             content becomes a recoverable fallback (retry / start over)
             instead of a full white-screen loss. Happy-path DOM is
@@ -1678,17 +1920,42 @@ export default function App() {
                 <label htmlFor="iru-photo-input" className="block w-full p-6 rounded-xl border-2 border-dashed border-slate-300 hover:border-indigo-400 focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-300 transition-colors cursor-pointer text-center">
                   <input
                     id="iru-photo-input"
+                    ref={photoInputRef}
                     type="file"
                     accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,.pdf"
                     className="sr-only"
-                    onChange={(e) => { setPhotoFile(e.target.files && e.target.files[0] ? e.target.files[0] : null); setImageReview(null); setReviewError(''); }}
+                    onClick={() => {
+                      // Save synchronously BEFORE the picker opens, so a
+                      // page discard while the picker is foreground still
+                      // restores progress. The picker-opened marker tells
+                      // boot restore to ask for the document again.
+                      saveRecovery(sessionStore(), { stage, language: lang, answers, docType: photoEvidenceKey, pickerOpened: true });
+                      const diag = diagnosticsRef.current;
+                      if (diag) diag.record('picker-open', { stage });
+                    }}
+                    onCancel={() => {
+                      // Cancellation is a no-op for assessment state by
+                      // design: it must never reset stage, language,
+                      // answers, or document type. (Do not depend on this
+                      // event firing — recovery covers the no-event case.)
+                      const diag = diagnosticsRef.current;
+                      if (diag) diag.record('picker-cancel', { stage });
+                    }}
+                    onChange={handlePhotoChange}
                   />
                   <span className="text-slate-600 font-medium">
                     {photoFile ? photoFile.name : (ui.photoChoose || 'Choose a photo…')}
                   </span>
                 </label>
 
+                <p className="text-sm text-slate-600 leading-relaxed">
+                  {t('pickerGuidance', 'To close the file picker, tap its X or back arrow. Once you are back in IRU, use IRU’s own Back and Continue buttons. Your phone’s Back gesture may take you out of this page.')}
+                </p>
+                <label htmlFor="iru-doc-type-select" className="block text-sm font-medium text-slate-700">
+                  {t('docTypeLabel', 'Choose the type of document or evidence.')}
+                </label>
                 <select
+                  id="iru-doc-type-select"
                   value={photoEvidenceKey}
                   onChange={(e) => setPhotoEvidenceKey(e.target.value)}
                   className="w-full p-3 rounded-xl border-2 border-slate-200 text-slate-700"
@@ -1705,7 +1972,32 @@ export default function App() {
                 </p>
 
                 {reviewError && (
-                  <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl p-3">{reviewError}</p>
+                  <div className="space-y-3">
+                    <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl p-3">{reviewError}</p>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                      {photoFile && (
+                        <button
+                          onClick={handlePhotoReview}
+                          disabled={reviewing}
+                          className="px-4 py-2 border-2 border-indigo-600 text-indigo-700 text-sm font-medium rounded-xl hover:bg-indigo-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {t('photoRetry', 'Retry')}
+                        </button>
+                      )}
+                      <button
+                        onClick={() => { if (photoInputRef.current) photoInputRef.current.click(); }}
+                        className="px-4 py-2 border-2 border-indigo-600 text-indigo-700 text-sm font-medium rounded-xl hover:bg-indigo-50 transition-colors"
+                      >
+                        {t('photoChooseAnother', 'Choose another document')}
+                      </button>
+                      <button
+                        onClick={handleNextQuestion}
+                        className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-xl hover:bg-indigo-700 transition-colors"
+                      >
+                        {t('photoContinueWithout', 'Continue without the document')}
+                      </button>
+                    </div>
+                  </div>
                 )}
 
                 {imageReview && (
@@ -2064,7 +2356,7 @@ export default function App() {
                         </div>
                       )}
                       {plan.conflicts.length > 0 && (
-                        <p className="text-sm font-semibold text-red-700">{t('formConflicts', 'Conflicting values — resolve above')}: {plan.conflicts.map((c: any) => c.label).join('; ')}</p>
+                        <p className="text-sm font-semibold text-red-700">{t('formConflicts', 'Conflicting values — resolve above')}: {plan.conflicts.map((c: any) => (c.values && c.values.length > 1 ? `${c.label} (“${c.values.map((v: any) => String(v)).join('” vs “')}”)` : c.label)).join('; ')}</p>
                       )}
                       {plan.missing.length > 0 && (
                         <div>

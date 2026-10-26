@@ -24,7 +24,7 @@ describe('App.tsx regression guards', () => {
     const body = app.slice(start, start + 1200);
     for (const needle of [
       'setAssessment(null)', 'setAiUnavailable(false)', 'setResourceResult(null)',
-      'setFactRecord(null)', 'setFormSummary(null)', 'setFormPdfBase64(\'\')',
+      'setFactRecord(null)', 'setFormDraftStore(emptyFormDraftStore())',
       "setStage('LANG')", 'setAnswers({})',
     ]) {
       assert.ok(body.includes(needle), `handleStartOver must include ${needle}`);
@@ -73,7 +73,7 @@ describe('App.tsx narrative stage guards (successive directive §4)', () => {
   });
 
   it('narrative panel renders chronology, issues, and the approval gate', () => {
-    assert.ok(app.includes('analyzeNarrative(factRecord.narrative, factRecord)'), 'panel must analyze the narrative');
+    assert.ok(app.includes('analyzeNarrative(factRecord.narrative, factRecord, lang)'), 'panel must analyze the narrative');
     assert.ok(app.includes('onClick={handleApproveNarrative}'), 'approve button must be bound');
     assert.ok(app.includes('disabled={blocking.length > 0}'), 'approval must be disabled while blocking issues remain');
     assert.ok(app.includes('handleNarrativeDate(issue.eventId)'), 'missing-date issues must offer the correction path');
@@ -81,13 +81,13 @@ describe('App.tsx narrative stage guards (successive directive §4)', () => {
   });
 
   it('packet labels the narrative with its approval status', () => {
-    assert.ok(app.includes('narrativeForPacket(factRecord.narrative, factRecord)'), 'packet must carry the honest narrative status label');
+    assert.ok(app.includes('narrativeForPacket(factRecord.narrative, factRecord, lang)'), 'packet must carry the honest narrative status label');
   });
 });
 
 describe('App.tsx B2C guards (2026-10-21 directive)', () => {
   it('the offer shows both options from the shared pricing module, before payment', () => {
-    assert.ok(app.includes('buildOffer()'), 'offer must be built from api/_lib/pricing.js');
+    assert.ok(app.includes('buildOffer(lang)'), 'offer must be built from api/_lib/pricing.js');
     assert.ok(app.includes('SKUS.EVALUATION'), 'evaluation purchase must use the server SKU');
     assert.ok(app.includes('SKUS.ONE_FORM') && app.includes('SKUS.BUNDLE') && app.includes('SKUS.SECOND_FORM_ADDON'), 'all B2C SKUs must be purchasable from the offer');
     assert.ok(app.includes("import { PRICING, SKUS, buildOffer, formatCents } from '../api/_lib/pricing.js'"), 'client and server share one pricing source');
@@ -105,12 +105,34 @@ describe('App.tsx B2C guards (2026-10-21 directive)', () => {
     assert.ok(app.includes('Official Blank Form — Reference Copy'), 'blank-form label must appear');
     assert.ok(app.includes('/api/blank-form?form='), 'blank download must use the verified-template endpoint');
     assert.ok(app.includes('finalReviewChecklist'), 'final review checklist must render from the summary');
-    assert.ok(app.includes('setFormDraftMeta'), 'draft versions must be identified');
+    assert.ok(app.includes('recordDraft(prev, selectedFormId'), 'draft versions must be identified via the per-form draft store (R4a)');
+    assert.ok(app.includes("t('draftVersion', 'Draft version')"), 'the draft version label must render from the retained per-form meta');
   });
 
   it('generation sends the token that covers the selected form', () => {
     assert.ok(app.includes('formTokens[selectedFormId]'), 'scoped form tokens must be selected per form');
     assert.ok(app.includes("sessionStorage.getItem('iru_evaluation_token')"), 'evaluation token must be kept for upgrades');
+  });
+});
+
+describe('App.tsx R4b guards (fact correction reachability)', () => {
+  it('every fact row renders a Correct control bound to the correction handler', () => {
+    // Before the fix, handleCorrectFact existed but was invoked nowhere:
+    // applicant-reported facts (status 'reported') rendered with no
+    // control at all, so a saved value (e.g. DOB) could not be corrected.
+    assert.ok(app.includes("t('correctFact', 'Correct')"), 'facts panel must render the Correct label');
+    assert.ok(app.includes('handleCorrectFact(f.id, factEditValue)'),
+      'saving the editor must call handleCorrectFact for that fact');
+    assert.ok(app.includes('setEditingFactId(f.id)'), 'the Correct control must open the inline editor');
+    assert.ok(app.includes("t('saveFact', 'Save')") && app.includes("t('cancelEdit', 'Cancel')"),
+      'the editor must offer Save and Cancel');
+  });
+
+  it('correction routes through the canonical mutation path (staleness preserved)', () => {
+    const start = app.indexOf('const handleCorrectFact');
+    const body = app.slice(start, start + 400);
+    assert.ok(body.includes('applyFactMutation'), 'correction must go through applyFactMutation');
+    assert.ok(body.includes("source: 'correction'"), 'correction must upsert with source correction');
   });
 });
 
