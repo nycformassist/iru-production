@@ -1950,7 +1950,14 @@ export default function App() {
                   </span>
                 </label>
 
+                <p className="text-sm text-slate-600 leading-relaxed">
+                  {t('pickerGuidance', 'To close the file picker, tap its X or back arrow. Once you are back in IRU, use IRU’s own Back and Continue buttons. Your phone’s Back gesture may take you out of this page.')}
+                </p>
+                <label htmlFor="iru-doc-type-select" className="block text-sm font-medium text-slate-700">
+                  {t('docTypeLabel', 'Choose the type of document or evidence.')}
+                </label>
                 <select
+                  id="iru-doc-type-select"
                   value={photoEvidenceKey}
                   onChange={(e) => setPhotoEvidenceKey(e.target.value)}
                   className="w-full p-3 rounded-xl border-2 border-slate-200 text-slate-700"
