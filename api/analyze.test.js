@@ -173,6 +173,20 @@ describe('handler', () => {
     assert.ok(src.includes('process.env.GEMINI_MODEL'), 'model is env-configurable');
   });
 
+  it('AI timeout timer is cleared on settle (no dangling 45s handle)', async () => {
+    // 2026-10-26: the AI stream race created a 45s setTimeout that was never
+    // cleared, so every AI-path invocation kept the test process alive ~45s
+    // after the tests finished (all seven analyze-invoking files ran ~50s).
+    // review-image.js withTimeout already clears its timer in .finally();
+    // analyze.js must do the same. This guard fails loudly if the clear is
+    // ever removed, so the hang cannot silently return.
+    const fs = await import('fs');
+    const src = fs.readFileSync('./api/analyze.js', 'utf8');
+    assert.ok(src.includes('clearTimeout'), 'AI timeout timer is cleared on settle');
+    assert.ok(/Promise\.race\(\[streamPromise, timeoutPromise\]\)\.finally/.test(src),
+      'the AI race clears its timer in .finally()');
+  });
+
   it('evidence gaps flow into the prompt and the fallback', async () => {
     stubClient('not json');
     const { req, res } = mockReqRes({

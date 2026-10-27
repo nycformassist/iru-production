@@ -206,8 +206,14 @@ export default async function handler(req, res) {
     // Timeout the AI stream: if Vercel kills the function mid-stream, the client
     // gets a truncated response with no 'done' event. Abort early and use fallback.
     const AI_TIMEOUT_MS = 45000; // Leave headroom under Vercel's 60s maxDuration
+    // Clear the timer when the race settles: an uncleared 45s timer kept the
+    // test process alive ~45s after every AI-path invocation (same pattern as
+    // review-image.js withTimeout). Clearing on settle is behavior-preserving:
+    // if the timeout already fired, clearTimeout is a no-op; if the stream won,
+    // the timer could never fire meaningfully again.
+    let timeoutId;
     const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('AI generation timeout')), AI_TIMEOUT_MS);
+      timeoutId = setTimeout(() => reject(new Error('AI generation timeout')), AI_TIMEOUT_MS);
     });
     const streamPromise = (async () => {
       for await (const chunk of client.generateContentStream(prompt)) {
@@ -219,7 +225,7 @@ export default async function handler(req, res) {
       }
       return fullText;
     })();
-    await Promise.race([streamPromise, timeoutPromise]);
+    await Promise.race([streamPromise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
 
     const validated = validateModelOutput(fullText);
     const assessment = validated.ok ? validated.data : fallbackAssessment(min, gapsForFallback, validatedReviews.reviews, lang);
