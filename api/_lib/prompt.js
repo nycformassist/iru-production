@@ -44,8 +44,9 @@ const LANG_NAMES = {
  * @param {Array} imageReviews validated image-review findings (lib/vision.js); optional
  */
 export function buildPrompt(min, lang = 'EN', gaps = [], imageReviews = [], documentFacts = []) {
+  const EVIDENCE_LABELS = { has_arrests: 'has_arrests (disposition certificates held, NOT arrest history)' };
   const evidenceLines = Object.entries(min.evidence)
-    .map(([k, v]) => `- ${k}: ${v}`)
+    .map(([k, v]) => `- ${EVIDENCE_LABELS[k] || k}: ${v}`)
     .join('\n');
   const targetLang = LANG_NAMES[lang] || LANG_NAMES.EN;
 
@@ -149,6 +150,7 @@ HARD RULES:
   is given at country level BY DESIGN: state the country, and never list
   city, state, or ZIP as missing model inputs.
 - ARREST HISTORY: the disposition-certificates answer states only whether the applicant HAS disposition certificates. It never establishes whether arrests occurred. Never write that the applicant has no arrest history, has no arrests, or has never been arrested unless the arrest-history answer is explicitly "no". If arrest history is unknown, say it is unknown.
+- has_arrests records ONLY whether disposition certificates are held. When Prior arrests is "no", the certificates question is not asked, so has_arrests is unknown BY DESIGN — never treat that as an ambiguity, contradiction, or uncertainty about whether arrests occurred.
 - ${NO_ADVERSE_INFERENCE_PRINCIPLE}
 - LEGAL PRINCIPLES (how to talk about evidence — you are not the adjudicator):
 ${legalHardRules().split('\n').map(l => '  * ' + l).join('\n')}

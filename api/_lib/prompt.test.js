@@ -71,6 +71,16 @@ describe('buildPrompt', () => {
     assert.ok(pNa.includes('Recent entrant'));
   });
 
+  it('labels has_arrests as disposition certificates, never as arrest history (2026-10-27)', () => {
+    const minA = minimizeForModel(
+      { country_of_origin: 'Cuba', entry_date: '2026-10-13', case_type: 'asylum', has_prior_arrests: 'no', narrative_text: '' },
+      []
+    );
+    const pA = buildPrompt(minA);
+    assert.ok(pA.includes('has_arrests (disposition certificates held, NOT arrest history): unknown'), 'checklist line must disambiguate has_arrests');
+    assert.ok(/has_arrests is unknown BY DESIGN/i.test(pA), 'prompt must forbid treating gated has_arrests as an ambiguity');
+  });
+
   it('states record fidelity: fields present in the record are never unknown (2026-10-27)', () => {
     const minF = minimizeForModel(
       { country_of_origin: 'Cuba', entry_date: '2026-10-13', case_type: 'asylum', marital_status: 'single', has_prior_arrests: 'no', has_passport: 'no', narrative_text: '' },
