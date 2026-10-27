@@ -129,7 +129,7 @@ const SERVER_FIELD_ALLOWLIST = new Set([
   'entry_date', 'case_type',
   'has_passport', 'has_i94', 'has_lease', 'has_persecution_proof',
   'has_green_card', 'has_tax_transcripts', 'has_marriage_cert',
-  'has_proof_of_relationship', 'has_arrests', 'narrative_text',
+  'has_proof_of_relationship', 'has_arrests', 'has_prior_arrests', 'marital_status', 'narrative_text',
 ]);
 
 function stripForServer(answers: Record<string, string>): Record<string, string> {
@@ -429,7 +429,7 @@ export default function App() {
       'gender', 'marital_status', 'entry_date', 'case_type',
       'has_passport', 'has_i94', 'has_lease', 'has_persecution_proof',
       'has_green_card', 'has_tax_transcripts', 'has_marriage_cert',
-      'has_proof_of_relationship', 'has_arrests',
+      'has_proof_of_relationship', 'has_arrests', 'has_prior_arrests',
     ];
     for (const id of ANSWER_FACTS) {
       if (ans[id]) upsertFact(rec, { id, value: ans[id], source: 'answer' }, now);

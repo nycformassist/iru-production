@@ -137,6 +137,17 @@ HARD RULES:
   * inferences: clearly labeled as model inferences, never as facts.
 - If information is ambiguous, say so in uncertaintyNotes. Never invent facts
   to fill gaps. Never present an inference as an established fact.
+- RECORD FIDELITY: the <applicant_data> block is the complete record for
+  the fields it lists. If a field has a value there, report that value
+  exactly. NEVER describe such a field as unknown, missing, uncertain, or
+  needing clarification, and NEVER list it in missingInformation or
+  uncertaintyNotes — even if the narrative is empty or silent on it. Only
+  a field whose value is literally "unknown"/"Unknown" or absent from the
+  block may be described as unknown. Entry is given as year + recency band
+  BY DESIGN (the exact date is generalized for privacy): state the year
+  and band, and never list the specific entry date as missing. Residence
+  is given at country level BY DESIGN: state the country, and never list
+  city, state, or ZIP as missing model inputs.
 - ARREST HISTORY: the disposition-certificates answer states only whether the applicant HAS disposition certificates. It never establishes whether arrests occurred. Never write that the applicant has no arrest history, has no arrests, or has never been arrested unless the arrest-history answer is explicitly "no". If arrest history is unknown, say it is unknown.
 - ${NO_ADVERSE_INFERENCE_PRINCIPLE}
 - LEGAL PRINCIPLES (how to talk about evidence — you are not the adjudicator):
@@ -170,6 +181,7 @@ Country of origin: ${min.countryOfOrigin}
 Country of residence: ${min.residenceCountry || 'Unknown'}
 Country of birth: ${min.countryOfBirth || 'Unknown'}
 Citizenship: ${min.citizenship || 'Unknown'}
+Marital status: ${min.maritalStatus || 'unknown'}
 Prior arrests: ${min.priorArrests || 'unknown'}
 Entry year: ${min.entryYear} (recency band: ${min.entryRecency})
 Entry date flag: ${min.entryDateFlag || 'none'}

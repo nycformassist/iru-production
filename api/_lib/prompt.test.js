@@ -71,6 +71,20 @@ describe('buildPrompt', () => {
     assert.ok(pNa.includes('Recent entrant'));
   });
 
+  it('states record fidelity: fields present in the record are never unknown (2026-10-27)', () => {
+    const minF = minimizeForModel(
+      { country_of_origin: 'Cuba', entry_date: '2026-10-13', case_type: 'asylum', marital_status: 'single', has_prior_arrests: 'no', has_passport: 'no', narrative_text: '' },
+      []
+    );
+    const pF = buildPrompt(minF);
+    assert.ok(pF.includes('Marital status: single'), 'marital status must reach the model as data');
+    assert.ok(pF.includes('Prior arrests: no'), 'prior-arrests answer must reach the model as data');
+    assert.ok(/RECORD FIDELITY/.test(pF));
+    assert.ok(/NEVER describe such a field as unknown/i.test(pF));
+    assert.ok(/year \+ recency band\s+BY DESIGN/i.test(pF));
+    assert.ok(/country level BY DESIGN/i.test(pF));
+  });
+
   it('instructs the target language while keeping English keys', () => {
     const pEs = buildPrompt(min, 'ES');
     assert.ok(pEs.includes('Spanish'), 'values should be in Spanish');

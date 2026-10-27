@@ -191,3 +191,23 @@ describe('not-applicable: single status and relationship proof (2026-10-27)', ()
     assert.ok(app.includes('pktNaRelationship'), 'App.tsx must reference the relationship N/A string key');
   });
 });
+
+// 2026-10-27 record-fidelity fix: the analyze request must actually carry
+// the prior-arrests and marital-status answers (previously dropped by the
+// client send allowlist, so the model truthfully reported them unknown),
+// and the fact record must show the prior-arrests answer.
+describe('record fidelity: client carries arrest and marital answers (2026-10-27)', () => {
+  it('SERVER_FIELD_ALLOWLIST includes has_prior_arrests and marital_status', () => {
+    const at = app.indexOf('SERVER_FIELD_ALLOWLIST');
+    assert.ok(at > 0, 'SERVER_FIELD_ALLOWLIST must exist');
+    const block = app.slice(at, app.indexOf(']);', at));
+    assert.ok(block.includes("'has_prior_arrests'"), 'prior-arrests answer must be sent to the server');
+    assert.ok(block.includes("'marital_status'"), 'marital status must be sent to the server');
+  });
+  it('ANSWER_FACTS includes has_prior_arrests', () => {
+    const at = app.indexOf('ANSWER_FACTS');
+    assert.ok(at > 0, 'ANSWER_FACTS must exist');
+    const block = app.slice(at, app.indexOf('];', at));
+    assert.ok(block.includes("'has_prior_arrests'"), 'fact record must show the prior-arrests answer');
+  });
+});
