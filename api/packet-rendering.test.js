@@ -154,3 +154,20 @@ describe('upload checklist (2026-10-27 fix #10)', () => {
     }
   });
 });
+
+// Source guard for the 2026-10-27 asylum-flow expansion: the four
+// evidence questions previously asked only in other flows must be
+// asked in the asylum flow too, so their not-applicable states render.
+describe('asylum flow evidence questions (2026-10-27)', () => {
+  it('asks green-card, tax, marriage, and relationship questions in the asylum flow', () => {
+    const constants = readFileSync(new URL('../src/constants.tsx', import.meta.url), 'utf8');
+    const phase2At = constants.indexOf('export const PHASE_2_QUESTIONS');
+    assert.ok(phase2At > 0, 'PHASE_2_QUESTIONS must exist');
+    const citizenshipAt = constants.indexOf('citizenship: [', phase2At);
+    assert.ok(citizenshipAt > phase2At, 'citizenship array must follow asylum in PHASE_2_QUESTIONS');
+    const asylumBlock = constants.slice(phase2At, citizenshipAt);
+    for (const id of ['has_green_card', 'has_tax_transcripts', 'has_marriage_cert', 'has_proof_of_relationship']) {
+      assert.ok(asylumBlock.includes(`id: "${id}"`), `asylum flow must ask ${id}`);
+    }
+  });
+});
