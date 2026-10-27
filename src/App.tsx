@@ -1070,6 +1070,9 @@ export default function App() {
     if (key === 'has_marriage_cert' && answers.marital_status === 'single') {
       return t('pktNaSingle', 'No marriage to certify (single status reported).');
     }
+    if (key === 'has_proof_of_relationship' && answers.marital_status === 'single') {
+      return t('pktNaRelationship', 'No relationship to document (single status reported).');
+    }
     const entryYear = answers.entry_date ? Number(String(answers.entry_date).slice(0, 4)) : NaN;
     const recentEntrant = !Number.isNaN(entryYear) && entryYear === new Date().getFullYear();
     if (key === 'has_green_card' && recentEntrant) {

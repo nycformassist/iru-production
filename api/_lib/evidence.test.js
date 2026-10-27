@@ -243,7 +243,9 @@ describe('buildGapRecords', () => {
   it('suppresses not-applicable gaps: single status and recent entry (2026-10-27 fix #9)', () => {
     const gapsSingle = buildGapRecords({ ...min, maritalStatus: 'single' });
     assert.ok(!gapsSingle.map(g => g.key).includes('has_marriage_cert'));
-    assert.equal(gapsSingle.length, 6);
+    // 2026-10-27 owner ruling: single status also makes relationship proof N/A.
+    assert.ok(!gapsSingle.map(g => g.key).includes('has_proof_of_relationship'));
+    assert.equal(gapsSingle.length, 5);
     const gapsRecent = buildGapRecords({
       ...min, entryRecency: '<1y',
       evidence: { ...min.evidence, has_tax_transcripts: 'no' },
@@ -270,7 +272,7 @@ describe('buildGapRecords', () => {
   it('getNotApplicableReasons mirrors the client rules and tolerates null', () => {
     assert.deepEqual(getNotApplicableReasons(null), []);
     const reasons = getNotApplicableReasons({ maritalStatus: 'single', entryRecency: '<1y' });
-    assert.deepEqual(reasons.map(r => r.key), ['has_marriage_cert', 'has_green_card', 'has_tax_transcripts']);
+    assert.deepEqual(reasons.map(r => r.key), ['has_marriage_cert', 'has_proof_of_relationship', 'has_green_card', 'has_tax_transcripts']);
     assert.deepEqual(getNotApplicableReasons({ maritalStatus: 'married', entryRecency: '1-5y' }), []);
   });
 });

@@ -171,3 +171,23 @@ describe('asylum flow evidence questions (2026-10-27)', () => {
     }
   });
 });
+
+// 2026-10-27 (owner ruling same day): single status makes proof of
+// relationship not applicable, mirroring the marriage rule.
+describe('not-applicable: single status and relationship proof (2026-10-27)', () => {
+  it('marks marriage and relationship not applicable for single applicants', async () => {
+    const { getNotApplicableReasons } = await import('./_lib/evidence.js');
+    const keys = getNotApplicableReasons({ maritalStatus: 'single' }).map(r => r.key);
+    assert.ok(keys.includes('has_marriage_cert'), 'marriage must be N/A for single applicants');
+    assert.ok(keys.includes('has_proof_of_relationship'), 'relationship must be N/A for single applicants');
+  });
+  it('does not mark relationship not applicable for non-single applicants', async () => {
+    const { getNotApplicableReasons } = await import('./_lib/evidence.js');
+    const keys = getNotApplicableReasons({ maritalStatus: 'married' }).map(r => r.key);
+    assert.ok(!keys.includes('has_proof_of_relationship'), 'relationship must stay applicable when married');
+  });
+  it('client mirror renders the relationship reason for single applicants', () => {
+    assert.ok(app.includes("key === 'has_proof_of_relationship' && answers.marital_status === 'single'"), 'App.tsx mirror must cover relationship for singles');
+    assert.ok(app.includes('pktNaRelationship'), 'App.tsx must reference the relationship N/A string key');
+  });
+});

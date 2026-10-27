@@ -662,6 +662,7 @@ export function getNotApplicableReasons(min) {
   const out = [];
   if (min.maritalStatus === 'single') {
     out.push({ key: 'has_marriage_cert', reason: 'No marriage to certify (single status reported).' });
+    out.push({ key: 'has_proof_of_relationship', reason: 'No relationship to document (single status reported).' });
   }
   if (min.entryRecency === '<1y') {
     out.push({ key: 'has_green_card', reason: 'Recent entrant — a green card is not expected at this stage.' });
