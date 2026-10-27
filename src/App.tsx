@@ -178,6 +178,13 @@ export default function App() {
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoEvidenceKey, setPhotoEvidenceKey] = useState('');
   const [imageReview, setImageReview] = useState<any>(null);
+  // Upload checklist (#10): every uploaded document in this session,
+  // tagged to its evidence key. File names live ONLY here (React state)
+  // — never in the recovery payload, which stores no file names, blobs,
+  // or review output by rule. A page recreation therefore resets upload
+  // states honestly (the files are gone); the checklist structure itself
+  // rebuilds from restored answers.
+  const [uploads, setUploads] = useState<Array<{ key: string; fileName: string; review: any | null }>>([]);
   const [reviewing, setReviewing] = useState(false);
   const [reviewError, setReviewError] = useState('');
   // Android recovery: one-time boot-restore notice, non-fatal global
@@ -505,7 +512,10 @@ export default function App() {
     if (stage === 'PHASE1') return PHASE_1_QUESTIONS;
     if (stage === 'TRIAGE') return [TRIAGE_QUESTION];
     if (stage === 'PHASE2') return PHASE_2_QUESTIONS[answers.case_type || 'asylum'] || [];
-    if (stage === 'PHASE3') return PHASE_3_QUESTIONS;
+    // Disposition question only after indicated prior arrests: the
+    // certificates question is never shown to someone who has not said
+    // they were arrested (owner directive 2026-10-27, fix #3).
+    if (stage === 'PHASE3') return PHASE_3_QUESTIONS.filter(q => q.id !== 'has_arrests' || answers.has_prior_arrests === 'yes');
     return [];
   };
 
@@ -545,7 +555,7 @@ export default function App() {
       setCurrentQ(0);
     } else if (stage === 'PHASE4') {
       setStage('PHASE3');
-      setCurrentQ(PHASE_3_QUESTIONS.length - 1);
+      setCurrentQ(answers.has_prior_arrests === 'yes' ? PHASE_3_QUESTIONS.length - 1 : 0);
     } else if (currentQ > 0) {
       setCurrentQ(currentQ - 1);
     } else {
@@ -632,6 +642,13 @@ export default function App() {
       const data = await response.json();
       if (data && data.ok && data.review) {
         setImageReview(data.review);
+        // Checklist (#10): keep every reviewed upload, tagged to its
+        // evidence key (latest upload per key wins), so later uploads
+        // never erase earlier ones from the analysis or the packet.
+        setUploads(prev => {
+          const withoutKey = prev.filter(u => u.key !== (photoEvidenceKey || ''));
+          return [...withoutKey, { key: photoEvidenceKey || '', fileName: photoFile ? photoFile.name : '', review: data.review }];
+        });
       } else {
         setReviewError(MESSAGE_PHOTO_BAD_RESPONSE);
       }
@@ -660,6 +677,7 @@ export default function App() {
     setCurrentQ(0);
     setImageReview(null);
     setPhotoFile(null);
+    setUploads([]);
     setReviewError('');
     setAssessment(null);
     setAiUnavailable(false);
@@ -982,7 +1000,14 @@ export default function App() {
           narrativeStarters,
           // Optional: the server re-validates this strictly and treats it as
           // unverified observations only. Never includes image bytes.
-          imageReviews: imageReview ? [imageReview] : [],
+          // Analysis input (#10): every reviewed upload, not just the
+          // most recent one — each review refines the gaps. The current
+          // review is included defensively if it is not already listed.
+          imageReviews: (() => {
+            const fromUploads = uploads.filter(u => u.review).map(u => u.review);
+            if (imageReview && !fromUploads.includes(imageReview)) fromUploads.push(imageReview);
+            return fromUploads;
+          })(),
           // Canonical fact record (§4/§5): server re-validates; document
           // facts reach the analysis as unverified document contents.
           factRecord: record,
@@ -1038,6 +1063,67 @@ export default function App() {
     });
   };
 
+  // Not-applicable rules (mirror api/_lib/evidence.js getNotApplicableReasons):
+  // a missing item that cannot apply is never a demand. Provided ('yes')
+  // answers always win over N/A at the call sites.
+  const notApplicableReason = (key: string): string | null => {
+    if (key === 'has_marriage_cert' && answers.marital_status === 'single') {
+      return t('pktNaSingle', 'No marriage to certify (single status reported).');
+    }
+    const entryYear = answers.entry_date ? Number(String(answers.entry_date).slice(0, 4)) : NaN;
+    const recentEntrant = !Number.isNaN(entryYear) && entryYear === new Date().getFullYear();
+    if (key === 'has_green_card' && recentEntrant) {
+      return t('pktNaGreenCard', 'Recent entrant — a green card is not expected at this stage.');
+    }
+    if (key === 'has_tax_transcripts' && recentEntrant) {
+      return t('pktNaTax', 'Recent entrant — no prior-year US tax filings expected.');
+    }
+    return null;
+  };
+
+  // Upload checklist (#10): one row per evidence item that can apply,
+  // derived from the questionnaire answers plus this session's uploads.
+  // - expected: what the user said they have (primary, or ticked
+  //   alternatives) or what is still missing.
+  // - state: reviewed (an upload with a completed review) > uploaded
+  //   (a file was picked but not reviewed) > needed (nothing yet).
+  // - uploaded-but-unreviewed is never styled as verified: reviewed rows
+  //   carry the automated-review-only qualifier.
+  const buildChecklistItems = () => {
+    const keys = ['has_passport', 'has_i94', 'has_lease', 'has_persecution_proof', 'has_green_card', 'has_tax_transcripts', 'has_marriage_cert', 'has_proof_of_relationship', 'has_arrests'];
+    const rows: Array<{ key: string; label: string; expected: string; state: 'needed' | 'uploaded' | 'reviewed'; review: any | null; fileName: string }> = [];
+    for (const key of keys) {
+      if (notApplicableReason(key)) continue;
+      if (key === 'has_arrests' && answers.has_prior_arrests === 'no') continue;
+      if (!answers[key]) continue;
+      const label = (ui.evidenceItemNames && ui.evidenceItemNames[key]) || EVIDENCE_ITEM_NAMES[key] || key;
+      const ans = answers[key];
+      let expected: string;
+      if (ans === 'yes') {
+        expected = label;
+      } else if (ans === 'no') {
+        const selectedProxies = (PROXIES[key]?.items || []).filter((i: any) => answers[i.id] === 'yes');
+        expected = selectedProxies.length > 0
+          ? selectedProxies.map((i: any) => i.label[lang]).join(', ')
+          : label;
+      } else {
+        expected = label;
+      }
+      const itemUploads = uploads.filter(u => u.key === key);
+      const reviewed = itemUploads.find(u => u.review);
+      const anyUpload = itemUploads[0];
+      rows.push({
+        key,
+        label,
+        expected,
+        state: reviewed ? 'reviewed' : anyUpload ? 'uploaded' : 'needed',
+        review: reviewed ? reviewed.review : null,
+        fileName: anyUpload ? anyUpload.fileName : '',
+      });
+    }
+    return rows;
+  };
+
   const calculateReadinessScore = () => {
     // Scored from the corrected answers (defect-closure P2): a fact
     // correction changes the score exactly as it changes the analysis.
@@ -1045,6 +1131,9 @@ export default function App() {
     let score = 0;
     let total = 0;
     const check = (key: string) => {
+      // Not-applicable items never count against readiness (fix #9);
+      // a provided ('yes') answer still counts.
+      if (eff[key] && eff[key] !== 'yes' && notApplicableReason(key)) return;
       if (eff[key]) {
         total++;
         if (eff[key] === 'yes') {
@@ -1085,6 +1174,11 @@ export default function App() {
       if (!answers[key]) return;
       const ans = answers[key];
       const st = ui.evidenceStates || {};
+      const naReason = notApplicableReason(key);
+      if (naReason && ans !== 'yes') {
+        rows.push({ item, statusText: st.notApplicable || 'Not applicable', statusKind: 'gray', nextStepText: naReason, nextStepHtml: escapeHtml(naReason), legalNoteText: '' });
+        return;
+      }
       let statusText: string;
       let statusKind: 'green' | 'red' | 'amber' | 'gray';
       let nextStepText: string;
@@ -1105,7 +1199,7 @@ export default function App() {
         const selectedProxies = (PROXIES[key]?.items || []).filter((i: any) => answers[i.id] === 'yes');
         if (selectedProxies.length > 0) {
           hasAlternatives = true;
-          const altLabel = st.alternativeIdentified || ui.alternativesReported || 'Alternatives reported';
+          const altLabel = st.alternativeIdentified || ui.alternativesReported || 'Alternatives you selected';
           const proxyNames = selectedProxies.map((i: any) => i.label[lang]).join(', ');
           const notReviewed = ui.alternativesNotReviewed || '';
           nextStepText = `${altLabel}: ${proxyNames}. ${notReviewed}`;
@@ -1129,7 +1223,11 @@ export default function App() {
     addRow((ui.evidenceItemNames && ui.evidenceItemNames['has_tax_transcripts']) || 'Tax Transcripts', 'has_tax_transcripts', t('pktStepVault', 'Photo-Vault & Email to self'), t('pktStepTax', 'Request from IRS.gov'));
     addRow((ui.evidenceItemNames && ui.evidenceItemNames['has_marriage_cert']) || 'Marriage/Divorce Certs', 'has_marriage_cert', t('pktStepVault', 'Photo-Vault & Email to self'), t('pktStepMarriage', 'Request from vital records'));
     addRow((ui.evidenceItemNames && ui.evidenceItemNames['has_proof_of_relationship']) || 'Proof of Relationship', 'has_proof_of_relationship', t('pktStepVault', 'Photo-Vault & Email to self'), t('pktStepRelationship', 'Gather photos, joint accounts'));
-    addRow((ui.evidenceItemNames && ui.evidenceItemNames['has_arrests']) || 'Certificates of Disposition', 'has_arrests', t('pktStepVault', 'Photo-Vault & Email to self'), t('pktStepDisposition', 'Request from criminal court'));
+    // Disposition row only when prior arrests are not explicitly denied: a
+    // 'no' to prior arrests means no disposition demand at all (owner
+    // directive 2026-10-27, fix #3). Legacy answers without the new
+    // question keep the prior behavior.
+    if (answers.has_prior_arrests !== 'no') addRow((ui.evidenceItemNames && ui.evidenceItemNames['has_arrests']) || 'Certificates of Disposition', 'has_arrests', t('pktStepVault', 'Photo-Vault & Email to self'), t('pktStepDisposition', 'Request from criminal court'));
     return { rows, hasAlternatives };
   };
 
@@ -1424,7 +1522,7 @@ export default function App() {
           <h1 class="font-serif">${ui.packetTitle}</h1>
           <p>${ui.humanAnchorSeal} • ${new Date().toLocaleDateString()}</p>
           <div style="margin-top: 1rem; display: inline-block; background-color: #eef2ff; color: #4f46e5; padding: 0.5rem 1rem; border-radius: 9999px; font-weight: 700; font-size: 0.875rem;">
-            ${ui.readinessScore}: ${readinessPercent}% <span style="font-weight:400;font-size:0.75rem;">${escapeHtml(t('pktHeuristicNote', '(approximate document-completeness heuristic — not a validated metric)'))}</span>
+            ${ui.readinessScore}: ${readinessPercent}% (${score} of ${total} evidence items) <span style="font-weight:400;font-size:0.75rem;">${escapeHtml(t('pktHeuristicNote', '(approximate document-completeness heuristic — not a validated metric)'))}</span>
           </div>
         </div>
         ${factRecord && factRecord.outputsStale ? `
@@ -1480,6 +1578,14 @@ export default function App() {
             <p style="margin: 0.75rem 0 0 0; font-size: 0.8rem; color: #64748b; font-style: italic;">${escapeHtml(ui.photoPrivacy || '')} ${escapeHtml(t('pktPhotoDisclaimer', 'This review does not establish authenticity or legal sufficiency.'))}</p>
           </div>
         </div>` : ''}
+        <!-- Upload checklist (#10): per-document states in the printable packet. -->
+        <div class="section">
+          <h3 class="section-title font-serif">${escapeHtml(t('checklistTitle', 'Document checklist'))}</h3>
+          <ul style="margin: 0; padding-left: 1.25rem; font-size: 0.875rem; color: #334155;">
+            ${buildChecklistItems().map((row: any) => `<li style="margin-bottom: 0.5rem;"><strong>${escapeHtml(row.label)}</strong>${row.expected !== row.label ? ` — ${escapeHtml(row.expected)}` : ''} — ${row.state === 'reviewed' ? escapeHtml(t('checklistReviewed', 'Reviewed (automated review only — not verified)')) + (row.review ? ` (${escapeHtml(t('photoCategory', 'Category'))}: ${escapeHtml(String(row.review.documentCategory || ''))}; ${escapeHtml(t('photoLegibility', 'Legibility'))}: ${escapeHtml(String(row.review.legibility || ''))})` : '') : row.state === 'uploaded' ? escapeHtml(t('checklistUploaded', 'Uploaded — not reviewed')) : escapeHtml(t('checklistNeeded', 'Needed'))}</li>`).join('')}
+          </ul>
+          ${uploads.filter(u => !u.key).length > 0 ? `<p style="font-size: 0.875rem; color: #334155;">${escapeHtml(t('checklistUntagged', 'Uploaded document (type not chosen)'))} × ${uploads.filter(u => !u.key).length}</p>` : ''}
+        </div>
         <div class="section">
           <h3 class="section-title font-serif">${ui.localResources}</h3>
           ${resourceResult?.isInternational ? `<div style="background-color: #eff6ff; border: 1px solid #3b82f6; border-radius: 0.5rem; padding: 1rem; margin-bottom: 1rem;">
@@ -1908,6 +2014,37 @@ export default function App() {
                 </p>
               </div>
 
+              {/* Upload checklist (#10): what the user said they have, what
+                  is already uploaded/reviewed, and what is still needed.
+                  Never blocks: Continue stays available with or without
+                  uploads, and uploaded-but-unreviewed is never styled as
+                  verified. */}
+              <div className="bg-white border border-slate-200 rounded-xl p-5 text-left">
+                <h3 className="text-base font-semibold text-slate-900 mb-3">{t('checklistTitle', 'Document checklist')}</h3>
+                <ul className="space-y-2">
+                  {buildChecklistItems().map((row: any) => (
+                    <li key={row.key} className="text-sm">
+                      <div className="flex items-start justify-between gap-3">
+                        <span className="text-slate-800"><strong>{row.label}</strong>{row.expected !== row.label ? ` — ${row.expected}` : ''}</span>
+                        <span className={row.state === 'reviewed' ? 'text-emerald-700 font-medium' : row.state === 'uploaded' ? 'text-amber-700 font-medium' : 'text-slate-500'}>
+                          {row.state === 'reviewed' ? t('checklistReviewed', 'Reviewed (automated review only — not verified)') : row.state === 'uploaded' ? t('checklistUploaded', 'Uploaded — not reviewed') : t('checklistNeeded', 'Needed')}
+                        </span>
+                      </div>
+                      {row.state === 'reviewed' && row.review && (
+                        <p className="text-xs text-slate-500 mt-0.5">{t('photoCategory', 'Category')}: {String(row.review.documentCategory || '')} · {t('photoLegibility', 'Legibility')}: {String(row.review.legibility || '')}</p>
+                      )}
+                      {row.state === 'uploaded' && row.fileName && (
+                        <p className="text-xs text-slate-500 mt-0.5">{row.fileName}</p>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+                {uploads.filter(u => !u.key).length > 0 && (
+                  <p className="text-sm text-slate-600 mt-3">{t('checklistUntagged', 'Uploaded document (type not chosen)')} × {uploads.filter(u => !u.key).length}</p>
+                )}
+                <p className="text-xs text-slate-500 mt-3">{t('checklistHint', 'You can add more than one document. Each upload stays on this checklist.')}</p>
+              </div>
+
               <div className="space-y-4">
                 {/* D5: the file input must stay ACTIVATABLE. A display:none
                     input (Tailwind "hidden") is not keyboard-focusable and
@@ -2085,7 +2222,7 @@ export default function App() {
               return (
                 <div className="mt-8 mb-8 text-left">
                   <div className="inline-block bg-indigo-50 text-indigo-700 px-4 py-2 rounded-full font-bold text-sm">
-                    {ui.readinessScore}: {readinessPercent}% <span className="font-normal text-xs">{t('pktHeuristicNote', '(approximate document-completeness heuristic — not a validated metric)')}</span>
+                    {ui.readinessScore}: {readinessPercent}% ({score} of {total} evidence items) <span className="font-normal text-xs">{t('pktHeuristicNote', '(approximate document-completeness heuristic — not a validated metric)')}</span>
                   </div>
                   <h3 className="text-lg font-serif font-bold text-slate-900 mb-2 mt-6">{ui.readinessReview || 'Readiness Review'}</h3>
                   <p className="text-base text-slate-800 italic bg-slate-50 border border-slate-200 rounded-xl p-4" style={{ whiteSpace: 'pre-wrap' }}>{renderAssessmentText(assessment)}</p>
@@ -2268,6 +2405,40 @@ export default function App() {
                       ))}
                     </tbody>
                   </table>
+                </div>
+              );
+            })()}
+
+            {/* ── Upload checklist (#10): per-document upload states in
+                the on-screen packet, matching the printable packet. ── */}
+            {(() => {
+              const items = buildChecklistItems();
+              const untagged = uploads.filter(u => !u.key).length;
+              if (items.length === 0 && untagged === 0) return null;
+              return (
+                <div className="mt-8 mb-8 text-left">
+                  <h3 className="text-lg font-serif font-bold text-slate-900 mb-2">{t('checklistTitle', 'Document checklist')}</h3>
+                  <ul className="space-y-2">
+                    {items.map((row: any) => (
+                      <li key={row.key} className="text-sm">
+                        <div className="flex items-start justify-between gap-3">
+                          <span className="text-slate-800"><strong>{row.label}</strong>{row.expected !== row.label ? ` — ${row.expected}` : ''}</span>
+                          <span className={row.state === 'reviewed' ? 'text-emerald-700 font-medium' : row.state === 'uploaded' ? 'text-amber-700 font-medium' : 'text-slate-500'}>
+                            {row.state === 'reviewed' ? t('checklistReviewed', 'Reviewed (automated review only — not verified)') : row.state === 'uploaded' ? t('checklistUploaded', 'Uploaded — not reviewed') : t('checklistNeeded', 'Needed')}
+                          </span>
+                        </div>
+                        {row.state === 'reviewed' && row.review && (
+                          <p className="text-xs text-slate-500 mt-0.5">{t('photoCategory', 'Category')}: {String(row.review.documentCategory || '')} · {t('photoLegibility', 'Legibility')}: {String(row.review.legibility || '')}</p>
+                        )}
+                        {row.state === 'uploaded' && row.fileName && (
+                          <p className="text-xs text-slate-500 mt-0.5">{row.fileName}</p>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                  {untagged > 0 && (
+                    <p className="text-sm text-slate-600 mt-3">{t('checklistUntagged', 'Uploaded document (type not chosen)')} × {untagged}</p>
+                  )}
                 </div>
               );
             })()}

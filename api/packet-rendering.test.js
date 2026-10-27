@@ -62,3 +62,95 @@ describe('printed packet carries a stale-outputs notice (value-upgrade gap 4, 20
       'stale notice must print above the Readiness Review findings it qualifies');
   });
 });
+
+// Source guards for the 2026-10-27 disposition-gating fix (#3): a 'no' to
+// prior arrests must never produce a disposition demand anywhere in the
+// client — questionnaire, triage table, or back-navigation.
+describe('disposition gating on prior arrests (2026-10-27 fix #3)', () => {
+  it('asks prior arrests before disposition certificates', () => {
+    const constants = readFileSync(new URL('../src/constants.tsx', import.meta.url), 'utf8');
+    assert.ok(constants.includes('has_prior_arrests'), 'PHASE_3_QUESTIONS must ask about prior arrests');
+    const phase3At = constants.indexOf('export const PHASE_3_QUESTIONS');
+    assert.ok(phase3At > 0, 'PHASE_3_QUESTIONS must exist');
+    const priorAt = constants.indexOf('has_prior_arrests', phase3At);
+    const arrestsAt = constants.indexOf('has_arrests', phase3At);
+    assert.ok(priorAt > 0 && arrestsAt > priorAt,
+      'prior-arrests question must precede the disposition-certificates question in PHASE_3_QUESTIONS');
+  });
+
+  it('shows the disposition question only after indicated prior arrests', () => {
+    assert.ok(app.includes("PHASE_3_QUESTIONS.filter(q => q.id !== 'has_arrests' || answers.has_prior_arrests === 'yes')"),
+      'PHASE3 question list must filter the disposition question unless prior arrests are yes');
+  });
+
+  it('suppresses the disposition triage row on an explicit no to prior arrests', () => {
+    assert.ok(app.includes("answers.has_prior_arrests !== 'no'"),
+      'triage builder must gate the disposition row on the prior-arrests answer');
+  });
+
+  it('lands back-navigation on the right PHASE3 question', () => {
+    assert.ok(app.includes("answers.has_prior_arrests === 'yes' ? PHASE_3_QUESTIONS.length - 1 : 0"),
+      'back-navigation into PHASE3 must land on the disposition question only when prior arrests are yes');
+  });
+});
+
+// Source guards for the 2026-10-27 not-applicable states fix (#9): items
+// that cannot apply must render as Not applicable, never as demands, and
+// must not count against the readiness score.
+describe('not-applicable states (2026-10-27 fix #9)', () => {
+  it('defines a not-applicable status in all languages', () => {
+    const constants = readFileSync(new URL('../src/constants.tsx', import.meta.url), 'utf8');
+    assert.ok(constants.includes('notApplicable: "Not applicable"'));
+    assert.ok(constants.includes('notApplicable: "No aplicable"'));
+    assert.ok(constants.includes('notApplicable: "不适用"'));
+    assert.ok(constants.includes('notApplicable: "Pa aplikab"'));
+    assert.ok(constants.includes('notApplicable: "غير منطبق"'));
+  });
+
+  it('gates triage rows and the score on the N/A rules', () => {
+    assert.ok(app.includes('notApplicableReason(key)'));
+    assert.ok(app.includes("statusText: st.notApplicable || 'Not applicable'"));
+    assert.ok(app.includes("eff[key] !== 'yes' && notApplicableReason(key)"));
+  });
+
+  it('defines the N/A reason strings in all languages', () => {
+    const constants = readFileSync(new URL('../src/constants.tsx', import.meta.url), 'utf8');
+    assert.ok(constants.includes('pktNaSingle:'));
+    assert.ok(constants.includes('pktNaGreenCard:'));
+    assert.ok(constants.includes('pktNaTax:'));
+  });
+});
+
+// Source guards for the 2026-10-27 upload checklist fix (#10): uploads
+// accumulate per evidence key, reach the analysis together, and render
+// in both packet paths with uploaded-never-verified styling.
+describe('upload checklist (2026-10-27 fix #10)', () => {
+  it('keeps every reviewed upload tagged to its evidence key', () => {
+    assert.ok(app.includes('const [uploads, setUploads]'));
+    assert.ok(app.includes("prev.filter(u => u.key !== (photoEvidenceKey || ''))"));
+  });
+
+  it('builds checklist rows from answers plus uploads', () => {
+    assert.ok(app.includes('const buildChecklistItems = ()'));
+    assert.ok(app.includes("state: reviewed ? 'reviewed' : anyUpload ? 'uploaded' : 'needed'"));
+  });
+
+  it('sends every reviewed upload to the analysis, not just the latest', () => {
+    assert.ok(app.includes('uploads.filter(u => u.review).map(u => u.review)'));
+  });
+
+  it('renders the checklist in the printable packet and on screen', () => {
+    assert.ok(app.includes("t('checklistTitle', 'Document checklist')"));
+  });
+
+  it('clears uploads on start over', () => {
+    assert.ok(app.includes('setUploads([])'), 'start over must clear uploads');
+  });
+
+  it('defines checklist strings in all languages', () => {
+    const constants = readFileSync(new URL('../src/constants.tsx', import.meta.url), 'utf8');
+    for (const k of ['checklistTitle', 'checklistNeeded', 'checklistUploaded', 'checklistReviewed', 'checklistUntagged', 'checklistHint']) {
+      assert.ok(constants.includes(k + ':'), `missing ${k}`);
+    }
+  });
+});

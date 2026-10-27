@@ -63,6 +63,7 @@ export const ELIGIBLE_ANSWER_KEYS = [
   'has_marriage_cert',
   'has_proof_of_relationship',
   'has_arrests',
+  'has_prior_arrests',
   'zip_code',
   'residence_postal_code',
 ];

@@ -19,7 +19,7 @@
  */
 
 import { legalHardRules } from './legal.js';
-import { NO_ADVERSE_INFERENCE_PRINCIPLE } from './evidence.js';
+import { NO_ADVERSE_INFERENCE_PRINCIPLE, getNotApplicableReasons } from './evidence.js';
 
 export const OUTPUT_SCHEMA_KEYS = [
   'readinessSummary',
@@ -137,12 +137,14 @@ HARD RULES:
   * inferences: clearly labeled as model inferences, never as facts.
 - If information is ambiguous, say so in uncertaintyNotes. Never invent facts
   to fill gaps. Never present an inference as an established fact.
+- ARREST HISTORY: the disposition-certificates answer states only whether the applicant HAS disposition certificates. It never establishes whether arrests occurred. Never write that the applicant has no arrest history, has no arrests, or has never been arrested unless the arrest-history answer is explicitly "no". If arrest history is unknown, say it is unknown.
 - ${NO_ADVERSE_INFERENCE_PRINCIPLE}
 - LEGAL PRINCIPLES (how to talk about evidence — you are not the adjudicator):
 ${legalHardRules().split('\n').map(l => '  * ' + l).join('\n')}
 - The timeline you describe must contain only supplied facts, with
   uncertainties clearly labeled. Do not fill in dates, entry manner, or events
   the applicant did not provide.
+- DOCUMENT-DATE TENSION: when any document's date predates the stated entry date, do not leave it as a passive note. Ask explicitly which is true: the applicant was present before the stated entry date, the document belongs to someone else, or the stated entry date is wrong — and note that the answer changes what the document proves.
 - Do not recommend efforts to obtain evidence that could endanger the
   applicant, their family, or witnesses without prominent caution and a
   direction to consult qualified counsel first.
@@ -168,11 +170,14 @@ Country of origin: ${min.countryOfOrigin}
 Country of residence: ${min.residenceCountry || 'Unknown'}
 Country of birth: ${min.countryOfBirth || 'Unknown'}
 Citizenship: ${min.citizenship || 'Unknown'}
+Prior arrests: ${min.priorArrests || 'unknown'}
 Entry year: ${min.entryYear} (recency band: ${min.entryRecency})
 Entry date flag: ${min.entryDateFlag || 'none'}
 
 Evidence checklist (yes/no/unknown):
 ${evidenceLines}
+
+Items not applicable (do NOT list as missing information): ${getNotApplicableReasons(min).map(r => r.reason).join('; ') || 'None'}
 
 Narrative themes selected by applicant:
 ${min.narrativeStarters.join(', ') || 'None'}

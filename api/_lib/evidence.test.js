@@ -13,6 +13,7 @@ import {
   legalReviewReason,
   EVIDENCE_KB,
   buildGapRecords,
+  getNotApplicableReasons,
   nextActionFor,
   NO_ADVERSE_INFERENCE_PRINCIPLE,
 } from './evidence.js';
@@ -222,6 +223,55 @@ describe('buildGapRecords', () => {
     assert.deepEqual(buildGapRecords({}), []);
     assert.deepEqual(buildGapRecords(null), []);
     assert.deepEqual(buildGapRecords({ evidence: {} }), []);
+  });
+
+  it('suppresses the disposition gap on an explicit no to prior arrests (2026-10-27 fix #3)', () => {
+    const gaps = buildGapRecords({ ...min, priorArrests: 'no' });
+    const keys = gaps.map(g => g.key);
+    assert.ok(!keys.includes('has_arrests'), 'no disposition demand without indicated arrests');
+    assert.equal(keys.length, 6);
+  });
+
+  it('keeps the disposition gap when prior arrests are indicated or unknown', () => {
+    const gapsYes = buildGapRecords({ ...min, priorArrests: 'yes' });
+    assert.ok(gapsYes.map(g => g.key).includes('has_arrests'));
+    const gapsUnknown = buildGapRecords(min); // legacy payloads carry no priorArrests
+    assert.ok(gapsUnknown.map(g => g.key).includes('has_arrests'));
+    assert.equal(gapsUnknown.length, 7);
+  });
+
+  it('suppresses not-applicable gaps: single status and recent entry (2026-10-27 fix #9)', () => {
+    const gapsSingle = buildGapRecords({ ...min, maritalStatus: 'single' });
+    assert.ok(!gapsSingle.map(g => g.key).includes('has_marriage_cert'));
+    assert.equal(gapsSingle.length, 6);
+    const gapsRecent = buildGapRecords({
+      ...min, entryRecency: '<1y',
+      evidence: { ...min.evidence, has_tax_transcripts: 'no' },
+    });
+    const recentKeys = gapsRecent.map(g => g.key);
+    assert.ok(!recentKeys.includes('has_green_card'));
+    assert.ok(!recentKeys.includes('has_tax_transcripts'));
+    assert.ok(recentKeys.includes('has_marriage_cert'));
+    assert.equal(recentKeys.length, 6);
+  });
+
+  it('keeps gaps when the N/A conditions do not hold', () => {
+    const gaps = buildGapRecords({
+      ...min, maritalStatus: 'married', entryRecency: '1-5y',
+      evidence: { ...min.evidence, has_tax_transcripts: 'no' },
+    });
+    const keys = gaps.map(g => g.key);
+    assert.ok(keys.includes('has_marriage_cert'));
+    assert.ok(keys.includes('has_green_card'));
+    assert.ok(keys.includes('has_tax_transcripts'));
+    assert.equal(keys.length, 8);
+  });
+
+  it('getNotApplicableReasons mirrors the client rules and tolerates null', () => {
+    assert.deepEqual(getNotApplicableReasons(null), []);
+    const reasons = getNotApplicableReasons({ maritalStatus: 'single', entryRecency: '<1y' });
+    assert.deepEqual(reasons.map(r => r.key), ['has_marriage_cert', 'has_green_card', 'has_tax_transcripts']);
+    assert.deepEqual(getNotApplicableReasons({ maritalStatus: 'married', entryRecency: '1-5y' }), []);
   });
 });
 

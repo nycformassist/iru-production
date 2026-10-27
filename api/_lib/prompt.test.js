@@ -48,6 +48,29 @@ describe('buildPrompt', () => {
     assert.ok(/never invent facts/i.test(p));
   });
 
+  it('never equates a certificates-no with no arrest history (2026-10-27 fix #3)', () => {
+    assert.ok(/ARREST HISTORY/.test(p));
+    assert.ok(/never write that the applicant has no arrest history/i.test(p));
+    assert.ok(p.includes('Prior arrests: unknown'), 'arrest-history answer must reach the model as data');
+  });
+
+  it('turns a document-before-entry tension into an explicit question (2026-10-27 fix #8)', () => {
+    assert.ok(/DOCUMENT-DATE TENSION/.test(p));
+    assert.ok(/belongs to someone else/i.test(p));
+    assert.ok(/stated entry date is wrong/i.test(p));
+  });
+
+  it('lists not-applicable items instead of missing ones (2026-10-27 fix #9)', () => {
+    const minNa = minimizeForModel(
+      { country_of_origin: 'Cuba', entry_date: '2026-10-13', case_type: 'asylum', marital_status: 'single', has_marriage_cert: 'no', has_green_card: 'no', has_tax_transcripts: 'no', narrative_text: '' },
+      []
+    );
+    const pNa = buildPrompt(minNa);
+    assert.ok(pNa.includes('Items not applicable (do NOT list as missing information):'));
+    assert.ok(pNa.includes('single status'));
+    assert.ok(pNa.includes('Recent entrant'));
+  });
+
   it('instructs the target language while keeping English keys', () => {
     const pEs = buildPrompt(min, 'ES');
     assert.ok(pEs.includes('Spanish'), 'values should be in Spanish');

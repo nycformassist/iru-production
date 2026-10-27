@@ -234,3 +234,11 @@ test('invalid document type degrades to empty, valid types keep', () => {
   assert.equal(createSnapshot({ ...BASE, docType: 'has_i94' }).docType, 'has_i94');
   assert.equal(createSnapshot({ ...BASE, docType: '' }).docType, '');
 });
+
+test('prior-arrests answer restores (2026-10-27 fix #3 persistence)', () => {
+  const store = fakeStorage();
+  assert.equal(saveRecovery(store, { ...BASE, stage: 'PHASE3', answers: { ...BASE.answers, has_prior_arrests: 'no' } }, {}, 1000), true);
+  const loaded = loadRecovery(store, {}, 2000);
+  assert.ok(loaded);
+  assert.equal(loaded.answers.has_prior_arrests, 'no');
+});

@@ -648,12 +648,41 @@ import { matchReviewsToGap } from './vision.js';
  *   NEVER change an evidence state and NEVER set INDEPENDENTLY_VERIFIED.
  * @returns {Array} gap records
  */
+/**
+ * Not-applicable rules (owner directive 2026-10-27, fix #9): an evidence
+ * item that cannot apply to this applicant is never a gap and never a
+ * demand. Provided ('yes') answers always win over N/A downstream.
+ * - Marriage certificate: single marital status (no marriage to certify).
+ * - Green card / tax transcripts: entered in the current calendar year
+ *   (entryRecency '<1y'), i.e. a recent entrant.
+ * Returns [{ key, reason }] in EN; the client mirrors these rules.
+ */
+export function getNotApplicableReasons(min) {
+  if (!min) return [];
+  const out = [];
+  if (min.maritalStatus === 'single') {
+    out.push({ key: 'has_marriage_cert', reason: 'No marriage to certify (single status reported).' });
+  }
+  if (min.entryRecency === '<1y') {
+    out.push({ key: 'has_green_card', reason: 'Recent entrant — a green card is not expected at this stage.' });
+    out.push({ key: 'has_tax_transcripts', reason: 'Recent entrant — no prior-year US tax filings expected.' });
+  }
+  return out;
+}
+
 export function buildGapRecords(min, imageReviews = [], lang = 'EN') {
   const evidence = (min && min.evidence) || {};
   const reviews = Array.isArray(imageReviews) ? imageReviews : [];
   const records = [];
+  const naKeys = new Set(getNotApplicableReasons(min).map(r => r.key));
   for (const key of EVIDENCE_KEYS) {
     const answer = evidence[key];
+    // Disposition gaps are suppressed only by an explicit 'no' to prior
+    // arrests: a certificates-'no' never implies no arrests, and legacy
+    // payloads without the arrest-history answer keep the prior behavior
+    // (owner directive 2026-10-27, fix #3).
+    if (key === 'has_arrests' && min && min.priorArrests === 'no') continue;
+    if (naKeys.has(key)) continue;
     if (answer !== 'no' && answer !== 'unknown') continue;
     const kb = localizedKb(key, lang);
     if (!kb) continue;

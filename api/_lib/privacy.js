@@ -33,6 +33,8 @@ const ALLOWED_FIELDS = new Set([
   'has_marriage_cert',
   'has_proof_of_relationship',
   'has_arrests',
+  'has_prior_arrests',
+  'marital_status',
   'narrative_text',
 ]);
 
@@ -111,6 +113,8 @@ export function minimizeForModel(answers, narrativeStarters) {
     entryRecency: entryYear.recency,         // '<1y' | '1-5y' | '>5y' | 'unknown' | 'future?'
     entryDateFlag: entryYear.flag,           // null | 'future-date'
     caseType: CASE_TYPES.has(answers.case_type) ? answers.case_type : 'asylum',
+    priorArrests: answers.has_prior_arrests || 'unknown', // 'yes' | 'no' | 'unknown' — gates disposition gaps (owner directive 2026-10-27)
+    maritalStatus: answers.marital_status || 'unknown', // gates marriage-cert N/A (owner directive 2026-10-27, fix #9)
     evidence: Object.fromEntries(EVIDENCE_FLAGS.map(k => [k, answers[k] || 'unknown'])),
     narrativeStarters: (narrativeStarters || []).filter(s => typeof s === 'string').slice(0, MAX_STARTERS),
     narrativeText: scrubNarrative(answers.narrative_text || ''),
