@@ -175,3 +175,233 @@ test('App stage reasons are attributed at navigation handlers', () => {
     assert.ok(appSrc.includes(`diagReasonRef.current = ${reason}`), `missing stage reason ${reason}`);
   }
 });
+
+// ── Debug-overlay minimize/expand behavior (2026-10-26 fix) ──────────
+// The overlay opens minimized as a small pill; there is no DOM harness,
+// so these tests drive mountOverlay against a minimal fake document and
+// assert on the elements/styles it produces — the same structural style
+// as the guards above. They do NOT prove real-browser tap behavior; the
+// owner phone test remains the arbiter for that.
+
+function fakeElement(tag) {
+  const el = {
+    tag,
+    style: {},
+    textContent: null,
+    children: [],
+    _listeners: {},
+    _removed: false,
+    appendChild(child) {
+      // Real DOM append re-attaches a detached node; model that so the
+      // pill/panel can be appended again after minimize/expand.
+      child._removed = false;
+      this.children.push(child);
+    },
+    remove() { this._removed = true; },
+    addEventListener(type, fn) {
+      (this._listeners[type] = this._listeners[type] || []).push(fn);
+    },
+    click() { (this._listeners.click || []).forEach((fn) => fn()); },
+  };
+  return el;
+}
+
+function fakeDocument() {
+  const bodyChildren = [];
+  const body = {
+    children: bodyChildren,
+    // Same re-attach semantics as fakeElement.appendChild: appending a
+    // detached node (e.g. the pill on minimize) makes it visible again.
+    appendChild(child) { child._removed = false; bodyChildren.push(child); },
+  };
+  return {
+    body,
+    createElement: (tag) => fakeElement(tag),
+    visibleChildren: () => bodyChildren.filter((c) => !c._removed),
+  };
+}
+
+// Runs fn with a fake document global and a fake clipboard, then restores
+// the real ones. Note: globalThis.navigator is getter-only in Node 22,
+// so the clipboard is patched onto the existing navigator object rather
+// than replacing navigator itself. The callback's return value is passed
+// through; element references captured inside remain usable after restore
+// (they are plain objects).
+function withFakeDom(fn) {
+  const doc = fakeDocument();
+  let clipboardText = null;
+  const prevDoc = globalThis.document;
+  const nav = globalThis.navigator;
+  const prevClipboard = nav ? nav.clipboard : undefined;
+  globalThis.document = doc;
+  if (nav) nav.clipboard = { writeText: async (t) => { clipboardText = t; } };
+  try {
+    return fn(doc, () => clipboardText);
+  } finally {
+    if (prevDoc === undefined) delete globalThis.document;
+    else globalThis.document = prevDoc;
+    if (nav) {
+      if (prevClipboard === undefined) delete nav.clipboard;
+      else nav.clipboard = prevClipboard;
+    }
+  }
+}
+
+function findDescendant(el, predicate) {
+  if (predicate(el)) return el;
+  for (const child of el.children || []) {
+    const found = findDescendant(child, predicate);
+    if (found) return found;
+  }
+  return null;
+}
+
+function collectText(el, out = []) {
+  if (typeof el.textContent === 'string') out.push(el.textContent);
+  for (const child of el.children || []) collectText(child, out);
+  return out;
+}
+
+test('overlay opens minimized as a small pill, never the full panel', () => {
+  withFakeDom((doc) => {
+    const diag = createDiagnostics();
+    const mounted = diag.mountOverlay();
+    assert.ok(mounted, 'mountOverlay must succeed with a document');
+    const visible = doc.visibleChildren();
+    assert.equal(visible.length, 1, 'exactly one overlay element may exist');
+    const pill = visible[0];
+    assert.equal(pill.tag, 'button', 'minimized control must be a tappable button');
+    assert.ok(pill.textContent.includes('Debug'), 'pill must advertise the debug log');
+    assert.equal(pill.style.position, 'fixed', 'pill must be outside document flow');
+    assert.equal(pill.style.top, '8px');
+    assert.equal(pill.style.right, '8px');
+    assert.equal(pill.style.boxSizing, 'border-box');
+    assert.equal(pill.style.maxWidth, '50vw');
+    assert.equal(pill.style.minHeight, '44px', 'pill must meet a 44px touch target');
+    assert.equal(findDescendant(pill, (el) => el.tag === 'pre'), null, 'no log panel may be shown by default');
+  });
+});
+
+test('logging continues while minimized and the pill count grows', () => {
+  withFakeDom((doc) => {
+    const diag = createDiagnostics();
+    diag.mountOverlay();
+    diag.record('boot', { stage: 'LANG' });
+    diag.record('stage', { stage: 'PHOTO', reason: 'next' });
+    diag.record('stage', { stage: 'PHOTO', reason: 'navigation' });
+    assert.equal(diag.log.events.length, 3, 'records must accumulate while minimized');
+    const pill = doc.visibleChildren()[0];
+    assert.ok(pill.textContent.includes('(3)'), `pill must show the live count, got: ${pill.textContent}`);
+  });
+});
+
+test('expanding shows every event accumulated while minimized, with Copy and Minimize', () => {
+  withFakeDom((doc) => {
+    const diag = createDiagnostics();
+    diag.record('boot', { stage: 'LANG' });
+    diag.record('stage', { stage: 'PHOTO', reason: 'next' });
+    diag.mountOverlay();
+    diag.record('stage', { stage: 'TRIAGE', reason: 'back' });
+    doc.visibleChildren()[0].click();
+    const panel = doc.visibleChildren()[0];
+    assert.equal(panel.tag, 'div', 'expanded overlay must be the panel');
+    const pre = findDescendant(panel, (el) => el.tag === 'pre');
+    assert.ok(pre, 'expanded panel must contain the log');
+    const snap = JSON.parse(pre.textContent);
+    assert.equal(snap.events.length, 3, 'reopening must show all accumulated entries');
+    assert.deepEqual(snap.events.map((e) => e.type), ['boot', 'stage', 'stage']);
+    const texts = collectText(panel);
+    assert.ok(texts.includes('Copy'), 'Copy Logs function must be retained');
+    assert.ok(texts.includes('Minimize'), 'an obvious minimize control must exist');
+    assert.ok(!texts.includes('Hide'), 'the one-way Hide control must be gone');
+  });
+});
+
+test('minimize returns to the pill and reopening retains the full log', () => {
+  withFakeDom((doc) => {
+    const diag = createDiagnostics();
+    diag.mountOverlay();
+    diag.record('boot', { stage: 'LANG' });
+    doc.visibleChildren()[0].click();
+    const panel = doc.visibleChildren()[0];
+    findDescendant(panel, (el) => el.textContent === 'Minimize').click();
+    assert.equal(doc.visibleChildren()[0].tag, 'button', 'minimize must return to the pill');
+    diag.record('stage', { stage: 'PHOTO', reason: 'next' });
+    diag.record('stage', { stage: 'TRIAGE', reason: 'back' });
+    assert.ok(doc.visibleChildren()[0].textContent.includes('(3)'), 'pill count must include post-minimize events');
+    doc.visibleChildren()[0].click();
+    const reopened = doc.visibleChildren()[0];
+    const snap = JSON.parse(findDescendant(reopened, (el) => el.tag === 'pre').textContent);
+    assert.equal(snap.events.length, 3, 'reopening must retain the full accumulated log');
+    assert.deepEqual(snap.events.map((e) => e.detail.stage || e.type), ['LANG', 'PHOTO', 'TRIAGE']);
+  });
+});
+
+test('Copy writes the accumulated snapshot to the clipboard', async () => {
+  let copyBtn;
+  let getClipboard;
+  withFakeDom((doc, getText) => {
+    getClipboard = getText;
+    const diag = createDiagnostics();
+    diag.record('boot', { stage: 'LANG' });
+    diag.record('stage', { stage: 'PHOTO', reason: 'next' });
+    diag.mountOverlay();
+    doc.visibleChildren()[0].click();
+    const panel = doc.visibleChildren()[0];
+    copyBtn = findDescendant(panel, (el) => el.textContent === 'Copy');
+    copyBtn.click();
+  });
+  await Promise.resolve();
+  assert.equal(copyBtn.textContent, 'Copied!');
+  const snap = JSON.parse(getClipboard());
+  assert.equal(snap.events.length, 2, 'copied snapshot must contain the accumulated events');
+});
+
+test('expanded panel and pill cannot overflow a 320px viewport', () => {
+  withFakeDom((doc) => {
+    const diag = createDiagnostics();
+    diag.mountOverlay();
+    const pill = doc.visibleChildren()[0];
+    // Border-box arithmetic: total footprint = maxWidth + right offset.
+    // Pill: 50vw + 8px < 100vw at any width (at 320px: 160 + 8 = 168 < 320).
+    assert.equal(pill.style.boxSizing, 'border-box');
+    assert.equal(pill.style.maxWidth, '50vw');
+    assert.equal(pill.style.right, '8px');
+    pill.click();
+    const panel = doc.visibleChildren()[0];
+    // Panel: 92vw + 8px < 100vw at any width (at 320px: 294.4 + 8 = 302.4
+    // < 320). The old panel lacked boxSizing, so its 12px padding pushed
+    // it ~6px past the left edge on a 320px screen.
+    assert.equal(panel.style.position, 'fixed', 'panel must be outside document flow (no layout shift)');
+    assert.equal(panel.style.top, '8px');
+    assert.equal(panel.style.right, '8px');
+    assert.equal(panel.style.boxSizing, 'border-box');
+    assert.equal(panel.style.maxWidth, '92vw');
+    assert.equal(panel.style.maxHeight, '50vh');
+  });
+});
+
+test('no backdrop or wrapper exists to intercept taps outside the control', () => {
+  withFakeDom((doc) => {
+    const diag = createDiagnostics();
+    diag.mountOverlay();
+    assert.equal(doc.visibleChildren().length, 1, 'minimized: exactly one element (the pill)');
+    doc.visibleChildren()[0].click();
+    const visible = doc.visibleChildren();
+    assert.equal(visible.length, 1, 'expanded: exactly one element (the panel)');
+    const panel = visible[0];
+    const fixedDescendants = [];
+    const walk = (el) => {
+      for (const child of el.children || []) {
+        if (child.style && child.style.position === 'fixed') fixedDescendants.push(child);
+        walk(child);
+      }
+    };
+    walk(panel);
+    assert.equal(fixedDescendants.length, 0, 'no descendant may be a fixed tap-intercepting layer');
+  });
+});
+
+test('mountOverlay returns null without a document', () => {
+  assert.equal(createDiagnostics().mountOverlay(), null);
+});

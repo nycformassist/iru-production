@@ -6,6 +6,16 @@
 // buffer), but the on-screen overlay is rendered ONLY when the page URL
 // contains "?debug=1". Normal users never see it.
 //
+// MINIMIZED DEFAULT (2026-10-26 fix for the overlay obstructing mobile
+// testing): when enabled, the overlay opens as ONE small top-right pill,
+// never as the full panel, so the app is testable unobstructed
+// immediately. Tapping the pill expands the full log panel; Minimize
+// collapses back to the pill. Logging continues in both states and
+// minimizing never clears the log. There is deliberately no destructive
+// Close: the old Hide button was a one-way door (panel removed, no
+// reopen path) that forced the tester to choose between an obstructing
+// panel and no diagnostics at all for the session.
+//
 // PRIVACY CONTRACT (enforced by call sites, verified by test): record()
 // stores exactly what the caller passes — type, timestamp, and a detail
 // object. Callers must pass ONLY non-sensitive facts: stage names,
@@ -294,11 +304,51 @@ export function createDiagnostics(): DiagnosticsHandle {
         const nav = (globalThis as unknown as {
           navigator?: { clipboard?: { writeText: (t: string) => Promise<void> } };
         }).navigator;
+        // Minimized default: the overlay opens as ONE small floating pill,
+        // never as the full panel, so ?debug=1 never greets the tester
+        // with a half-screen panel over the assessment. There is no
+        // backdrop, wrapper, or full-screen layer — the pill (minimized)
+        // or the panel (expanded, only after the user taps the pill) is
+        // the ONLY element the overlay adds, so taps anywhere outside it
+        // reach the app. Both elements are fixed (outside document flow,
+        // no layout shift) and border-box sized so they cannot overflow
+        // a 320px viewport: pill maxWidth 50vw + right 8px, panel
+        // maxWidth 92vw + right 8px, each < 100vw including padding.
+        // Placement: top-right. The app has no fixed header and no
+        // persistent top-right control (language selection is a step
+        // screen; photo/Skip/Review/Continue controls live in the
+        // scrolling content column), so the pill sits over the
+        // header/margin zone — never over the step action buttons that
+        // the old bottom-right panel covered. A fixed element can
+        // transiently overlap in-flow content during scroll, but the
+        // pill footprint (~110x44px) cannot cover a button row, and a
+        // small scroll reveals anything beneath it.
+        const pill = doc.createElement('button');
+        pill.style.position = 'fixed';
+        pill.style.top = '8px';
+        pill.style.right = '8px';
+        pill.style.zIndex = '9999';
+        pill.style.boxSizing = 'border-box';
+        pill.style.pointerEvents = 'auto';
+        pill.style.maxWidth = '50vw';
+        pill.style.minHeight = '44px';
+        pill.style.padding = '8px 10px';
+        pill.style.whiteSpace = 'nowrap';
+        pill.style.overflow = 'hidden';
+        pill.style.textOverflow = 'ellipsis';
+        pill.style.background = '#0f172a';
+        pill.style.color = '#e2e8f0';
+        pill.style.border = '1px solid #334155';
+        pill.style.borderRadius = '999px';
+        pill.style.fontSize = '12px';
+        pill.style.fontFamily = 'monospace';
         const panel = doc.createElement('div');
         panel.style.position = 'fixed';
+        panel.style.top = '8px';
         panel.style.right = '8px';
-        panel.style.bottom = '8px';
         panel.style.zIndex = '9999';
+        panel.style.boxSizing = 'border-box';
+        panel.style.pointerEvents = 'auto';
         panel.style.maxWidth = '92vw';
         panel.style.maxHeight = '50vh';
         panel.style.overflow = 'auto';
@@ -329,43 +379,69 @@ export function createDiagnostics(): DiagnosticsHandle {
             copyBtn.textContent = 'Copy failed';
           }
         });
-        const hideBtn = doc.createElement('button');
-        hideBtn.textContent = 'Hide';
-        hideBtn.addEventListener('click', () => {
-          try {
-            panel.remove();
-          } catch {
-            /* ignore */
-          }
-          overlay = null;
-        });
+        // Minimize (not Hide): collapsing returns to the pill and NEVER
+        // stops logging or loses the log. The old Hide button removed
+        // the panel with no reopen path — a one-way door that forced the
+        // tester to choose between an obstructing panel and no
+        // diagnostics at all for the session. There is deliberately no
+        // destructive Close: minimizing is the single dismiss action.
+        const minimizeBtn = doc.createElement('button');
+        minimizeBtn.textContent = 'Minimize';
         const pre = doc.createElement('pre');
         pre.style.whiteSpace = 'pre-wrap';
         pre.style.wordBreak = 'break-word';
         panel.appendChild(title);
         panel.appendChild(copyBtn);
-        panel.appendChild(hideBtn);
+        panel.appendChild(minimizeBtn);
         panel.appendChild(pre);
-        doc.body.appendChild(panel);
+        let expanded = false;
+        let shown: { remove: () => void } = pill;
         const render = () => {
           try {
-            pre.textContent = handle.snapshot();
+            pill.textContent = `Debug log (${log.events.length}) ▸`;
+            if (expanded) pre.textContent = handle.snapshot();
           } catch {
             /* ignore */
           }
         };
-        overlay = { element: panel, render, unmount: () => {
+        const expand = () => {
           try {
-            panel.remove();
+            shown.remove();
+          } catch {
+            /* ignore */
+          }
+          expanded = true;
+          shown = panel;
+          doc.body.appendChild(panel);
+          render();
+        };
+        const minimize = () => {
+          try {
+            shown.remove();
+          } catch {
+            /* ignore */
+          }
+          expanded = false;
+          shown = pill;
+          doc.body.appendChild(pill);
+          render();
+        };
+        pill.addEventListener('click', expand);
+        minimizeBtn.addEventListener('click', minimize);
+        doc.body.appendChild(pill);
+        const unmount = () => {
+          try {
+            shown.remove();
           } catch {
             /* ignore */
           }
           overlay = null;
-        } };
+        };
+        overlay = { element: pill, render, unmount };
         render();
         return {
           refresh: render,
-          unmount: overlay.unmount,
+          unmount,
         };
       } catch {
         return null;
