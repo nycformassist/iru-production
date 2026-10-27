@@ -2,7 +2,7 @@
 //  P1: draft↔fact-snapshot binding (stale-draft API safeguard)
 //  P2: correction-to-output propagation (precedence + fallback basis)
 //  P3: packet resource source + on-screen package (wiring guards)
-//  P4: edition manifest vs the live USCIS monitor baseline
+//  P4: edition manifest vs the committed monitor snapshot fixture
 // Synthetic data only. Direct-API tests drive the real HTTP handlers.
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -533,11 +533,18 @@ describe('P3: localization of new strings', () => {
   });
 });
 
-/* ── P4: edition manifest vs the live USCIS monitor baseline ───────── */
-describe('P4: three-way edition control against the live monitor file', () => {
-  const monitor = JSON.parse(readFileSync(join(HERE, '..', '..', 'uscis-monitor', 'state.json'), 'utf8'));
+/* ── P4: edition manifest vs the committed monitor snapshot fixture ─── */
+// Previously this read ../../uscis-monitor/state.json (the live USCIS monitor
+// baseline, outside the repo), so the whole file failed to load on any machine
+// without that sibling directory. It now reads the committed fixture
+// api/fixtures/uscis-monitor-state.json (synthetic, representative values).
+// The three-way edition control mechanism is unchanged; only liveness moved
+// out — live-drift detection is the USCIS monitor cron's job. Update the
+// fixture whenever the registry editions change; never weaken the assertions.
+describe('P4: three-way edition control against the committed monitor snapshot fixture', () => {
+  const monitor = JSON.parse(readFileSync(join(HERE, 'fixtures', 'uscis-monitor-state.json'), 'utf8'));
 
-  it('the monitor baseline file is available and current', () => {
+  it('the monitor snapshot fixture is available and tracks both forms', () => {
     assert.ok(monitor.forms['I-589'], 'monitor tracks I-589');
     assert.ok(monitor.forms['I-765'], 'monitor tracks I-765');
   });
