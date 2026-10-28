@@ -24,6 +24,31 @@
 // output, or payment data. Error events record the error NAME only,
 // never the message or stack, because messages can embed user data.
 
+/**
+ * Non-sensitive description of a picked file for the debug log (2026-10-28):
+ * MIME class and a coarse size bucket ONLY. Never the file name, contents,
+ * or any preview. Lets a device test show WHY a selection failed (HEIC,
+ * empty type from a cloud provider, oversize) without logging the document.
+ */
+export function summarizeFileForDiagnostics(
+  file: { type?: unknown; size?: unknown } | null | undefined,
+): { mimeClass: string; sizeBucket: string } {
+  if (!file) return { mimeClass: 'none', sizeBucket: 'none' };
+  const type = typeof file.type === 'string' ? file.type.toLowerCase() : '';
+  const known = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'application/pdf'];
+  let mimeClass = 'other';
+  if (type === '') mimeClass = 'empty';
+  else if (known.includes(type)) mimeClass = type;
+  else if (type === 'image/heic' || type === 'image/heif') mimeClass = 'heic';
+  const size = typeof file.size === 'number' && Number.isFinite(file.size) ? file.size : -1;
+  let sizeBucket = 'unknown';
+  if (size === 0) sizeBucket = 'empty';
+  else if (size > 0 && size < 1024 * 1024) sizeBucket = '<1MB';
+  else if (size >= 1024 * 1024 && size < 3 * 1024 * 1024) sizeBucket = '1-3MB';
+  else if (size >= 3 * 1024 * 1024) sizeBucket = '>=3MB';
+  return { mimeClass, sizeBucket };
+}
+
 export const DIAGNOSTIC_PARAM = 'debug';
 export const DIAGNOSTIC_VALUE = '1';
 export const DIAGNOSTIC_EVENT_LIMIT = 30;

@@ -22,6 +22,7 @@ import {
   safeStorage,
   DIAGNOSTIC_BOOT_SESSION_KEY,
   DIAGNOSTIC_BOOT_TOTAL_KEY,
+  summarizeFileForDiagnostics,
 } from './diagnostics';
 
 // Android recovery: session-scoped restore (see src/assessmentRecovery.ts).
@@ -600,7 +601,7 @@ export default function App() {
   const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     try {
       const diag = diagnosticsRef.current;
-      if (diag) diag.record('picker-change', { stage, hasFile: !!(e.target.files && e.target.files[0]) });
+      if (diag) diag.record('picker-change', { stage, hasFile: !!(e.target.files && e.target.files[0]), ...summarizeFileForDiagnostics(e.target.files && e.target.files[0]) });
       setPhotoFile(e.target.files && e.target.files[0] ? e.target.files[0] : null);
       setImageReview(null);
       setReviewError('');
@@ -626,9 +627,13 @@ export default function App() {
     // server (or the platform) would reject with a generic error.
     const validation = validatePhotoFile(photoFile);
     if (validation.ok === false) {
+      const diagV = diagnosticsRef.current;
+      if (diagV) diagV.record('review-validate', { ok: false });
       setReviewError(validation.message);
       return;
     }
+    const diagR = diagnosticsRef.current;
+    if (diagR) diagR.record('review-start', { stage });
     setReviewing(true);
     let phase: 'read' | 'fetch' | 'parse' = 'read';
     try {
@@ -650,6 +655,7 @@ export default function App() {
           lang,
         }),
       });
+      if (diagR) diagR.record('review-response', { status: response.status, ok: response.ok });
       if (!response.ok) {
         // Distinguishable, recoverable message per failure class; the
         // user can retry, pick another file, or skip this step.
@@ -672,6 +678,7 @@ export default function App() {
       }
     } catch (e) {
       console.error('Photo review error:', e);
+      if (diagR) diagR.record('review-error', { phase, errorName: e && (e as any).name ? String((e as any).name) : 'unknown' });
       setReviewError(
         phase === 'read'
           ? MESSAGE_PHOTO_READ_FAILURE
