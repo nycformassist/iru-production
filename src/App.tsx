@@ -40,6 +40,11 @@ import {
   isRelationshipNotApplicable,
   scopedQuestionText,
 } from './questionGating';
+import {
+  savePhotoFile,
+  loadPhotoFile,
+  clearPhotoFile,
+} from './photoFileStore';
 
 import { LANGUAGES, UI_LABELS, PHASE_1_QUESTIONS, TRIAGE_QUESTION, PHASE_2_QUESTIONS, PHASE_3_QUESTIONS, NYC_RESOURCES, CONSULATES, PROXIES, NARRATIVE_STARTERS, USCIS_FORMS, FEE_SCHEDULE_AS_OF, buildExecutiveSummary } from './constants';
 
@@ -187,16 +192,24 @@ export default function App() {
   // C3: server request id, shown as a reference so a report maps to one log line.
   const [requestId, setRequestId] = useState('');
   const [isNycCoverage, setIsNycCoverage] = useState(true);
-  // Optional one-time document photo review (never persisted server-side).
+  // Optional one-time document photo review. The picked file is held
+  // temporarily in this browser only (IndexedDB, see src/photoFileStore.ts)
+  // so it survives a page recreation on Android; it is never sent to
+  // IRU servers except in the existing /api/review-image review call,
+  // and it is cleared on Start Over, packet completion, and after a
+  // successful review.
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoEvidenceKey, setPhotoEvidenceKey] = useState('');
+  const [photoRestoredNotice, setPhotoRestoredNotice] = useState('');
+  const photoRestoreAttemptedRef = useRef(false);
   const [imageReview, setImageReview] = useState<any>(null);
   // Upload checklist (#10): every uploaded document in this session,
   // tagged to its evidence key. File names live ONLY here (React state)
   // — never in the recovery payload, which stores no file names, blobs,
-  // or review output by rule. A page recreation therefore resets upload
-  // states honestly (the files are gone); the checklist structure itself
-  // rebuilds from restored answers.
+  // or review output by rule. The picked file itself is held separately
+  // in the browser-local photo store (src/photoFileStore.ts, owner ruling
+  // 2026-10-28) so a page recreation restores the file; the checklist
+  // structure itself rebuilds from restored answers.
   const [uploads, setUploads] = useState<Array<{ key: string; fileName: string; review: any | null }>>([]);
   const [reviewing, setReviewing] = useState(false);
   const [reviewError, setReviewError] = useState('');
@@ -253,9 +266,13 @@ export default function App() {
     if (stage === 'PACKET') {
       refreshPurchaseState();
       // Assessment complete: clear ONLY the recovery key (never payment
-      // keys — clearRecovery removes exactly one namespaced key).
+      // keys — clearRecovery removes exactly one namespaced key), plus
+      // the browser-local held photo file (its review, if any, is kept
+      // in the uploads checklist; the blob is no longer needed).
       clearRecovery(sessionStore());
+      void clearPhotoFile();
       setRestoredNotice('');
+      setPhotoRestoredNotice('');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stage]);
@@ -614,6 +631,37 @@ export default function App() {
     }
   };
 
+  // Photo-file restore after a page recreation (owner ruling 2026-10-28).
+  // Runs once per mount, only on PHOTO with no current file. If the
+  // browser-local store holds a picked file, it becomes the current file
+  // (name shown in the dropzone, Review enabled) and the stale
+  // "select the document again" boot notice is replaced with a restored
+  // notice. If no file is held, the boot notice is left as-is. This
+  // effect never runs after a user-picked file (photoFile non-null),
+  // never runs after Start Over in the same mount clears the store
+  // (the load then returns null), and never clears anything itself.
+  useEffect(() => {
+    if (stage !== 'PHOTO' || photoFile || photoRestoreAttemptedRef.current) return;
+    photoRestoreAttemptedRef.current = true;
+    let cancelled = false;
+    loadPhotoFile().then((stored) => {
+      if (cancelled || !stored || !stored.blob) return;
+      try {
+        const file = new File([stored.blob], stored.name || 'document', { type: stored.type || 'image/jpeg' });
+        setPhotoFile(file);
+        setPhotoEvidenceKey((prev: string) => prev || stored.evidenceKey || '');
+        setRestoredNotice('');
+        setPhotoRestoredNotice(t('photoRestored', 'Your selected document was restored after the page was recreated. You can review it now.'));
+      } catch {
+        // A malformed held record must never break the photo step.
+      }
+    }).catch(() => {
+      // loadPhotoFile never throws by contract; this is defence in depth.
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stage, photoFile]);
+
   /** PHOTO file selection (Android recovery). Cancellation — including a
    * change event with no files — never touches stage, language, answers,
    * or document type. The input value is reset after handling so the same
@@ -623,7 +671,17 @@ export default function App() {
     try {
       const diag = diagnosticsRef.current;
       if (diag) diag.record('picker-change', { stage, hasFile: !!(e.target.files && e.target.files[0]), ...summarizeFileForDiagnostics(e.target.files && e.target.files[0]) });
+      const picked = e.target.files && e.target.files[0] ? e.target.files[0] : null;
       setPhotoFile(e.target.files && e.target.files[0] ? e.target.files[0] : null);
+      if (picked) {
+        // Browser-local hold so a later page recreation restores this
+        // file. Fire-and-forget: savePhotoFile never throws and never
+        // blocks the UI; a failed hold leaves the in-state file usable
+        // in this page. Choosing another file replaces the held file.
+        // An empty change (cancel) does not touch the held file.
+        void savePhotoFile(picked, photoEvidenceKey);
+        setPhotoRestoredNotice('');
+      }
       setImageReview(null);
       setReviewError('');
       // Reset the input so re-selecting the same file fires change again.
@@ -636,7 +694,10 @@ export default function App() {
     }
   };
 
-  /** One-time document photo review. The image is sent once and never stored by IRU. */
+  /** One-time document photo review. The image is sent once to the
+   * review endpoint; before that it is held temporarily in this browser
+   * only (see src/photoFileStore.ts) and removed after a successful
+   * review. It is never stored on IRU servers. */
   const handlePhotoReview = async () => {
     if (!photoFile || reviewing) return;
     setReviewError('');
@@ -694,6 +755,12 @@ export default function App() {
           const withoutKey = prev.filter(u => u.key !== (photoEvidenceKey || ''));
           return [...withoutKey, { key: photoEvidenceKey || '', fileName: photoFile ? photoFile.name : '', review: data.review }];
         });
+        // Successful review: the blob is no longer needed (the review
+        // result is kept in uploads). Clear the browser-local hold.
+        // Review FAILURE paths below deliberately do NOT clear, so
+        // Retry can reuse the held file after a recreation.
+        void clearPhotoFile();
+        setPhotoRestoredNotice('');
       } else {
         setReviewError(MESSAGE_PHOTO_BAD_RESPONSE);
       }
@@ -714,9 +781,12 @@ export default function App() {
   const handleStartOver = () => {
     diagReasonRef.current = 'start-over';
     // Android recovery: start over clears ONLY the recovery key (never
-    // payment keys — clearRecovery removes exactly one namespaced key).
+    // payment keys — clearRecovery removes exactly one namespaced key),
+    // plus the browser-local held photo file (explicitly, alongside it).
     clearRecovery(sessionStore());
+    void clearPhotoFile();
     setRestoredNotice('');
+    setPhotoRestoredNotice('');
     setGlobalNotice('');
     setStage('LANG');
     setAnswers({});
@@ -2079,6 +2149,13 @@ export default function App() {
               <h2 className="text-3xl font-serif font-semibold text-slate-900">
                 {ui.photoTitle}
               </h2>
+
+              {photoRestoredNotice && (
+                <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-sm text-emerald-900 flex items-start justify-between gap-3">
+                  <span>{photoRestoredNotice}</span>
+                  <button onClick={() => setPhotoRestoredNotice('')} className="font-medium shrink-0" aria-label="Dismiss">×</button>
+                </div>
+              )}
 
               <div className="bg-indigo-50 rounded-xl p-4 flex items-start space-x-3 border border-indigo-100">
                 <Info className="w-5 h-5 text-indigo-600 flex-shrink-0 mt-0.5" />
