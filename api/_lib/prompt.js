@@ -20,6 +20,7 @@
 
 import { legalHardRules } from './legal.js';
 import { NO_ADVERSE_INFERENCE_PRINCIPLE, getNotApplicableReasons } from './evidence.js';
+import { RESIDENCE_NOT_PROVIDED } from './privacy.js';
 
 export const OUTPUT_SCHEMA_KEYS = [
   'readinessSummary',
@@ -148,7 +149,10 @@ HARD RULES:
   BY DESIGN (the exact date is generalized for privacy): state the year
   and band, and never list the specific entry date as missing. Residence
   is given at country level BY DESIGN: state the country, and never list
-  city, state, or ZIP as missing model inputs.
+  city, state, or ZIP as missing model inputs. A residence value of "Not
+  provided" means the applicant left the questionnaire's country default
+  unchanged: never describe residence as unknown, missing, or unclear, and
+  never list it in missingInformation or uncertaintyNotes.
 - ARREST HISTORY: the disposition-certificates answer states only whether the applicant HAS disposition certificates. It never establishes whether arrests occurred. Never write that the applicant has no arrest history, has no arrests, or has never been arrested unless the arrest-history answer is explicitly "no". If arrest history is unknown, say it is unknown.
 - has_arrests records ONLY whether disposition certificates are held. When Prior arrests is "no", the certificates question is not asked, so has_arrests is unknown BY DESIGN — never treat that as an ambiguity, contradiction, or uncertainty about whether arrests occurred.
 - ${NO_ADVERSE_INFERENCE_PRINCIPLE}
@@ -180,7 +184,7 @@ ${legalHardRules().split('\n').map(l => '  * ' + l).join('\n')}
 <applicant_data>
 Case type: ${min.caseType}
 Country of origin: ${min.countryOfOrigin}
-Country of residence: ${min.residenceCountry || 'Unknown'}
+Country of residence: ${min.residenceCountry === RESIDENCE_NOT_PROVIDED ? 'Not provided (the questionnaire country field was left at its default; this is not a gap and not unknown)' : (min.residenceCountry || 'Unknown')}
 Country of birth: ${min.countryOfBirth || 'Unknown'}
 Citizenship: ${min.citizenship || 'Unknown'}
 Marital status: ${min.maritalStatus || 'unknown'}

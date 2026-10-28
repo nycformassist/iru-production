@@ -10,6 +10,11 @@
 
 export const MAX_BODY_BYTES = 32 * 1024;
 export const MAX_NARRATIVE_CHARS = 1000;
+// Sentinel for a residence country the applicant never changed from the
+// questionnaire's default. It is NOT "Unknown": the client record shows the
+// default, and the model must neither list it as missing nor call it
+// unknown (2026-10-27 residence-contradiction fix, C1 A+B).
+export const RESIDENCE_NOT_PROVIDED = 'Not provided';
 export const MAX_TEXT_FIELD_CHARS = 200;
 export const MAX_STARTERS = 20;
 
@@ -106,7 +111,7 @@ export function minimizeForModel(answers, narrativeStarters) {
   return {
     applicantRef: 'the applicant', // no name, no A-number, no zip
     countryOfOrigin: answers.country_of_origin || 'Unknown',
-    residenceCountry: answers.residence_country || 'Unknown',
+    residenceCountry: answers.residence_country || RESIDENCE_NOT_PROVIDED,
     countryOfBirth: answers.country_of_birth || 'Unknown',
     citizenship: answers.citizenship || 'Unknown',
     entryYear: entryYear.year,               // e.g. "2023" or "Unknown"

@@ -336,6 +336,12 @@ export default function App() {
   // UI strings are translated for every supported language (EN/ES/ZH/HT/AR);
   // t() falls back to the given English string only if a key is ever missing.
   const t = (key: string, fallback: string) => (ui[key] as string) || fallback;
+  // The location dropdown DISPLAYS 'US' but writes residence_country only on
+  // change. The fact record therefore carries a default the applicant never
+  // selected; label it as such instead of "You provided this" (C1 A). A
+  // correction (source 'correction') or a real selection clears the label.
+  const isDefaultedResidence = (f: any) =>
+    !!f && f.id === 'residence_country' && f.source === 'answer' && !answers.residence_country;
 
   // ── Android recovery: session-scoped restore + save ──────────────────
   // Boot restore runs once, AFTER the diagnostics boot effect (so boot is
@@ -1420,7 +1426,7 @@ export default function App() {
       city_of_birth: 'City of birth',
       passport_number: 'Passport number (from document)', a_number: 'A-Number (from document)',
     };
-    const factStatusLabel = (f: any) => f.status === 'conflicting' ? t('pktFactStatusConflicting', 'Sources disagree — needs your decision')
+    const factStatusLabel = (f: any) => isDefaultedResidence(f) ? t('factStatusDefault', 'Form default — you did not select this') : f.status === 'conflicting' ? t('pktFactStatusConflicting', 'Sources disagree — needs your decision')
       : f.status === 'extracted-unconfirmed' ? t('pktFactStatusExtracted', 'From your document — not yet confirmed by you')
       : f.source === 'document' ? t('pktFactStatusDocConfirmed', 'From your document — confirmed by you') : t('pktFactStatusReported', 'Provided by you');
     const factRows = factRecord ? Object.values(factRecord.facts)
@@ -2281,7 +2287,7 @@ export default function App() {
                         <span className="font-semibold text-slate-800 text-sm">{(ui.factLabels && ui.factLabels[f.id]) || FACT_LABELS[f.id]}</span>
                         <span className="text-slate-700 text-sm">{String(f.value)}</span>
                         <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${f.status === 'conflicting' ? 'bg-red-100 text-red-800' : f.status === 'extracted-unconfirmed' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600'}`}>
-                          {f.status === 'conflicting' ? t('factStatusConflicting', 'Sources disagree') : f.status === 'extracted-unconfirmed' ? t('factStatusExtracted', 'From your document — please confirm') : t('factStatusReported', 'You provided this')}
+                          {isDefaultedResidence(f) ? t('factStatusDefault', 'Form default — you did not select this') : f.status === 'conflicting' ? t('factStatusConflicting', 'Sources disagree') : f.status === 'extracted-unconfirmed' ? t('factStatusExtracted', 'From your document — please confirm') : t('factStatusReported', 'You provided this')}
                         </span>
                       </div>
                       {f.status === 'extracted-unconfirmed' && (
