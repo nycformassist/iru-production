@@ -33,6 +33,13 @@ import {
   loadPickerMarker,
   sessionStore,
 } from './assessmentRecovery';
+import {
+  filterPhase2Questions,
+  pruneSkippedAnswers,
+  isMarriageNotApplicable,
+  isRelationshipNotApplicable,
+  scopedQuestionText,
+} from './questionGating';
 
 import { LANGUAGES, UI_LABELS, PHASE_1_QUESTIONS, TRIAGE_QUESTION, PHASE_2_QUESTIONS, PHASE_3_QUESTIONS, NYC_RESOURCES, CONSULATES, PROXIES, NARRATIVE_STARTERS, USCIS_FORMS, FEE_SCHEDULE_AS_OF, buildExecutiveSummary } from './constants';
 
@@ -434,6 +441,17 @@ export default function App() {
     return () => clearTimeout(handle);
   }, [stage, answers, photoEvidenceKey, lang]);
 
+  // Live gating of the marriage / relationship questions (owner ruling
+  // 2026-10-28). When marital status or case type changes (or a saved
+  // snapshot is restored), answers to questions that are now skipped are
+  // CLEARED, so no stale yes/no reaches the packet, checklist, score, fact
+  // record or model prompt. pruneSkippedAnswers returns the same object when
+  // nothing changes, so this never loops. Single -> married reasks both
+  // questions (the answers were cleared); married -> single removes them.
+  useEffect(() => {
+    setAnswers((prev: Record<string, string>) => pruneSkippedAnswers(prev));
+  }, [answers.marital_status, answers.case_type]);
+
   /**
    * Build the canonical fact record from the interview answers and any
    * document extraction. Answers are consumer-reported; extracted values
@@ -530,7 +548,10 @@ export default function App() {
   const getQuestionsForStage = () => {
     if (stage === 'PHASE1') return PHASE_1_QUESTIONS;
     if (stage === 'TRIAGE') return [TRIAGE_QUESTION];
-    if (stage === 'PHASE2') return PHASE_2_QUESTIONS[answers.case_type || 'asylum'] || [];
+    // Marriage / relationship evidence is gated by marital status + case type
+    // (owner ruling 2026-10-28): see src/questionGating.ts. Navigation and the
+    // question counter use this FILTERED list.
+    if (stage === 'PHASE2') return filterPhase2Questions(PHASE_2_QUESTIONS[answers.case_type || 'asylum'] || [], answers);
     // Disposition question only after indicated prior arrests: the
     // certificates question is never shown to someone who has not said
     // they were arrested (owner directive 2026-10-27, fix #3).
@@ -580,7 +601,7 @@ export default function App() {
     } else {
       if (stage === 'PHASE3') {
         setStage('PHASE2');
-        setCurrentQ((PHASE_2_QUESTIONS[answers.case_type || 'asylum'] || []).length - 1);
+        setCurrentQ(Math.max(0, filterPhase2Questions(PHASE_2_QUESTIONS[answers.case_type || 'asylum'] || [], answers).length - 1));
       } else if (stage === 'PHASE2') {
         setStage('TRIAGE');
         setCurrentQ(0);
@@ -1109,10 +1130,10 @@ export default function App() {
   // a missing item that cannot apply is never a demand. Provided ('yes')
   // answers always win over N/A at the call sites.
   const notApplicableReason = (key: string): string | null => {
-    if (key === 'has_marriage_cert' && answers.marital_status === 'single') {
+    if (key === 'has_marriage_cert' && isMarriageNotApplicable(answers)) {
       return t('pktNaSingle', 'No marriage to certify (single status reported).');
     }
-    if (key === 'has_proof_of_relationship' && answers.marital_status === 'single') {
+    if (key === 'has_proof_of_relationship' && isRelationshipNotApplicable(answers)) {
       return t('pktNaRelationship', 'No relationship to document (single status reported).');
     }
     const entryYear = answers.entry_date ? Number(String(answers.entry_date).slice(0, 4)) : NaN;
@@ -1796,13 +1817,13 @@ export default function App() {
 
             <div className="space-y-8">
               <h2 className="text-3xl font-serif font-semibold text-slate-900">
-                {question.labels[lang as keyof typeof question.labels]}
+                {scopedQuestionText(question as any, answers, lang).label}
               </h2>
 
               <div className="bg-indigo-50 rounded-xl p-4 flex items-start space-x-3 border border-indigo-100">
                 <Shield className="w-5 h-5 text-indigo-600 flex-shrink-0 mt-0.5" />
                 <p className="text-sm text-indigo-900 leading-relaxed font-medium">
-                  {question.guardianTips[lang as keyof typeof question.guardianTips]}
+                  {scopedQuestionText(question as any, answers, lang).tip}
                 </p>
               </div>
 

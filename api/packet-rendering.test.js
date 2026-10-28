@@ -187,7 +187,10 @@ describe('not-applicable: single status and relationship proof (2026-10-27)', ()
     assert.ok(!keys.includes('has_proof_of_relationship'), 'relationship must stay applicable when married');
   });
   it('client mirror renders the relationship reason for single applicants', () => {
-    assert.ok(app.includes("key === 'has_proof_of_relationship' && answers.marital_status === 'single'"), 'App.tsx mirror must cover relationship for singles');
+    // 2026-10-28: the unconditional single => N/A rule became context-aware
+    // (single AND not a family petition). The mirror now delegates to the
+    // shared gating module; the rule itself is tested in question-gating.test.js.
+    assert.ok(app.includes("key === 'has_proof_of_relationship' && isRelationshipNotApplicable(answers)"), 'App.tsx mirror must cover relationship for singles via the shared gating rule');
     assert.ok(app.includes('pktNaRelationship'), 'App.tsx must reference the relationship N/A string key');
   });
 });

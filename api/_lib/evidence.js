@@ -653,16 +653,28 @@ import { matchReviewsToGap } from './vision.js';
  * item that cannot apply to this applicant is never a gap and never a
  * demand. Provided ('yes') answers always win over N/A downstream.
  * - Marriage certificate: single marital status (no marriage to certify).
+ * - Relationship proof: single AND not a family-based case (2026-10-28).
  * - Green card / tax transcripts: entered in the current calendar year
  *   (entryRecency '<1y'), i.e. a recent entrant.
  * Returns [{ key, reason }] in EN; the client mirrors these rules.
  */
+/** Case types for which a SINGLE applicant is still asked about relationship proof (mirror of src/questionGating.ts). */
+export const RELATIONSHIP_ASKED_WHEN_SINGLE_FOR = ['family'];
+
 export function getNotApplicableReasons(min) {
   if (!min) return [];
   const out = [];
   if (min.maritalStatus === 'single') {
+    // Marriage certificate: always marriage-scoped, so N/A in every context.
     out.push({ key: 'has_marriage_cert', reason: 'No marriage to certify (single status reported).' });
-    out.push({ key: 'has_proof_of_relationship', reason: 'No relationship to document (single status reported).' });
+    // Relationship proof: context-aware (owner ruling 2026-10-28). In a
+    // family-based petition it is core family-relationship evidence a single
+    // applicant can still have, so it stays applicable there. Mirror of
+    // src/questionGating.ts (RELATIONSHIP_ASKED_WHEN_SINGLE_FOR); a missing
+    // caseType defaults to 'asylum' exactly as the questionnaire does.
+    if (!RELATIONSHIP_ASKED_WHEN_SINGLE_FOR.includes(min.caseType || 'asylum')) {
+      out.push({ key: 'has_proof_of_relationship', reason: 'No relationship to document (single status reported).' });
+    }
   }
   if (min.entryRecency === '<1y') {
     out.push({ key: 'has_green_card', reason: 'Recent entrant — a green card is not expected at this stage.' });
