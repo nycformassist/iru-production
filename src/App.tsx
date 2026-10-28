@@ -2323,6 +2323,7 @@ export default function App() {
               {pickerRecreatedNotice && !photoFile && (
                 <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-sm text-amber-900 space-y-3" role="status">
                   <p className="m-0">{pickerRecreatedNotice}</p>
+                  <p className="m-0 text-amber-800">{t('pickerRecreatedWhy', 'This is a limit of how some phones return from the photo picker. It is not something you did wrong.')}</p>
                   <label htmlFor="iru-photo-input" className="inline-block px-4 py-2 rounded-xl bg-indigo-600 text-white font-medium cursor-pointer">
                     {t('pickerRetry', 'Pick photo again')}
                   </label>
