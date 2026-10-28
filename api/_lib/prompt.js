@@ -19,7 +19,7 @@
  */
 
 import { legalHardRules } from './legal.js';
-import { NO_ADVERSE_INFERENCE_PRINCIPLE, getNotApplicableReasons } from './evidence.js';
+import { NO_ADVERSE_INFERENCE_PRINCIPLE, getNotApplicableReasons, EVIDENCE_KEY_SEMANTICS } from './evidence.js';
 import { RESIDENCE_NOT_PROVIDED } from './privacy.js';
 
 export const OUTPUT_SCHEMA_KEYS = [
@@ -45,7 +45,7 @@ const LANG_NAMES = {
  * @param {Array} imageReviews validated image-review findings (lib/vision.js); optional
  */
 export function buildPrompt(min, lang = 'EN', gaps = [], imageReviews = [], documentFacts = []) {
-  const EVIDENCE_LABELS = { has_arrests: 'has_arrests (disposition certificates held, NOT arrest history)' };
+  const EVIDENCE_LABELS = { has_arrests: EVIDENCE_KEY_SEMANTICS.has_arrests.promptLabel };
   const evidenceLines = Object.entries(min.evidence)
     .map(([k, v]) => `- ${EVIDENCE_LABELS[k] || k}: ${v}`)
     .join('\n');

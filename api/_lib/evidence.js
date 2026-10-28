@@ -773,6 +773,25 @@ export function nextActionFor(key, answer, lang = 'EN') {
  * account. This principle is encoded here (not just in prose) so prompts,
  * tests, and gap records all share one statement of it.
  */
+/**
+ * C5 — naming-collision guard. `has_prior_arrests` records whether arrests
+ * occurred; `has_arrests` records ONLY whether disposition certificates are
+ * held. The second reads as "has arrests" to any reader, including the model
+ * (which once manufactured an "ambiguity" between them). The key is NOT
+ * renamed: a rename would orphan stored recovery payloads and silently drop
+ * the answer from analysis during a client/server version skew (the server
+ * allowlist drops unknown keys). Instead, the meaning lives in ONE place and
+ * api/c5-key-semantics.test.js fails if any prompt line or question text
+ * stops carrying it.
+ */
+export const EVIDENCE_KEY_SEMANTICS = Object.freeze({
+  has_arrests: Object.freeze({
+    meaning: 'disposition certificates held, NOT arrest history',
+    promptLabel: 'has_arrests (disposition certificates held, NOT arrest history)',
+    gatedBy: 'has_prior_arrests',
+  }),
+});
+
 export const NO_ADVERSE_INFERENCE_PRINCIPLE =
   'The absence of corroborating evidence does not, by itself, disprove the ' +
   'applicant\u2019s account. Missing documents are gaps to address — through ' +
