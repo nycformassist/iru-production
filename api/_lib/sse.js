@@ -56,18 +56,22 @@ export async function* sseEvents(reader) {
 
 /**
  * Consume an /api/analyze stream to completion.
- * Returns { assessment, aiUnavailable } with the client's semantics:
- * the last terminal event carrying an assessment wins; any terminal
- * event flagged ai_unavailable marks the result as the fallback.
+ * Returns { assessment, aiUnavailable, integrityFlags } with the client's
+ * semantics: the last terminal event carrying an assessment wins; any
+ * terminal event flagged ai_unavailable marks the result as the fallback;
+ * integrityFlags (C2) are the record-consistency field ids from the
+ * terminal event, filtered to strings.
  */
 export async function readAnalyzeStream(reader) {
   let assessment = null;
   let aiUnavailable = false;
+  let integrityFlags = [];
   for await (const event of sseEvents(reader)) {
     if (event && (event.type === 'done' || event.type === 'error')) {
       if (event.assessment) assessment = event.assessment;
       if (event.status === 'ai_unavailable') aiUnavailable = true;
+      if (Array.isArray(event.integrityFlags)) integrityFlags = event.integrityFlags.filter(f => typeof f === 'string');
     }
   }
-  return { assessment, aiUnavailable };
+  return { assessment, aiUnavailable, integrityFlags };
 }

@@ -17,6 +17,7 @@ import { GoogleGenAI } from "@google/genai";
 import { sanitizeAnswers, minimizeForModel, droppedFieldNames, MAX_BODY_BYTES } from "./_lib/privacy.js";
 import { buildPrompt, validateModelOutput, fallbackAssessment } from "./_lib/prompt.js";
 import { buildGapRecords } from "./_lib/evidence.js";
+import { checkOutputConsistency } from "./_lib/consistency.js";
 import { validateImageReviews } from "./_lib/vision.js";
 import { sanitizeFactRecord } from "./_lib/facts.js";
 import { createLimiter, clientIp } from "./_lib/ratelimit.js";
@@ -229,6 +230,22 @@ export default async function handler(req, res) {
 
     const validated = validateModelOutput(fullText);
     const assessment = validated.ok ? validated.data : fallbackAssessment(min, gapsForFallback, validatedReviews.reviews, lang);
+    // C2: deterministic record-consistency check. FLAG, never rewrite: the
+    // assessment is delivered unchanged; the payload carries field ids only
+    // (no model text, no record values) and the log carries the same.
+    const consistency = validated.ok
+      ? checkOutputConsistency(min, validated.data, lang)
+      : { flags: [], skipped: null };
+    const integrityFlags = [...new Set(consistency.flags.map(f => f.field))];
+    if (integrityFlags.length || consistency.skipped) {
+      console.log(JSON.stringify({
+        event: 'iru_analyze_consistency',
+        requestId,
+        fields: integrityFlags,
+        rules: [...new Set(consistency.flags.map(f => f.rule))],
+        skipped: consistency.skipped,
+      }));
+    }
     if (validated.sanitized) {
       // Privacy-safe observability only: no model text, no intake data.
       // A verification claim was rewritten to neutral language instead
@@ -250,7 +267,7 @@ export default async function handler(req, res) {
     }
     // Include ai_unavailable status when validation fails (fallback used)
     const status = validated.ok ? undefined : "ai_unavailable";
-    send({ type: "done", status, assessment });
+    send({ type: "done", status, assessment, ...(integrityFlags.length ? { integrityFlags } : {}) });
     res.end();
   } catch (err) {
     // Structured, privacy-safe logging. Never log intake answers, PII, or prompt content.

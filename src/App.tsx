@@ -173,6 +173,9 @@ export default function App() {
   const [copied, setCopied] = useState(false);
   const [assessment, setAssessment] = useState<any>(null);
   const [aiUnavailable, setAiUnavailable] = useState(false);
+  // C2: record-consistency field ids the server flagged on the model review
+  // (ids only; the assessment itself is never altered).
+  const [integrityFlags, setIntegrityFlags] = useState<string[]>([]);
   const [isNycCoverage, setIsNycCoverage] = useState(true);
   // Optional one-time document photo review (never persisted server-side).
   const [photoFile, setPhotoFile] = useState<File | null>(null);
@@ -687,6 +690,7 @@ export default function App() {
     setReviewError('');
     setAssessment(null);
     setAiUnavailable(false);
+    setIntegrityFlags([]);
     setIsNycCoverage(true);
     setResourceResult(null);
     setFactRecord(null);
@@ -1028,12 +1032,11 @@ export default function App() {
       // chunks: the terminal event carries the whole assessment on one
       // long line, and a chunk boundary inside it previously discarded
       // it whole — the analysis silently vanished in real browsers (D2).
-      const { assessment: finalAssessment, aiUnavailable: streamAiUnavailable } =
+      const { assessment: finalAssessment, aiUnavailable: streamAiUnavailable, integrityFlags: streamFlags } =
         await readAnalyzeStream(response.body!.getReader());
-      if (streamAiUnavailable) {
-        // AI failed; fallback assessment provided but marked as unavailable
-        setAiUnavailable(true);
-      }
+      // AI failed: fallback marked unavailable. A good re-run clears a stale flag.
+      if (streamAiUnavailable) { setAiUnavailable(true); } else { setAiUnavailable(false); }
+      setIntegrityFlags(streamFlags || []);
       setAssessment(finalAssessment);
       // The regenerated assessment was computed from the current
       // record — including every overlaid correction — so the
@@ -1541,6 +1544,7 @@ export default function App() {
         ` : ''}
         <div class="section">
           <h3 class="section-title font-serif">${escapeHtml(ui.readinessReview || 'Readiness Review')}</h3>
+          ${integrityFlags.length > 0 ? `<p style="font-size:0.875rem;color:#78350f;background-color:#fffbeb;border:1px solid #fde68a;border-radius:0.5rem;padding:0.75rem;margin:0 0 0.75rem 0;">${escapeHtml(t('pktIntegrityNote', 'Some statements in this review may not match the information on your record. Please check “Your Information on Record” and point out any difference to a qualified legal professional.'))}</p>` : ''}
           <p class="exec-summary font-serif" style="white-space: pre-wrap;">${escapeHtml(renderAssessmentText(assessment))}</p>
         </div>
         ${hasNarrative ? `
@@ -2234,6 +2238,9 @@ export default function App() {
                     {ui.readinessScore}: {readinessPercent}% ({score} of {total} evidence items) <span className="font-normal text-xs">{t('pktHeuristicNote', '(approximate document-completeness heuristic — not a validated metric)')}</span>
                   </div>
                   <h3 className="text-lg font-serif font-bold text-slate-900 mb-2 mt-6">{ui.readinessReview || 'Readiness Review'}</h3>
+                  {integrityFlags.length > 0 && (
+                    <p className="text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-xl p-3 mb-3" data-testid="integrity-note">{t('pktIntegrityNote', 'Some statements in this review may not match the information on your record. Please check “Your Information on Record” and point out any difference to a qualified legal professional.')}</p>
+                  )}
                   <p className="text-base text-slate-800 italic bg-slate-50 border border-slate-200 rounded-xl p-4" style={{ whiteSpace: 'pre-wrap' }}>{renderAssessmentText(assessment)}</p>
                 </div>
               );
