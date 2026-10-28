@@ -184,6 +184,75 @@ export function getNavigationInfo(
   };
 }
 
+/**
+ * Persisted diagnostics key (2026-10-28, brief section A). The
+ * in-memory ring buffer resets on every boot, which is exactly the
+ * boot that needs the previous boot's log when a page is recreated
+ * during the picker. Persisting the buffer synchronously in
+ * sessionStorage on every record lets the restore boot prepend the
+ * previous boot's events (labelled previousBoot in their detail) so
+ * the debug panel can show "picker-open with no picker-change".
+ * Payload is privacy-safe by construction: callers pass only stage
+ * names, event names, booleans, counters, MIME classes, size buckets,
+ * HTTP statuses, and error NAMES — never file names, contents,
+ * answers, addresses, messages, or stacks. This function additionally
+ * drops any detail value that is not a string/number/boolean, so a
+ * future caller cannot smuggle sensitive data into the persisted log.
+ */
+export const DIAGNOSTIC_PERSIST_KEY = 'iru_diagnostics_v1';
+
+export function persistDiagnosticEvents(
+  storage: StorageLike | null | undefined,
+  events: DiagnosticEvent[],
+): void {
+  if (!storage) return;
+  try {
+    const safe = events.slice(-DIAGNOSTIC_EVENT_LIMIT).map((e) => {
+      const detail: DiagnosticDetail = {};
+      const src = e.detail || {};
+      for (const key of Object.keys(src)) {
+        const v = src[key];
+        if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
+          detail[key] = v;
+        }
+      }
+      return { ts: typeof e.ts === 'number' ? e.ts : 0, type: typeof e.type === 'string' ? e.type : 'unknown', detail };
+    });
+    storage.setItem(DIAGNOSTIC_PERSIST_KEY, JSON.stringify(safe));
+  } catch {
+    // Persisting must never break recording.
+  }
+}
+
+/** Load persisted events, or [] when absent/malformed. Never throws. */
+export function loadPersistedDiagnostics(
+  storage: StorageLike | null | undefined,
+): DiagnosticEvent[] {
+  if (!storage) return [];
+  try {
+    const raw = storage.getItem(DIAGNOSTIC_PERSIST_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as Array<Partial<DiagnosticEvent>>;
+    if (!Array.isArray(parsed)) return [];
+    const out: DiagnosticEvent[] = [];
+    for (const e of parsed) {
+      if (typeof e.type !== 'string') continue;
+      const detail: DiagnosticDetail = {};
+      const src = (e.detail || {}) as Record<string, unknown>;
+      for (const key of Object.keys(src)) {
+        const v = src[key];
+        if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
+          detail[key] = v;
+        }
+      }
+      out.push({ ts: typeof e.ts === 'number' ? e.ts : 0, type: e.type, detail });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
 /** Bounded ring buffer: keeps only the latest `limit` events. */
 export function createEventLog(limit: number = DIAGNOSTIC_EVENT_LIMIT): DiagnosticLog {
   const events: DiagnosticEvent[] = [];
@@ -271,7 +340,9 @@ export function installDiagnosticListeners(
  * overlay only when ?debug=1 is present. record() auto-refreshes the
  * overlay when mounted.
  */
-export function createDiagnostics(): DiagnosticsHandle {
+export function createDiagnostics(
+  persistStorage?: StorageLike | null,
+): DiagnosticsHandle {
   const log = createEventLog(DIAGNOSTIC_EVENT_LIMIT);
   let overlay: {
     element: unknown;
@@ -283,6 +354,15 @@ export function createDiagnostics(): DiagnosticsHandle {
     log,
     record: (type: string, detail: DiagnosticDetail = {}) => {
       log.record(type, detail);
+      // Persist synchronously on every record when a storage was
+      // supplied (the app passes sessionStorage). No-arg callers
+      // (including the node test harness) keep the old in-memory-only
+      // behaviour. Persistence never throws into recording.
+      try {
+        if (persistStorage) persistDiagnosticEvents(persistStorage, log.events);
+      } catch {
+        /* ignore */
+      }
       try {
         if (overlay) overlay.render();
       } catch {

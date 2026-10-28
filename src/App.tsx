@@ -20,10 +20,21 @@ import {
   getNavigationInfo,
   installDiagnosticListeners,
   safeStorage,
+  loadPersistedDiagnostics,
   DIAGNOSTIC_BOOT_SESSION_KEY,
   DIAGNOSTIC_BOOT_TOTAL_KEY,
   summarizeFileForDiagnostics,
 } from './diagnostics';
+
+// Picker-attempt marker (2026-10-28, brief sections A/C): a synchronous
+// sessionStorage marker written at onClick before the picker opens, so
+// a page recreation during the picker is visible on the restore boot
+// even though the 72689dc photo hold never ran (change never fired).
+import {
+  markPickerOpened,
+  readPickerAttempt,
+  clearPickerAttempt,
+} from './pickerAttemptStore';
 
 // Android recovery: session-scoped restore (see src/assessmentRecovery.ts).
 import {
@@ -201,6 +212,16 @@ export default function App() {
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoEvidenceKey, setPhotoEvidenceKey] = useState('');
   const [photoRestoredNotice, setPhotoRestoredNotice] = useState('');
+  // Recreation notice (2026-10-28, brief section C): shown only when a
+  // picker attempt marker exists on boot AND no held file was found —
+  // i.e. the page was recreated during the picker, before the photo
+  // arrived. Attempt count itself is diagnostics-only, never shown here.
+  const [pickerRecreatedNotice, setPickerRecreatedNotice] = useState('');
+  // Set by the boot restore effect when the recovery snapshot says the
+  // picker was open on PHOTO. Read by the photo restore effect to
+  // decide between the specific recreation notice and the generic one,
+  // even if the sessionStorage marker itself did not survive the kill.
+  const pickerRecreatedCandidateRef = useRef(false);
   const photoRestoreAttemptedRef = useRef(false);
   const [imageReview, setImageReview] = useState<any>(null);
   // Upload checklist (#10): every uploaded document in this session,
@@ -271,8 +292,10 @@ export default function App() {
       // in the uploads checklist; the blob is no longer needed).
       clearRecovery(sessionStore());
       void clearPhotoFile();
+      clearPickerAttempt();
       setRestoredNotice('');
       setPhotoRestoredNotice('');
+      setPickerRecreatedNotice('');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stage]);
@@ -287,7 +310,11 @@ export default function App() {
   // counters) — see src/diagnostics.ts privacy contract.
   const diagnosticsRef = useRef<any>(null);
   if (diagnosticsRef.current === null) {
-    diagnosticsRef.current = createDiagnostics();
+    // Pass sessionStorage so every record persists synchronously across
+    // boots (brief section A). In the node harness sessionStorage is
+    // absent and safeStorage returns null, preserving in-memory-only
+    // behaviour for tests.
+    diagnosticsRef.current = createDiagnostics(safeStorage((() => { try { return sessionStorage; } catch { return null; } })()));
   }
   const diagReasonRef = useRef('navigation');
   const diagBootDoneRef = useRef(false);
@@ -312,6 +339,23 @@ export default function App() {
     diag.navigationType = nav.type;
     diag.wasDiscarded = nav.wasDiscarded;
     diag.record('boot', { stage, navigationType: nav.type, wasDiscarded: nav.wasDiscarded, bootSession: diag.bootSessionCount });
+    // Persisted diagnostics (brief section A): prepend the previous
+    // boot's events, labelled previousBoot in their detail, so the
+    // debug panel can show a previous-boot picker-open with no
+    // picker-change after it. Then record a feature-detect only
+    // (no API call) for showOpenFilePicker, which settles empirically
+    // on the actual device whether the File System Access picker
+    // route is even available on that browser.
+    try {
+      const prev = loadPersistedDiagnostics(sessionStore);
+      if (prev.length > 0) {
+        diag.log.events.unshift(...prev.map((e: any) => ({ ...e, detail: { ...(e.detail || {}), previousBoot: true } })));
+      }
+    } catch { /* persisted diagnostics are best-effort */ }
+    try {
+      const hasPickerApi = typeof (globalThis as any).showOpenFilePicker === 'function';
+      diag.record('picker-api', { showOpenFilePicker: hasPickerApi });
+    } catch { /* feature-detect must never break boot */ }
     const cleanups: Array<() => void> = [];
     try {
       cleanups.push(installDiagnosticListeners(window, diag.record, ['pagehide', 'pageshow', 'focus', 'blur', 'popstate']));
@@ -403,6 +447,12 @@ export default function App() {
       setCurrentQ(0);
       setStage(restored.stage);
       if (restored.pickerOpened && restored.stage === 'PHOTO') {
+        // Candidate for the specific recreation notice: the photo
+        // restore effect decides, once it knows whether a held file
+        // exists. If a held file is found, the restored notice wins
+        // and this candidate is dropped; if not, the specific notice
+        // replaces the generic one below.
+        pickerRecreatedCandidateRef.current = true;
         setRestoredNotice(t('recoveryPicker', 'Your assessment progress was restored. Please select the document again.'));
       } else {
         setRestoredNotice(t('recoveryRestored', 'Your assessment progress was restored.'));
@@ -636,24 +686,50 @@ export default function App() {
   // browser-local store holds a picked file, it becomes the current file
   // (name shown in the dropzone, Review enabled) and the stale
   // "select the document again" boot notice is replaced with a restored
-  // notice. If no file is held, the boot notice is left as-is. This
-  // effect never runs after a user-picked file (photoFile non-null),
-  // never runs after Start Over in the same mount clears the store
-  // (the load then returns null), and never clears anything itself.
+  // notice, and the picker-attempt marker is cleared defensively (the
+  // pick did resolve, after all). If NO file is held AND a picker
+  // attempt marker exists (or the boot restore snapshot said the
+  // picker was open on PHOTO), the page was recreated DURING the
+  // picker, before the photo arrived — the 72689dc hold could not
+  // run, because change never fired. In that case the generic boot
+  // notice is replaced with the specific recreation notice + retry
+  // control (brief section C). If neither marker exists, the generic
+  // boot notice is left as-is. This effect never runs after a
+  // user-picked file (photoFile non-null), and never runs after Start
+  // Over in the same mount clears the store (the load returns null,
+  // and the marker was cleared by Start Over, so no recreation notice
+  // can appear from a cleared assessment).
   useEffect(() => {
     if (stage !== 'PHOTO' || photoFile || photoRestoreAttemptedRef.current) return;
     photoRestoreAttemptedRef.current = true;
     let cancelled = false;
     loadPhotoFile().then((stored) => {
-      if (cancelled || !stored || !stored.blob) return;
+      if (cancelled) return;
+      if (stored && stored.blob) {
+        try {
+          const file = new File([stored.blob], stored.name || 'document', { type: stored.type || 'image/jpeg' });
+          setPhotoFile(file);
+          setPhotoEvidenceKey((prev: string) => prev || stored.evidenceKey || '');
+          setRestoredNotice('');
+          setPhotoRestoredNotice(t('photoRestored', 'Your selected document was restored after the page was recreated. You can review it now.'));
+          clearPickerAttempt();
+          setPickerRecreatedNotice('');
+        } catch {
+          // A malformed held record must never break the photo step.
+        }
+        return;
+      }
+      // No held file: recreation during the picker, if a marker says so.
       try {
-        const file = new File([stored.blob], stored.name || 'document', { type: stored.type || 'image/jpeg' });
-        setPhotoFile(file);
-        setPhotoEvidenceKey((prev: string) => prev || stored.evidenceKey || '');
-        setRestoredNotice('');
-        setPhotoRestoredNotice(t('photoRestored', 'Your selected document was restored after the page was recreated. You can review it now.'));
+        const attempt = readPickerAttempt();
+        if (attempt || pickerRecreatedCandidateRef.current) {
+          const diag = diagnosticsRef.current;
+          if (diag) diag.record('picker-recreation-detected', { attemptCount: attempt ? attempt.attemptCount : 1, stage: 'PHOTO' });
+          setRestoredNotice('');
+          setPickerRecreatedNotice(t('pickerRecreated', 'The page was recreated while the picker was open, before your photo arrived. Your answers are saved. Please pick the photo again.'));
+        }
       } catch {
-        // A malformed held record must never break the photo step.
+        // Marker read failure falls back to the generic boot notice.
       }
     }).catch(() => {
       // loadPhotoFile never throws by contract; this is defence in depth.
@@ -674,11 +750,19 @@ export default function App() {
       const picked = e.target.files && e.target.files[0] ? e.target.files[0] : null;
       setPhotoFile(e.target.files && e.target.files[0] ? e.target.files[0] : null);
       if (picked) {
+        // The pick resolved, so the attempt marker is no longer needed
+        // (brief section A clear rule), and any recreation notice from
+        // a previous boot is superseded by the landed file.
+        clearPickerAttempt();
+        setPickerRecreatedNotice('');
         // Browser-local hold so a later page recreation restores this
         // file. Fire-and-forget: savePhotoFile never throws and never
         // blocks the UI; a failed hold leaves the in-state file usable
         // in this page. Choosing another file replaces the held file.
-        // An empty change (cancel) does not touch the held file.
+        // An empty change (cancel) does not touch the held file, and
+        // does not clear the marker on its own — cancellation clears
+        // via onCancel, which is the explicit cancel path. This keeps
+        // the clear rule consistent: picked => clear, cancelled => clear.
         void savePhotoFile(picked, photoEvidenceKey);
         setPhotoRestoredNotice('');
       }
@@ -785,8 +869,10 @@ export default function App() {
     // plus the browser-local held photo file (explicitly, alongside it).
     clearRecovery(sessionStore());
     void clearPhotoFile();
+    clearPickerAttempt();
     setRestoredNotice('');
     setPhotoRestoredNotice('');
+    setPickerRecreatedNotice('');
     setGlobalNotice('');
     setStage('LANG');
     setAnswers({});
@@ -2157,6 +2243,21 @@ export default function App() {
                 </div>
               )}
 
+              {/* Recreation notice (brief section C): shown only when
+                  no held file was found and a picker attempt marker
+                  existed on boot. The retry control is a <label>
+                  bound to the same file input, so tapping it opens
+                  the picker through a real user gesture — no
+                  programmatic input.click() is ever attempted. */}
+              {pickerRecreatedNotice && !photoFile && (
+                <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-sm text-amber-900 space-y-3" role="status">
+                  <p className="m-0">{pickerRecreatedNotice}</p>
+                  <label htmlFor="iru-photo-input" className="inline-block px-4 py-2 rounded-xl bg-indigo-600 text-white font-medium cursor-pointer">
+                    {t('pickerRetry', 'Pick photo again')}
+                  </label>
+                </div>
+              )}
+
               <div className="bg-indigo-50 rounded-xl p-4 flex items-start space-x-3 border border-indigo-100">
                 <Info className="w-5 h-5 text-indigo-600 flex-shrink-0 mt-0.5" />
                 <p className="text-sm text-indigo-900 leading-relaxed font-medium">
@@ -2212,19 +2313,28 @@ export default function App() {
                     accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,.pdf"
                     className="sr-only"
                     onClick={() => {
-                      // Save synchronously BEFORE the picker opens, so a
-                      // page discard while the picker is foreground still
+                      // Picker-attempt marker FIRST, synchronously, before
+                      // anything else: sessionStorage.setItem completes
+                      // before the browser hands control to the picker
+                      // intent, so it can survive a page recreation
+                      // during the picker (brief section A). Then save
+                      // synchronously BEFORE the picker opens, so a page
+                      // discard while the picker is foreground still
                       // restores progress. The picker-opened marker tells
                       // boot restore to ask for the document again.
+                      markPickerOpened(photoEvidenceKey || null);
                       saveRecovery(sessionStore(), { stage, language: lang, answers, docType: photoEvidenceKey, pickerOpened: true });
                       const diag = diagnosticsRef.current;
                       if (diag) diag.record('picker-open', { stage });
                     }}
                     onCancel={() => {
-                      // Cancellation is a no-op for assessment state by
-                      // design: it must never reset stage, language,
-                      // answers, or document type. (Do not depend on this
-                      // event firing — recovery covers the no-event case.)
+                      // Cancellation clears the attempt marker (brief
+                      // section A clear rule) but is otherwise a no-op
+                      // for assessment state by design: it must never
+                      // reset stage, language, answers, or document
+                      // type. (Do not depend on this event firing —
+                      // recovery covers the no-event case.)
+                      clearPickerAttempt();
                       const diag = diagnosticsRef.current;
                       if (diag) diag.record('picker-cancel', { stage });
                     }}
