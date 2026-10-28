@@ -1150,6 +1150,7 @@ export default function App() {
     const eff = answersWithCorrections(answers, factRecord);
     let score = 0;
     let total = 0;
+    let alternativesCounted = 0; // C4: items that earned half credit via an alternative
     const check = (key: string) => {
       // Not-applicable items never count against readiness (fix #9);
       // a provided ('yes') answer still counts.
@@ -1162,6 +1163,7 @@ export default function App() {
           const selectedProxies = PROXIES[key].items.filter((i: any) => eff[i.id] === 'yes');
           if (selectedProxies.length > 0) {
             score += 0.5;  // Secondary docs carry half weight vs primary
+            alternativesCounted++;
           }
         }
       }
@@ -1170,7 +1172,7 @@ export default function App() {
     // having an arrest record is not "readiness". It is surfaced separately
     // as a flag to discuss with counsel (see triage table).
     ['has_passport', 'has_i94', 'has_lease', 'has_persecution_proof', 'has_green_card', 'has_tax_transcripts', 'has_marriage_cert', 'has_proof_of_relationship'].forEach(check);
-    return { score, total: total || 1 };
+    return { score, total: total || 1, alternativesCounted };
   };
 
   /**
@@ -1305,7 +1307,7 @@ export default function App() {
 
   const generateHtml = () => {
     const htmlLang = ({ EN: 'en', ES: 'es', ZH: 'zh', HT: 'ht', AR: 'ar' } as Record<string, string>)[lang] || 'en';
-    const { score, total } = calculateReadinessScore();
+    const { score, total, alternativesCounted } = calculateReadinessScore();
     const readinessPercent = Math.round((score / total) * 100);
 
     const resourcesHtml = resources.map((res: ResourceOrg) => {
@@ -1446,6 +1448,7 @@ export default function App() {
     const factsSectionHtml = factRows ? `
         <div class="section">
           <h3 class="section-title font-serif">${escapeHtml(t('factsTitle', 'Your Information on Record'))}</h3>
+          ${factRecord && factRecord.facts && factRecord.facts.entry_date && factRecord.facts.entry_date.value ? `<p style="margin:0 0 0.75rem 0;font-size:0.75rem;color:#64748b;">${escapeHtml(t('pktDateNote', 'Your record shows your exact entry date. For privacy, the entry date you typed is reduced to a year and a general time band (for example, 2026, less than 1 year ago) before the automated review sees it; your city, state, and ZIP code answers are not sent. If you upload a document photo for review, details read from that document can be included in the review.'))}</p>` : ''}
           <table><thead><tr><th>${escapeHtml(ui.item)}</th><th>${escapeHtml(t('pktValueHeader', 'Value'))}</th><th>${escapeHtml(ui.status)}</th></tr></thead><tbody>${factRows}</tbody></table>
           <p style="font-size:0.8rem;color:#64748b;font-style:italic;">${escapeHtml(t('pktFactsNote', 'Document-extracted values show what a document contains; they are not proof of authenticity. Correct anything that is wrong before relying on it.'))}</p>
         </div>` : '';
@@ -1544,6 +1547,7 @@ export default function App() {
           <div style="margin-top: 1rem; display: inline-block; background-color: #eef2ff; color: #4f46e5; padding: 0.5rem 1rem; border-radius: 9999px; font-weight: 700; font-size: 0.875rem;">
             ${ui.readinessScore}: ${readinessPercent}% (${score} of ${total} evidence items) <span style="font-weight:400;font-size:0.75rem;">${escapeHtml(t('pktHeuristicNote', '(approximate document-completeness heuristic — not a validated metric)'))}</span>
           </div>
+          ${alternativesCounted > 0 ? `<p style="margin:0.5rem 0 0 0;font-size:0.75rem;color:#64748b;">${escapeHtml(t('pktAltCreditNote', 'Where you identified an alternative document, it counts as half credit. That reflects what you reported, not a review: IRU has not verified any document.'))}</p>` : ''}
         </div>
         ${factRecord && factRecord.outputsStale ? `
         <div class="section" style="background-color: #fffbeb; border: 1px solid #f59e0b; border-radius: 0.5rem; padding: 1rem 1.5rem;">
@@ -2250,13 +2254,16 @@ export default function App() {
                 printable packet carries, rendered on screen so the
                 header's promise above holds on this page too. ── */}
             {(() => {
-              const { score, total } = calculateReadinessScore();
+              const { score, total, alternativesCounted } = calculateReadinessScore();
               const readinessPercent = Math.round((score / total) * 100);
               return (
                 <div className="mt-8 mb-8 text-left">
                   <div className="inline-block bg-indigo-50 text-indigo-700 px-4 py-2 rounded-full font-bold text-sm">
                     {ui.readinessScore}: {readinessPercent}% ({score} of {total} evidence items) <span className="font-normal text-xs">{t('pktHeuristicNote', '(approximate document-completeness heuristic — not a validated metric)')}</span>
                   </div>
+                  {alternativesCounted > 0 && (
+                    <p className="text-xs text-slate-500 mt-2" data-testid="alt-credit-note">{t('pktAltCreditNote', 'Where you identified an alternative document, it counts as half credit. That reflects what you reported, not a review: IRU has not verified any document.')}</p>
+                  )}
                   <h3 className="text-lg font-serif font-bold text-slate-900 mb-2 mt-6">{ui.readinessReview || 'Readiness Review'}</h3>
                   {integrityFlags.length > 0 && (
                     <p className="text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-xl p-3 mb-3" data-testid="integrity-note">{t('pktIntegrityNote', 'Some statements in this review may not match the information on your record. Please check “Your Information on Record” and point out any difference to a qualified legal professional.')}</p>
@@ -2302,6 +2309,9 @@ export default function App() {
               <div className="mt-8 mb-8 text-left">
                 <h3 className="text-lg font-serif font-bold text-slate-900 mb-2">{t('factsTitle', 'Your Information on Record')}</h3>
                 <p className="text-xs text-slate-500 mb-4">{t('factsIntro', 'Everything IRU is using, where it came from, and what still needs your confirmation.')}</p>
+                {factRecord.facts.entry_date && factRecord.facts.entry_date.value && (
+                  <p className="text-xs text-slate-500 mb-4" data-testid="date-privacy-note">{t('pktDateNote', 'Your record shows your exact entry date. For privacy, the entry date you typed is reduced to a year and a general time band (for example, 2026, less than 1 year ago) before the automated review sees it; your city, state, and ZIP code answers are not sent. If you upload a document photo for review, details read from that document can be included in the review.')}</p>
+                )}
                 {factRecord.outputsStale && (
                   <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4 flex flex-wrap items-center gap-3">
                     <p className="text-sm text-amber-900 font-medium flex-1">{t('factsChanged', 'Your information changed. Re-run the analysis or regenerate your form draft so everything stays consistent.')}</p>
