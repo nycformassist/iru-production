@@ -56,6 +56,15 @@ import {
   loadPhotoFile,
   clearPhotoFile,
 } from './photoFileStore';
+import {
+  pickViaFsa,
+  hasFsaPicker,
+  saveFsaHandle,
+  clearFsaHandle,
+  probeStoredHandle,
+  regrantStoredHandle,
+  pickerRoutesVisible,
+} from './fsaPicker';
 
 import { LANGUAGES, UI_LABELS, PHASE_1_QUESTIONS, TRIAGE_QUESTION, PHASE_2_QUESTIONS, PHASE_3_QUESTIONS, NYC_RESOURCES, CONSULATES, PROXIES, NARRATIVE_STARTERS, USCIS_FORMS, FEE_SCHEDULE_AS_OF, buildExecutiveSummary } from './constants';
 
@@ -212,6 +221,10 @@ export default function App() {
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoEvidenceKey, setPhotoEvidenceKey] = useState('');
   const [photoRestoredNotice, setPhotoRestoredNotice] = useState('');
+  // Picker-route experiments (src/fsaPicker.ts). Visible only with ?debug=1
+  // while PICKER_ROUTES_PUBLIC is false; normal users never see them.
+  const [routesVisible] = useState(() => pickerRoutesVisible(isDiagnosticsEnabledFromLocation()));
+  const [fsaHandleStored, setFsaHandleStored] = useState(false);
   // Recreation notice (2026-10-28, brief section C): shown only when a
   // picker attempt marker exists on boot AND no held file was found —
   // i.e. the page was recreated during the picker, before the photo
@@ -292,6 +305,7 @@ export default function App() {
       // in the uploads checklist; the blob is no longer needed).
       clearRecovery(sessionStore());
       void clearPhotoFile();
+      void clearFsaHandle();
       clearPickerAttempt();
       setRestoredNotice('');
       setPhotoRestoredNotice('');
@@ -356,6 +370,13 @@ export default function App() {
       const hasPickerApi = typeof (globalThis as any).showOpenFilePicker === 'function';
       diag.record('picker-api', { showOpenFilePicker: hasPickerApi });
     } catch { /* feature-detect must never break boot */ }
+    // Debug only: after a recreation, report whether a stored
+    // File System Access handle survived and what permission it has.
+    try {
+      if (isDiagnosticsEnabledFromLocation()) {
+        void probeStoredHandle(diag.record).then((found) => setFsaHandleStored(found)).catch(() => { /* best-effort */ });
+      }
+    } catch { /* probe must never break boot */ }
     const cleanups: Array<() => void> = [];
     try {
       cleanups.push(installDiagnosticListeners(window, diag.record, ['pagehide', 'pageshow', 'focus', 'blur', 'popstate']));
@@ -724,7 +745,7 @@ export default function App() {
         const attempt = readPickerAttempt();
         if (attempt || pickerRecreatedCandidateRef.current) {
           const diag = diagnosticsRef.current;
-          if (diag) diag.record('picker-recreation-detected', { attemptCount: attempt ? attempt.attemptCount : 1, stage: 'PHOTO' });
+          if (diag) diag.record('picker-recreation-detected', { attemptCount: attempt ? attempt.attemptCount : 1, stage: 'PHOTO', method: attempt ? attempt.method : 'input' });
           setRestoredNotice('');
           setPickerRecreatedNotice(t('pickerRecreated', 'The page was recreated while the picker was open, before your photo arrived. Your answers are saved. Please pick the photo again.'));
         }
@@ -738,6 +759,54 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stage, photoFile]);
 
+  /** DEBUG-ONLY route experiment: File System Access picker (src/fsaPicker.ts).
+   * Everything before pickViaFsa() is synchronous so the click's user
+   * activation is intact when showOpenFilePicker runs. The marker is
+   * written first, exactly like the <input> route, so a recreation during
+   * THIS picker is detected and labelled method 'fsa'. A landed file takes
+   * the same hold + clear rules as the <input> route. */
+  const handleFsaPick = () => {
+    markPickerOpened(photoEvidenceKey || null, undefined, 'fsa');
+    saveRecovery(sessionStore(), { stage, language: lang, answers, docType: photoEvidenceKey, pickerOpened: true });
+    const diag = diagnosticsRef.current;
+    if (diag) diag.record('picker-open', { stage, method: 'fsa' });
+    void pickViaFsa().then((r) => {
+      const d = diagnosticsRef.current;
+      clearPickerAttempt();
+      if (r.status === 'picked') {
+        if (d) d.record('picker-change', { stage, method: 'fsa', hasFile: true, ...summarizeFileForDiagnostics(r.file) });
+        setPickerRecreatedNotice('');
+        setPhotoFile(r.file);
+        void savePhotoFile(r.file, photoEvidenceKey);
+        void saveFsaHandle(r.handle, photoEvidenceKey).then((ok) => {
+          if (d) d.record('fsa-handle-saved', { ok });
+          setFsaHandleStored(ok);
+        });
+        setPhotoRestoredNotice('');
+        setImageReview(null);
+        setReviewError('');
+      } else if (r.status === 'cancelled') {
+        if (d) d.record('picker-cancel', { stage, method: 'fsa' });
+      } else if (r.status === 'unsupported') {
+        if (d) d.record('fsa-error', { errorName: 'Unsupported', stage: 'picker' });
+      } else if (d) {
+        d.record('fsa-error', { errorName: r.errorName, stage: r.stage });
+      }
+    }).catch(() => { /* pickViaFsa never rejects; defence in depth */ });
+  };
+
+  /** DEBUG-ONLY: re-grant read access to the stored handle (needs this tap
+   * as its user gesture) and adopt the file if the grant works. */
+  const handleFsaRegrant = () => {
+    const diag = diagnosticsRef.current;
+    void regrantStoredHandle(diag ? diag.record : () => {}).then((got) => {
+      if (!got) return;
+      setPhotoFile(got.file);
+      setPhotoEvidenceKey((prev: string) => prev || got.evidenceKey || '');
+      setPhotoRestoredNotice(t('photoRestored', 'Your selected document was restored after the page was recreated. You can review it now.'));
+    }).catch(() => { /* best-effort */ });
+  };
+
   /** PHOTO file selection (Android recovery). Cancellation — including a
    * change event with no files — never touches stage, language, answers,
    * or document type. The input value is reset after handling so the same
@@ -746,7 +815,7 @@ export default function App() {
   const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     try {
       const diag = diagnosticsRef.current;
-      if (diag) diag.record('picker-change', { stage, hasFile: !!(e.target.files && e.target.files[0]), ...summarizeFileForDiagnostics(e.target.files && e.target.files[0]) });
+      if (diag) diag.record('picker-change', { stage, method: e.target.id === 'iru-photo-camera-input' ? 'camera' : 'input', hasFile: !!(e.target.files && e.target.files[0]), ...summarizeFileForDiagnostics(e.target.files && e.target.files[0]) });
       const picked = e.target.files && e.target.files[0] ? e.target.files[0] : null;
       setPhotoFile(e.target.files && e.target.files[0] ? e.target.files[0] : null);
       if (picked) {
@@ -844,6 +913,7 @@ export default function App() {
         // Review FAILURE paths below deliberately do NOT clear, so
         // Retry can reuse the held file after a recreation.
         void clearPhotoFile();
+      void clearFsaHandle();
         setPhotoRestoredNotice('');
       } else {
         setReviewError(MESSAGE_PHOTO_BAD_RESPONSE);
@@ -869,6 +939,7 @@ export default function App() {
     // plus the browser-local held photo file (explicitly, alongside it).
     clearRecovery(sessionStore());
     void clearPhotoFile();
+      void clearFsaHandle();
     clearPickerAttempt();
     setRestoredNotice('');
     setPhotoRestoredNotice('');
@@ -2344,6 +2415,47 @@ export default function App() {
                     {photoFile ? photoFile.name : (ui.photoChoose || 'Choose a photo…')}
                   </span>
                 </label>
+
+                {routesVisible && (
+                  <div className="p-3 rounded-xl bg-slate-900 text-slate-100 text-sm space-y-2" data-testid="picker-experiments">
+                    <p className="m-0 font-semibold">Picker experiments (debug only, not shown to normal users)</p>
+                    {hasFsaPicker() && (
+                      <button type="button" onClick={handleFsaPick} className="block w-full px-4 py-3 rounded-lg bg-indigo-500 text-white font-medium text-left">
+                        Choose with alternate picker
+                      </button>
+                    )}
+                    <label htmlFor="iru-photo-camera-input" className="block w-full px-4 py-3 rounded-lg bg-indigo-500 text-white font-medium cursor-pointer">
+                      Take a photo with the camera
+                      <input
+                        id="iru-photo-camera-input"
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        className="sr-only"
+                        onClick={() => {
+                          markPickerOpened(photoEvidenceKey || null, undefined, 'camera');
+                          saveRecovery(sessionStore(), { stage, language: lang, answers, docType: photoEvidenceKey, pickerOpened: true });
+                          const diag = diagnosticsRef.current;
+                          if (diag) diag.record('picker-open', { stage, method: 'camera' });
+                        }}
+                        onCancel={() => {
+                          clearPickerAttempt();
+                          const diag = diagnosticsRef.current;
+                          if (diag) diag.record('picker-cancel', { stage, method: 'camera' });
+                        }}
+                        onChange={handlePhotoChange}
+                      />
+                    </label>
+                    {fsaHandleStored && (
+                      <button type="button" onClick={handleFsaRegrant} className="block w-full px-4 py-3 rounded-lg bg-slate-700 text-white font-medium text-left">
+                        Re-check saved file access
+                      </button>
+                    )}
+                    <button type="button" onClick={() => { try { window.location.reload(); } catch { /* ignore */ } }} className="block w-full px-4 py-3 rounded-lg bg-slate-700 text-white font-medium text-left">
+                      Reload page (simulates a recreation)
+                    </button>
+                  </div>
+                )}
 
                 <p className="text-sm text-slate-600 leading-relaxed">
                   {t('pickerGuidance', 'To close the file picker, tap its X or back arrow. Once you are back in IRU, use IRU’s own Back and Continue buttons. Your phone’s Back gesture may take you out of this page.')}

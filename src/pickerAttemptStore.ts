@@ -21,10 +21,19 @@
 
 export const PICKER_ATTEMPT_KEY = 'iru_picker_attempt_v1';
 
+/**
+ * Which route opened the picker. Non-sensitive (an enumerated label, no
+ * file data). Lets a restore boot say WHICH route was in flight when the
+ * page was recreated, which is what the A/B/C device experiment compares.
+ * Markers written before this field existed read back as 'input'.
+ */
+export type PickerMethod = 'input' | 'fsa' | 'camera';
+
 export interface PickerAttempt {
   openedAt: number;
   attemptCount: number;
   docType: string | null;
+  method: PickerMethod;
 }
 
 /** Minimal storage surface, mirroring diagnostics.ts StorageLike. */
@@ -70,6 +79,7 @@ function resolveStorage(
 export function markPickerOpened(
   docType: string | null,
   storage?: PickerStorageLike | null,
+  method: PickerMethod = 'input',
 ): void {
   try {
     const store = resolveStorage(storage);
@@ -79,6 +89,7 @@ export function markPickerOpened(
       openedAt: Date.now(),
       attemptCount: (prev ? prev.attemptCount : 0) + 1,
       docType: typeof docType === 'string' && docType.length > 0 ? docType : null,
+      method: method === 'fsa' || method === 'camera' ? method : 'input',
     };
     store.setItem(PICKER_ATTEMPT_KEY, JSON.stringify(next));
   } catch {
@@ -103,6 +114,8 @@ export function readPickerAttempt(
       attemptCount: parsed.attemptCount,
       docType:
         typeof parsed.docType === 'string' ? parsed.docType : null,
+      method:
+        parsed.method === 'fsa' || parsed.method === 'camera' ? parsed.method : 'input',
     };
   } catch {
     return null;
