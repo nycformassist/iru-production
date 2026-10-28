@@ -39,7 +39,7 @@ import { LANGUAGES, UI_LABELS, PHASE_1_QUESTIONS, TRIAGE_QUESTION, PHASE_2_QUEST
 import { resolveResources, resolveResourcesForLocation, ResourceResult, ResourceOrg, localizedResourceText, localizedNationalDescription } from './resources';
 
 // Country-aware location model (directive §3).
-import { COUNTRIES, isUsCountry, localizedCountryName } from './location';
+import { COUNTRIES, isUsCountry, localizedCountryName, countryDisplayName } from './location';
 
 // Canonical fact record (directive §4) — one shared model for answers,
 // document extraction, corrections, the packet, and form preparation.
@@ -347,6 +347,13 @@ export default function App() {
   // correction (source 'correction') or a real selection clears the label.
   const isDefaultedResidence = (f: any) =>
     !!f && f.id === 'residence_country' && f.source === 'answer' && !answers.residence_country;
+
+  // Display-only country-name mapping for the record rows (screen +
+  // print): a stored code ('CA') renders as its localized name
+  // ('Canada'). The stored value, the prompt payload, and resource
+  // matching keep using the code; only the presented text changes.
+  const displayFactValue = (f: any): string =>
+    f && f.id === 'residence_country' ? countryDisplayName(String(f.value), lang) : String(f.value);
 
   // ── Android recovery: session-scoped restore + save ──────────────────
   // Boot restore runs once, AFTER the diagnostics boot effect (so boot is
@@ -708,6 +715,17 @@ export default function App() {
     setFormDraftStore(emptyFormDraftStore());
     setEditingFactId('');
     setPurchaseState({ hasEvaluation: false, ownedForms: [] });
+    // Start Over hardening (2026-10-28): the remaining workflow state
+    // a packet run leaves behind — narrative edits, the fact editor,
+    // and any in-flight busy flags — must not survive into a fresh
+    // run in the same tab. Payment tokens are deliberately NOT cleared
+    // (see the recovery-key comment above).
+    setNarrativeDates({});
+    setNarrativeError('');
+    setFactEditValue('');
+    setFormBusy(false);
+    setCheckoutBusy(false);
+    setReviewing(false);
   };
 
   // ── Facts: consumer confirmation / conflict resolution / correction (§8).
@@ -1444,7 +1462,7 @@ export default function App() {
       : f.source === 'document' ? t('pktFactStatusDocConfirmed', 'From your document — confirmed by you') : t('pktFactStatusReported', 'Provided by you');
     const factRows = factRecord ? Object.values(factRecord.facts)
       .filter((f: any) => f && f.value && FACT_DISPLAY_NAMES[f.id])
-      .map((f: any) => `<tr><td style="font-weight:500;">${escapeHtml(lang === 'EN' ? FACT_DISPLAY_NAMES[f.id] : ((ui.factLabels && ui.factLabels[f.id]) || FACT_DISPLAY_NAMES[f.id]))}</td><td>${escapeHtml(String(f.value))}</td><td style="color:#64748b;">${escapeHtml(factStatusLabel(f))}</td></tr>`).join('') : '';
+      .map((f: any) => `<tr><td style="font-weight:500;">${escapeHtml(lang === 'EN' ? FACT_DISPLAY_NAMES[f.id] : ((ui.factLabels && ui.factLabels[f.id]) || FACT_DISPLAY_NAMES[f.id]))}</td><td>${escapeHtml(displayFactValue(f))}</td><td style="color:#64748b;">${escapeHtml(factStatusLabel(f))}</td></tr>`).join('') : '';
     const factsSectionHtml = factRows ? `
         <div class="section">
           <h3 class="section-title font-serif">${escapeHtml(t('factsTitle', 'Your Information on Record'))}</h3>
@@ -2323,7 +2341,7 @@ export default function App() {
                     <div key={f.id} className="border border-slate-200 rounded-xl p-3">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-semibold text-slate-800 text-sm">{(ui.factLabels && ui.factLabels[f.id]) || FACT_LABELS[f.id]}</span>
-                        <span className="text-slate-700 text-sm">{String(f.value)}</span>
+                        <span className="text-slate-700 text-sm">{displayFactValue(f)}</span>
                         <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${f.status === 'conflicting' ? 'bg-red-100 text-red-800' : f.status === 'extracted-unconfirmed' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600'}`}>
                           {isDefaultedResidence(f) ? t('factStatusDefault', 'Form default — you did not select this') : f.status === 'conflicting' ? t('factStatusConflicting', 'Sources disagree') : f.status === 'extracted-unconfirmed' ? t('factStatusExtracted', 'From your document — please confirm') : t('factStatusReported', 'You provided this')}
                         </span>
@@ -2841,8 +2859,9 @@ export default function App() {
                 <span>{ui.openPrint}</span>
               </button>
               
-              <button 
-                onClick={handleStartOver} 
+              <button
+                type="button"
+                onClick={handleStartOver}
                 className="px-8 py-4 text-slate-600 font-medium hover:bg-slate-100 rounded-xl transition-colors w-full sm:w-auto justify-center border border-slate-200"
               >
                 {ui.startOver}

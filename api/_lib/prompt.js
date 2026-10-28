@@ -21,6 +21,7 @@
 import { legalHardRules } from './legal.js';
 import { NO_ADVERSE_INFERENCE_PRINCIPLE, getNotApplicableReasons, EVIDENCE_KEY_SEMANTICS } from './evidence.js';
 import { RESIDENCE_NOT_PROVIDED } from './privacy.js';
+import { residencePromptValue } from './countries.js';
 
 export const OUTPUT_SCHEMA_KEYS = [
   'readinessSummary',
@@ -184,7 +185,7 @@ ${legalHardRules().split('\n').map(l => '  * ' + l).join('\n')}
 <applicant_data>
 Case type: ${min.caseType}
 Country of origin: ${min.countryOfOrigin}
-Country of residence: ${min.residenceCountry === RESIDENCE_NOT_PROVIDED ? 'Not provided (the questionnaire country field was left at its default; this is not a gap and not unknown)' : (min.residenceCountry || 'Unknown')}
+Country of residence: ${min.residenceCountry === RESIDENCE_NOT_PROVIDED ? 'Not provided (the questionnaire country field was left at its default; this is not a gap and not unknown)' : (min.residenceCountry ? residencePromptValue(min.residenceCountry) : 'Unknown')}
 Country of birth: ${min.countryOfBirth || 'Unknown'}
 Citizenship: ${min.citizenship || 'Unknown'}
 Marital status: ${min.maritalStatus || 'unknown'}

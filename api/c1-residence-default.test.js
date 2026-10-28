@@ -41,7 +41,9 @@ describe('C1: untouched residence is not "Unknown"', () => {
 
   it('a real selection renders plainly with no default wording', () => {
     const p = buildPrompt(minimizeForModel({ ...base, residence_country: 'MX' }, []));
-    assert.ok(p.includes('Country of residence: MX'));
+    // Display name + code (2026-10-28 Canada fix): the stored code is
+    // unchanged, but the model is given the name users see.
+    assert.ok(p.includes('Country of residence: Mexico (MX)'));
     assert.ok(!p.includes('Country of residence: Not provided'));
   });
 

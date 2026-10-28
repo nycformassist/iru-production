@@ -144,6 +144,19 @@ export function localizedCountryName(country: Country, lang: string): string {
   return COUNTRY_NAMES_I18N[country.code]?.[lang as 'ES' | 'ZH' | 'HT' | 'AR'] || country.name;
 }
 
+/**
+ * Display name for a stored ISO country code (e.g. 'CA' -> 'Canada').
+ * Display-only: the stored code is never changed by this helper, and
+ * resource matching keeps using the code. Unknown codes fall back to
+ * the code itself so nothing renders blank.
+ */
+export function countryDisplayName(code: string | undefined | null, lang: string): string {
+  if (!code) return '';
+  const country = COUNTRIES.find((c) => c.code === code);
+  if (!country) return code;
+  return localizedCountryName(country, lang);
+}
+
 export function isUsCountry(code: string | undefined | null): boolean {
   return !code || code === 'US';
 }
