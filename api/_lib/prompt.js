@@ -265,6 +265,12 @@ export function validateModelOutput(text) {
   if (typeof data.readinessSummary !== 'string' || typeof data.notLegalAdvice !== 'string') {
     return { ok: false, error: 'summary fields must be strings' };
   }
+  // C3: a blank summary is a failed review, not a valid one. Previously
+  // readinessSummary: "" passed and the applicant received an empty review
+  // presented as a success.
+  if (!data.readinessSummary.trim() || !data.notLegalAdvice.trim()) {
+    return { ok: false, error: 'summary fields must not be blank' };
+  }
   for (const key of ['factsProvided', 'missingInformation', 'contradictions', 'inferences', 'suggestedQuestions', 'uncertaintyNotes', 'evidenceGaps']) {
     if (!Array.isArray(data[key])) return { ok: false, error: `${key} must be an array` };
   }

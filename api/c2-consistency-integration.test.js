@@ -112,7 +112,8 @@ describe('C2: SSE consumer and client wiring', () => {
 
   it('App.tsx shows the note on screen and in print, and resets it on Start Over', () => {
     const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
-    assert.ok(app.includes('setIntegrityFlags(streamFlags || [])'));
+    assert.ok(app.includes('applyStreamMeta(streamMeta)'));
+    assert.ok(app.includes('setIntegrityFlags(m.integrityFlags || [])'));
     assert.ok(app.includes('data-testid="integrity-note"'));
     assert.equal((app.match(/pktIntegrityNote/g) || []).length, 2, 'one on-screen use and one print use');
     assert.ok(app.includes('setAiUnavailable(false);\n    setIntegrityFlags([]);'), 'Start Over must clear the flags');

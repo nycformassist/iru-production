@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Shield, Globe, Printer, ArrowRight, ArrowLeft, CheckCircle2, Copy, Info, ChevronRight } from 'lucide-react';
+import { Shield, Globe, Printer, ArrowRight, ArrowLeft, CheckCircle2, Copy, Info, ChevronRight, AlertTriangle } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 // Mobile repair 2026-10-26: upload validation + error messages (pure,
@@ -176,6 +176,8 @@ export default function App() {
   // C2: record-consistency field ids the server flagged on the model review
   // (ids only; the assessment itself is never altered).
   const [integrityFlags, setIntegrityFlags] = useState<string[]>([]);
+  // C3: server request id, shown as a reference so a report maps to one log line.
+  const [requestId, setRequestId] = useState('');
   const [isNycCoverage, setIsNycCoverage] = useState(true);
   // Optional one-time document photo review (never persisted server-side).
   const [photoFile, setPhotoFile] = useState<File | null>(null);
@@ -691,6 +693,7 @@ export default function App() {
     setAssessment(null);
     setAiUnavailable(false);
     setIntegrityFlags([]);
+    setRequestId('');
     setIsNycCoverage(true);
     setResourceResult(null);
     setFactRecord(null);
@@ -950,6 +953,11 @@ export default function App() {
     setTimeout(() => URL.revokeObjectURL(url), 5000);
   };
 
+  const applyStreamMeta = (m: { integrityFlags?: string[]; requestId?: string }) => {
+    setIntegrityFlags(m.integrityFlags || []);
+    setRequestId(m.requestId || '');
+  };
+
   const handleInterviewComplete = async () => {
     diagReasonRef.current = 'complete';
     setStage('ANALYZING');
@@ -1032,11 +1040,11 @@ export default function App() {
       // chunks: the terminal event carries the whole assessment on one
       // long line, and a chunk boundary inside it previously discarded
       // it whole — the analysis silently vanished in real browsers (D2).
-      const { assessment: finalAssessment, aiUnavailable: streamAiUnavailable, integrityFlags: streamFlags } =
+      const { assessment: finalAssessment, aiUnavailable: streamAiUnavailable, ...streamMeta } =
         await readAnalyzeStream(response.body!.getReader());
       // AI failed: fallback marked unavailable. A good re-run clears a stale flag.
       if (streamAiUnavailable) { setAiUnavailable(true); } else { setAiUnavailable(false); }
-      setIntegrityFlags(streamFlags || []);
+      applyStreamMeta(streamMeta);
       setAssessment(finalAssessment);
       // The regenerated assessment was computed from the current
       // record — including every overlaid correction — so the
@@ -1543,6 +1551,7 @@ export default function App() {
         </div>
         ` : ''}
         <div class="section">
+          ${aiUnavailable ? `<p style="font-size:0.95rem;font-weight:700;color:#92400e;background-color:#fef3c7;border:1px solid #fcd34d;border-radius:0.5rem;padding:0.75rem;margin:0 0 0.75rem 0;">${escapeHtml(t('pktReviewNotRunTitle', 'AI Review Did Not Run'))} — ${escapeHtml(t('pktReviewNotRunDesc', 'Your document checklist and rule-based findings below are complete, but the automated AI review could not be completed. Please present this packet to a qualified legal professional.'))}</p>` : ''}
           <h3 class="section-title font-serif">${escapeHtml(ui.readinessReview || 'Readiness Review')}</h3>
           ${integrityFlags.length > 0 ? `<p style="font-size:0.875rem;color:#78350f;background-color:#fffbeb;border:1px solid #fde68a;border-radius:0.5rem;padding:0.75rem;margin:0 0 0.75rem 0;">${escapeHtml(t('pktIntegrityNote', 'Some statements in this review may not match the information on your record. Please check “Your Information on Record” and point out any difference to a qualified legal professional.'))}</p>` : ''}
           <p class="exec-summary font-serif" style="white-space: pre-wrap;">${escapeHtml(renderAssessmentText(assessment))}</p>
@@ -1622,6 +1631,7 @@ export default function App() {
           ${hasAlternatives ? `<p style="font-size: 0.875rem; font-weight: 600; color: #92400e; background-color: #fef3c7; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem; text-align: left;">${ui.noteForLegalCounsel}</p>` : ''}
           <p>${ui.privacyShield}</p>
           <small>${ui.disclaimer}</small>
+          ${requestId ? `<div style="margin-top:0.75rem;font-size:0.7rem;color:#94a3b8;">${escapeHtml(t('pktReference', 'Reference'))}: ${escapeHtml(requestId)}</div>` : ''}
           <div style="margin-top: 2rem; font-size: 0.75rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.1em;">
             Sanctuary Architect 20345 | Powered by Parametric Insight Engine
           </div>
@@ -2218,11 +2228,21 @@ export default function App() {
             transition={{ duration: 0.7 }}
             className="p-8 sm:p-12 text-center"
           >
-            <CheckCircle2 className="w-16 h-16 text-green-500 mx-auto mb-6" />
-            <h2 className="text-3xl font-serif font-bold text-slate-900 mb-4">{ui.packetReady}</h2>
-            <p className="text-lg text-slate-600 mb-8">
-              {ui.packetDesc}
-            </p>
+            {aiUnavailable ? (
+              <div data-testid="review-not-run">
+                <AlertTriangle className="w-16 h-16 text-amber-500 mx-auto mb-6" />
+                <h2 className="text-3xl font-serif font-bold text-amber-800 mb-4">{t('pktReviewNotRunTitle', 'AI Review Did Not Run')}</h2>
+                <p className="text-lg text-slate-600 mb-8">{t('pktReviewNotRunDesc', 'Your document checklist and rule-based findings below are complete, but the automated AI review could not be completed. Please present this packet to a qualified legal professional.')}</p>
+              </div>
+            ) : (
+              <>
+                <CheckCircle2 className="w-16 h-16 text-green-500 mx-auto mb-6" />
+                <h2 className="text-3xl font-serif font-bold text-slate-900 mb-4">{ui.packetReady}</h2>
+                <p className="text-lg text-slate-600 mb-8">
+                  {ui.packetDesc}
+                </p>
+              </>
+            )}
 
             {/* ── Readiness Score + Readiness Review (2026-10-24 fix):
                 the same score heuristic (calculateReadinessScore) and
@@ -2242,6 +2262,7 @@ export default function App() {
                     <p className="text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-xl p-3 mb-3" data-testid="integrity-note">{t('pktIntegrityNote', 'Some statements in this review may not match the information on your record. Please check “Your Information on Record” and point out any difference to a qualified legal professional.')}</p>
                   )}
                   <p className="text-base text-slate-800 italic bg-slate-50 border border-slate-200 rounded-xl p-4" style={{ whiteSpace: 'pre-wrap' }}>{renderAssessmentText(assessment)}</p>
+                  {requestId && <p className="text-xs text-slate-400 mt-2" data-testid="request-ref">{t('pktReference', 'Reference')}: {requestId}</p>}
                 </div>
               );
             })()}

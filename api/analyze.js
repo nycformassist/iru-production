@@ -54,6 +54,30 @@ function getAiClient(apiKey) {
   };
 }
 
+// Privacy-safe description of a provider/stream error: class, truncated
+// message, and HTTP-ish status only. Never the prompt, answers, or key.
+function describeError(err) {
+  const errMsg = err && err.message ? String(err.message).slice(0, 200) : String(err).slice(0, 200);
+  const errName = err && err.name ? String(err.name).slice(0, 50) : 'unknown';
+  let providerStatus = 'unknown';
+  if (err && typeof err === 'object') {
+    if (err.status) providerStatus = String(err.status).slice(0, 10);
+    else if (err.code) providerStatus = String(err.code).slice(0, 20);
+  }
+  return { errMsg, errName, providerStatus };
+}
+
+// C3 bounded retry. Only a failure BEFORE the first chunk reached the client
+// is retried (afterwards the client has already rendered partial text), never
+// a timeout (the budget is spent), never a permanent client error (bad key or
+// model: 400/401/403/404), and only when enough of the function budget is left.
+const AI_TIMEOUT_MS = 45000;        // per attempt; headroom under maxDuration 60s
+const TOTAL_BUDGET_MS = 55000;      // whole analysis, all attempts
+const MIN_RETRY_REMAINING_MS = 20000;
+const MAX_ATTEMPTS = 2;
+const RETRY_DELAY_MS = 400;
+const PERMANENT_STATUSES = new Set(['400', '401', '403', '404']);
+
 export default async function handler(req, res) {
   const startTime = Date.now();
   const requestId = Math.random().toString(36).slice(2, 8);
@@ -201,32 +225,66 @@ export default async function handler(req, res) {
 
   const send = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
 
+  // C3 diagnostics: enough to tell a provider error from a timeout from blank
+  // output after the fact (privacy-safe: no prompt, answers, or model text).
+  const modelName = process.env.GEMINI_MODEL || "gemini-3.8-flash";
+  let attempt = 0;
+  let chunksSent = 0;
+  let firstChunkMs = null;
+  const diag = () => ({ model: modelName, attempt, chunksSent, firstChunkMs });
+
   try {
     const client = getAiClient(apiKey);
     let fullText = "";
-    // Timeout the AI stream: if Vercel kills the function mid-stream, the client
-    // gets a truncated response with no 'done' event. Abort early and use fallback.
-    const AI_TIMEOUT_MS = 45000; // Leave headroom under Vercel's 60s maxDuration
-    // Clear the timer when the race settles: an uncleared 45s timer kept the
-    // test process alive ~45s after every AI-path invocation (same pattern as
-    // review-image.js withTimeout). Clearing on settle is behavior-preserving:
-    // if the timeout already fired, clearTimeout is a no-op; if the stream won,
-    // the timer could never fire meaningfully again.
-    let timeoutId;
-    const timeoutPromise = new Promise((_, reject) => {
-      timeoutId = setTimeout(() => reject(new Error('AI generation timeout')), AI_TIMEOUT_MS);
-    });
-    const streamPromise = (async () => {
-      for await (const chunk of client.generateContentStream(prompt)) {
-        const text = chunk.text || "";
-        if (text) {
-          fullText += text;
-          send({ type: "chunk", text });
+    for (;;) {
+      attempt++;
+      // Timeout the AI stream: if Vercel kills the function mid-stream, the client
+      // gets a truncated response with no 'done' event. Abort early and use fallback.
+      // Clear the timer when the race settles: an uncleared timer kept the test
+      // process alive after every AI-path invocation (same pattern as
+      // review-image.js withTimeout).
+      const attemptTimeoutMs = Math.min(AI_TIMEOUT_MS, TOTAL_BUDGET_MS - (Date.now() - startTime));
+      let timeoutId;
+      let aborted = false; // stop writing to a response we have already given up on
+      const timeoutPromise = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('AI generation timeout')), attemptTimeoutMs);
+      });
+      const streamPromise = (async () => {
+        for await (const chunk of client.generateContentStream(prompt)) {
+          if (aborted) break;
+          const text = chunk.text || "";
+          if (text) {
+            if (firstChunkMs === null) firstChunkMs = Date.now() - startTime;
+            chunksSent++;
+            fullText += text;
+            send({ type: "chunk", text });
+          }
         }
+        return fullText;
+      })();
+      try {
+        await Promise.race([streamPromise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
+        break;
+      } catch (attemptErr) {
+        aborted = true;
+        const info = describeError(attemptErr);
+        const elapsed = Date.now() - startTime;
+        const retryable =
+          attempt < MAX_ATTEMPTS &&
+          chunksSent === 0 &&
+          info.errMsg !== 'AI generation timeout' &&
+          !PERMANENT_STATUSES.has(info.providerStatus) &&
+          TOTAL_BUDGET_MS - elapsed >= MIN_RETRY_REMAINING_MS;
+        if (!retryable) throw attemptErr;
+        console.error(JSON.stringify({
+          event: 'iru_analyze_retry', requestId, stage: 'ai_stream',
+          errorClass: info.errName, providerStatus: info.providerStatus,
+          durationMs: elapsed, message: info.errMsg, ...diag(),
+        }));
+        fullText = "";
+        await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
       }
-      return fullText;
-    })();
-    await Promise.race([streamPromise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
+    }
 
     const validated = validateModelOutput(fullText);
     const assessment = validated.ok ? validated.data : fallbackAssessment(min, gapsForFallback, validatedReviews.reviews, lang);
@@ -263,24 +321,17 @@ export default async function handler(req, res) {
         message: String(validated.error).slice(0, 200),
         responseEmpty: !fullText || fullText.length === 0,
         responseLength: fullText ? fullText.length : 0,
+        ...diag(),
       }));
     }
     // Include ai_unavailable status when validation fails (fallback used)
     const status = validated.ok ? undefined : "ai_unavailable";
-    send({ type: "done", status, assessment, ...(integrityFlags.length ? { integrityFlags } : {}) });
+    send({ type: "done", status, requestId, assessment, ...(integrityFlags.length ? { integrityFlags } : {}) });
     res.end();
   } catch (err) {
     // Structured, privacy-safe logging. Never log intake answers, PII, or prompt content.
     const durationMs = Date.now() - startTime;
-    const errMsg = err && err.message ? String(err.message).slice(0, 200) : String(err).slice(0, 200);
-    const errName = err && err.name ? String(err.name).slice(0, 50) : 'unknown';
-    // Extract provider HTTP status if available (without exposing details)
-    let providerStatus = 'unknown';
-    if (err && typeof err === 'object') {
-      const e = err;
-      if (e.status) providerStatus = String(e.status).slice(0, 10);
-      else if (e.code) providerStatus = String(e.code).slice(0, 20);
-    }
+    const { errMsg, errName, providerStatus } = describeError(err);
     console.error(JSON.stringify({
       event: 'iru_analyze_failure',
       requestId,
@@ -289,12 +340,14 @@ export default async function handler(req, res) {
       providerStatus,
       durationMs,
       message: errMsg,
+      ...diag(),
       // Never include: answers, imageReviews content, prompt, apiKey
     }));
     // Return explicit ai_unavailable status instead of fake assessment
     send({ 
       type: "error", 
       status: "ai_unavailable",
+      requestId,
       assessment: fallbackAssessment(min, gapsForFallback, validatedReviews.reviews, lang) 
     });
     res.end();
