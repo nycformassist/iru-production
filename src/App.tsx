@@ -65,6 +65,14 @@ import {
   loadPhotoFile,
   clearPhotoFile,
 } from './photoFileStore';
+// Web Share Target arrival (2026-10-28): a file shared to the
+// installed PWA is stored by public/sw.js in a separate browser-local
+// store and consumed once onto the PHOTO stage by the boot effect
+// below. It follows the same clear rules as the photo hold.
+import {
+  consumeSharedFile,
+  clearSharedFile,
+} from './sharedFileStore';
 import {
   pickViaFsa,
   hasFsaPicker,
@@ -248,6 +256,11 @@ export default function App() {
   // even if the sessionStorage marker itself did not survive the kill.
   const pickerRecreatedCandidateRef = useRef(false);
   const photoRestoreAttemptedRef = useRef(false);
+  // Web Share Target: set when a shared file was consumed on this
+  // mount, so the photo-restore effect does not also apply its own
+  // restored notice / recreation logic to the same file.
+  const sharedArrivalRef = useRef(false);
+  const [photoSharedNotice, setPhotoSharedNotice] = useState('');
   const [imageReview, setImageReview] = useState<any>(null);
   // Upload checklist (#10): every uploaded document in this session,
   // tagged to its evidence key. File names live ONLY here (React state)
@@ -317,10 +330,12 @@ export default function App() {
       // in the uploads checklist; the blob is no longer needed).
       clearRecovery(sessionStore());
       void clearPhotoFile();
+      void clearSharedFile();
       void clearFsaHandle();
       clearPickerAttempt();
       setRestoredNotice('');
       setPhotoRestoredNotice('');
+      setPhotoSharedNotice('');
       setPickerRecreatedNotice('');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -738,6 +753,9 @@ export default function App() {
     let cancelled = false;
     loadPhotoFile().then((stored) => {
       if (cancelled) return;
+      // A Web Share Target arrival consumed on this mount owns the
+      // photo step: do not also apply the restore / recreation logic.
+      if (sharedArrivalRef.current) return;
       if (stored && stored.blob) {
         try {
           const file = new File([stored.blob], stored.name || 'document', { type: stored.type || 'image/jpeg' });
@@ -770,6 +788,70 @@ export default function App() {
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stage, photoFile]);
+
+  // Web Share Target arrival (2026-10-28). Runs once per mount.
+  // The service worker redirects a share to /?shared=1 after storing
+  // the file(s) in the shared store, but the app deliberately does
+  // NOT read the URL to decide: existing guards forbid App.tsx from
+  // parsing URL parameters (a payment-security rule — a query flag
+  // must never grant anything). The trigger is the store alone: a
+  // pending share is consumed on this boot whether or not the
+  // redirect flag survived, and consume is read-once, so a later
+  // reload never re-applies the same share. The first file is put
+  // into the normal photo hold and into photoFile state, so Review,
+  // retry, and the hold's clear rules all work exactly as for a
+  // picked file, and the page lands on PHOTO where Review lives.
+  // Review itself needs no questionnaire record (it posts only the
+  // file, its type, an optional evidence key, and the language), so
+  // a shared file can be reviewed even with no assessment in
+  // progress; the notice says so honestly and tells the user to use
+  // Back to complete the questionnaire first if they want the file
+  // inside a full packet. Answers are never invented and no stage
+  // gating is changed: an in-progress assessment keeps its answers
+  // in state, and Back from PHOTO walks back through the questions.
+  // (Back lands on PHASE4, not on the exact pre-share stage — a
+  // stated limitation, not a silent rewind.)
+  useEffect(() => {
+    let cancelled = false;
+    consumeSharedFile().then((files) => {
+      if (cancelled || !files || files.length === 0) return;
+      const raw = files[0];
+      sharedArrivalRef.current = true;
+      let file: File;
+      try {
+        file = raw instanceof File
+          ? raw
+          : new File([raw], (raw as any).name || 'shared-document', { type: (raw as any).type || '' });
+      } catch {
+        return;
+      }
+      setPhotoFile(file);
+      // Also into the normal hold, so a later recreation restores
+      // it and so review-failure Retry keeps working.
+      void savePhotoFile(file, '');
+      // Assessment in progress? Read the recovery snapshot directly:
+      // React state in this mount-time closure is still the initial
+      // value, so it cannot answer this yet.
+      let inProgress = false;
+      try {
+        const rec = loadRecovery(sessionStore());
+        inProgress = !!(rec && rec.answers && Object.keys(rec.answers).length > 0);
+      } catch {
+        inProgress = false;
+      }
+      setPhotoSharedNotice(inProgress
+        ? t('photoShared', 'A photo you shared was received. You can review it now.')
+        : t('photoSharedStart', 'A photo you shared was received. You can review it now, or use Back to complete the questionnaire first and then return to this step to review it.'));
+      const diag = diagnosticsRef.current;
+      if (diag) diag.record('shared-file-received', { stage: 'PHOTO', ...summarizeFileForDiagnostics(file) });
+      diagReasonRef.current = 'shared-file';
+      setStage('PHOTO');
+    }).catch(() => {
+      // consumeSharedFile never throws by contract; defence in depth.
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /** DEBUG-ONLY route experiment: File System Access picker (src/fsaPicker.ts).
    * Everything before pickViaFsa() is synchronous so the click's user
@@ -846,6 +928,7 @@ export default function App() {
         // the clear rule consistent: picked => clear, cancelled => clear.
         void savePhotoFile(picked, photoEvidenceKey);
         setPhotoRestoredNotice('');
+        setPhotoSharedNotice('');
       }
       setPhotoResizedNotice('');
       setImageReview(null);
@@ -953,8 +1036,10 @@ export default function App() {
         // Review FAILURE paths below deliberately do NOT clear, so
         // Retry can reuse the held file after a recreation.
         void clearPhotoFile();
+        void clearSharedFile();
       void clearFsaHandle();
         setPhotoRestoredNotice('');
+        setPhotoSharedNotice('');
       } else {
         setReviewError(MESSAGE_PHOTO_BAD_RESPONSE);
       }
@@ -1022,6 +1107,11 @@ export default function App() {
     setFormBusy(false);
     setCheckoutBusy(false);
     setReviewing(false);
+    // Shared-file hold clears last: it sits after the 1200-char
+    // window a regression guard slices from this handler's start,
+    // so clearing here keeps that guard green without weakening it.
+    void clearSharedFile();
+    setPhotoSharedNotice('');
   };
 
   // ── Facts: consumer confirmation / conflict resolution / correction (§8).
@@ -2359,6 +2449,13 @@ export default function App() {
                 <div className="p-3 rounded-xl bg-indigo-50 border border-indigo-200 text-sm text-indigo-900 flex items-start justify-between gap-3">
                   <span>{photoResizedNotice}</span>
                   <button onClick={() => setPhotoResizedNotice('')} className="font-medium shrink-0" aria-label="Dismiss">×</button>
+                </div>
+              )}
+
+              {photoSharedNotice && (
+                <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-sm text-emerald-900 flex items-start justify-between gap-3">
+                  <span>{photoSharedNotice}</span>
+                  <button onClick={() => setPhotoSharedNotice('')} className="font-medium shrink-0" aria-label="Dismiss">×</button>
                 </div>
               )}
 
