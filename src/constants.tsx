@@ -571,7 +571,7 @@ export const UI_LABELS: Record<string, any> = {
     personalNarrative: "个人陈述",
     photoTitle: "可选：审核证件照片",
     photoDesc: "您可以上传一张证件照片进行一次性自动审核。您的照片仅保存在您的浏览器中，直到审核完成，然后会被删除，并且仅发送一次用于审核——IRU 服务器不会保存副本。此审核无法确定文件是否真实或具有法律效力。",
-    photoSkip: "跳过此歂骤",
+    photoSkip: "跳过此步骤",
     photoReview: "审核照片",
     photoChoose: "选择照片…",
     photoPrivacy: "隐私：您的照片仅保存在您的浏览器中，直到审核完成，然后会被删除。照片仅发送一次用于审核，不会存储在 IRU 服务器上。",

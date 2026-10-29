@@ -38,6 +38,10 @@ test('all three PHOTO controls retain their existing actions', () => {
   assert.ok(photo.includes('onClick={handlePhotoReview}'), 'Review keeps handlePhotoReview');
   assert.ok(photo.includes('onClick={handleNextQuestion}'), 'Skip keeps handleNextQuestion');
   assert.ok(photo.includes('ui.photoSkip || ui.next'), 'Skip keeps its label');
+  assert.ok(
+    photo.includes("imageReview ? (ui.next"),
+    'after a completed review the primary button says Next, not Skip this step',
+  );
   assert.ok(photo.includes('ui.photoReview'), 'Review keeps its label');
   assert.ok(photo.includes('ui.back'), 'Back keeps its label');
 });

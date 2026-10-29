@@ -2691,7 +2691,7 @@ export default function App() {
                     onClick={handleNextQuestion}
                     className="px-8 py-3 bg-indigo-600 text-white font-medium rounded-xl hover:bg-indigo-700 transition-colors flex items-center justify-center space-x-2 w-full sm:w-auto"
                   >
-                    <span>{ui.photoSkip || ui.next}</span>
+                    <span>{imageReview ? (ui.next || 'Next') : (ui.photoSkip || ui.next)}</span>
                     <ArrowRight className="w-4 h-4" />
                   </button>
                 </div>
