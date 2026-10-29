@@ -151,7 +151,6 @@ test('App diagnostics wiring exists and records no sensitive identifiers', () =>
   assert.ok(appSrc.includes("from './diagnostics'"), 'App must import the diagnostics module');
   assert.ok(appSrc.includes('isDiagnosticsEnabledFromLocation()'), 'overlay must be gated on ?debug=1 via the diagnostics module');
   assert.ok(appSrc.includes("diag.record('boot'"), 'boot event must be recorded');
-  assert.ok(appSrc.includes("diag.record('stage'"), 'stage transitions must be recorded');
   // Standing entitlement guards (see also language-completion +
   // pricing-acceptance source guards): App.tsx itself must never read
   // the return URL query or parse URL parameters, so ?checkout=success
@@ -161,7 +160,10 @@ test('App diagnostics wiring exists and records no sensitive identifiers', () =>
   assert.ok(!appSrc.includes('URLSearchParams'), 'App.tsx must not parse URL parameters');
   assert.ok(!appSrc.includes('checkout=success'), 'App.tsx must not handle checkout=success');
   const recordLines = appSrc.split('\n').filter((l) => l.includes('.record('));
-  assert.ok(recordLines.length >= 2, `expected diagnostics record calls, found ${recordLines.length}`);
+  // Picker-testing instrumentation removed 2026-10-29: the only
+  // remaining debug record is the boot event (buildSha + counters +
+  // navigation type for the ?debug=1 panel).
+  assert.ok(recordLines.length >= 1, `expected diagnostics record calls, found ${recordLines.length}`);
   const forbidden = ['answers', 'photoFile', 'full_name', 'token', 'imageReview', 'fileName', 'reviewError', 'factRecord'];
   for (const line of recordLines) {
     for (const token of forbidden) {
@@ -170,10 +172,18 @@ test('App diagnostics wiring exists and records no sensitive identifiers', () =>
   }
 });
 
-test('App stage reasons are attributed at navigation handlers', () => {
-  for (const reason of ["'next'", "'back'", "'start-over'", "'complete'"]) {
-    assert.ok(appSrc.includes(`diagReasonRef.current = ${reason}`), `missing stage reason ${reason}`);
-  }
+test('persisted diagnostics store is gone (picker-testing instrumentation removed 2026-10-29)', () => {
+  const diagSrc = fs.readFileSync(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), '../src/diagnostics.ts'),
+    'utf8',
+  );
+  assert.ok(!diagSrc.includes('iru_diagnostics_v1'), 'persisted diagnostics key must be removed');
+  assert.ok(!diagSrc.includes('persistDiagnosticEvents'), 'persist function must be removed');
+  assert.ok(!diagSrc.includes('loadPersistedDiagnostics'), 'load function must be removed');
+  assert.ok(!diagSrc.includes('summarizeFileForDiagnostics'), 'file summarizer must be removed');
+  assert.ok(!appSrc.includes('iru_diagnostics_v1'), 'App must not reference the persisted diagnostics key');
+  assert.ok(!appSrc.includes('pickerAttemptStore'), 'picker-attempt marker module must not be imported');
+  assert.ok(!appSrc.includes('fsaPicker'), 'picker-routes harness module must not be imported');
 });
 
 // ── Debug-overlay minimize/expand behavior (2026-10-26 fix) ──────────

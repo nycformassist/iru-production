@@ -37,7 +37,7 @@ test('picker open saves synchronously with the picker-opened marker', () => {
   const clickBody = photo.slice(clickStart, clickEnd);
   assert.ok(clickBody.includes('saveRecovery(sessionStore()'), 'open must save synchronously');
   assert.ok(clickBody.includes('pickerOpened: true'), 'open must set the picker marker');
-  assert.ok(clickBody.includes("diag.record('picker-open'"), 'open must record a diagnostic');
+  assert.ok(!clickBody.includes("diag.record("), 'open must not record a debug diagnostic (picker-testing logging removed 2026-10-29)');
 });
 
 test('picker cancellation never resets stage, language, answers, or doc type', () => {
@@ -45,7 +45,8 @@ test('picker cancellation never resets stage, language, answers, or doc type', (
   const cancelStart = photo.indexOf('onCancel={() => {');
   const cancelEnd = photo.indexOf('onChange={handlePhotoChange}', cancelStart);
   const cancelBody = photo.slice(cancelStart, cancelEnd);
-  assert.ok(cancelBody.includes("diag.record('picker-cancel'"), 'cancel must record a diagnostic');
+  assert.ok(cancelBody.includes('pickerOpened: false'), 'cancel must clear the picker-opened flag');
+  assert.ok(cancelBody.includes('saveRecovery(sessionStore()'), 'cancel must persist the cleared flag');
   for (const token of ['setStage', 'setLang', 'setAnswers', 'setPhotoEvidenceKey', 'setCurrentQ']) {
     assert.ok(!cancelBody.includes(token), `cancel handler must not call ${token}`);
   }
@@ -56,7 +57,8 @@ test('file-change handling resets the input and never resets stage', () => {
   assert.ok(fnStart !== -1, 'handlePhotoChange must exist');
   const fnEnd = appSrc.indexOf('/** One-time document photo review', fnStart);
   const fnBody = appSrc.slice(fnStart, fnEnd);
-  assert.ok(fnBody.includes("diag.record('picker-change'"), 'change must record a diagnostic');
+  assert.ok(!fnBody.includes("diag.record("), 'change must not record a debug diagnostic (picker-testing logging removed 2026-10-29)');
+  assert.ok(fnBody.includes('pickerOpened: false'), 'a landed pick must clear the picker-opened flag');
   assert.ok(fnBody.includes('setPhotoFile(e.target.files'), 'change must set the photo state from the selected file');
   assert.ok(fnBody.includes("e.target.value = ''"), 'input value must reset so the same file can be re-selected');
   assert.ok(!fnBody.includes('setStage'), 'change handler must never reset stage');
@@ -97,7 +99,6 @@ test('assessment completion clears recovery', () => {
 
 test('boot restore + hide/pagehide saves are wired', () => {
   assert.ok(appSrc.includes('loadRecovery(store'), 'boot must attempt a restore');
-  assert.ok(appSrc.includes("diagReasonRef.current = 'restore'"), 'restore must attribute the stage reason');
   assert.ok(appSrc.includes("t('recoveryPicker'"), 'picker-return restore message must exist');
   assert.ok(appSrc.includes("t('recoveryRestored'"), 'plain restore message must exist');
   assert.ok(appSrc.includes("document.visibilityState === 'hidden'"), 'hidden must trigger a save');

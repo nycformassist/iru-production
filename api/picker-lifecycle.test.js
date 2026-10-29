@@ -12,7 +12,6 @@ import {
   loadPickerMarker,
   RECOVERY_KEY,
 } from '../src/assessmentRecovery.ts';
-import { summarizeFileForDiagnostics } from '../src/diagnostics.ts';
 
 const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
 
@@ -65,13 +64,14 @@ test('picker open: the recovery snapshot (with picker marker) is written synchro
 test('picker open: App writes recovery in the input onClick BEFORE the OS picker can take over', () => {
   const click = body('onClick={() => {', 'onCancel={');
   assert.match(click, /saveRecovery\(sessionStore\(\), \{[^}]*pickerOpened: true/);
-  assert.ok(click.indexOf('saveRecovery') < click.indexOf("'picker-open'"), 'saved first, then logged');
+  assert.ok(!click.includes('diag.record('), 'no debug logging on picker open (picker-testing instrumentation removed 2026-10-29)');
 });
 
-test('picker cancel: the cancel handler cannot change stage, language, answers, doc type, or storage', () => {
+test('picker cancel: the cancel handler cannot change stage, language, answers, or doc type', () => {
   const cancel = body('onCancel={() => {', 'onChange={handlePhotoChange}');
   assert.ok(!MUTATORS.test(cancel), 'cancel handler contains no state or recovery mutation');
-  assert.match(cancel, /picker-cancel/);
+  assert.match(cancel, /pickerOpened: false/, 'cancel clears the picker-opened flag');
+  assert.ok(!cancel.includes('diag.record('), 'no debug logging on picker cancel');
 });
 
 test('picker cancel (no event at all): the saved snapshot alone restores stage, language, answers and doc type', () => {
@@ -126,25 +126,10 @@ test('Start Over clears ONLY the recovery key (payment and other keys survive)',
   assert.ok(!/(sessionStorage|localStorage)\.(clear|removeItem)/.test(start), 'Start Over never clears storage wholesale');
 });
 
-test('debug log describes a picked file by MIME class and size bucket only (no file name)', () => {
-  const file = { name: 'jane-doe-passport.jpg', type: 'image/jpeg', size: 2 * 1024 * 1024 };
-  const out = summarizeFileForDiagnostics(file);
-  assert.deepEqual(out, { mimeClass: 'image/jpeg', sizeBucket: '1-3MB' });
-  assert.ok(!JSON.stringify(out).includes('jane'));
-  assert.deepEqual(summarizeFileForDiagnostics(null), { mimeClass: 'none', sizeBucket: 'none' });
-  assert.equal(summarizeFileForDiagnostics({ type: '', size: 10 }).mimeClass, 'empty', 'cloud-provider files may report an empty type');
-  assert.equal(summarizeFileForDiagnostics({ type: 'image/HEIC', size: 10 }).mimeClass, 'heic');
-  assert.equal(summarizeFileForDiagnostics({ type: 'application/x-weird', size: 10 }).mimeClass, 'other');
-  assert.equal(summarizeFileForDiagnostics({ type: 'image/png', size: 0 }).sizeBucket, 'empty');
-  assert.equal(summarizeFileForDiagnostics({ type: 'image/png', size: 5 * 1024 * 1024 }).sizeBucket, '>=3MB');
-});
 
-test('App passes only the summary (never the file name) to the picker/review diagnostics', () => {
-  const change = body('const handlePhotoChange =', '/** One-time document photo review.');
-  assert.ok(!/files\[0\]\.name|\.name\b/.test(change.split('picker-change')[1].split('\n')[0]), 'picker-change record carries no file name');
-  for (const ev of ['review-validate', 'review-start', 'review-response', 'review-error']) {
-    assert.ok(app.includes(`'${ev}'`), `${ev} diagnostic present`);
+test('picker-testing diagnostics are gone from App (picker defect resolved on-device 2026-10-29)', () => {
+  for (const ev of ['review-validate', 'review-start', 'review-response', 'review-error', 'picker-open', 'picker-cancel', 'picker-change', 'picker-recreation-detected', 'shared-file-received', 'review-compressed']) {
+    assert.ok(!app.includes(`'${ev}'`), `${ev} debug event must be removed`);
   }
-  const reviewErr = app.slice(app.indexOf("'review-error'"), app.indexOf("'review-error'") + 200);
-  assert.ok(!/\.message|\.stack/.test(reviewErr), 'error NAME only, never message or stack');
+  assert.ok(!app.includes('summarizeFileForDiagnostics'), 'file summarizer must be removed');
 });

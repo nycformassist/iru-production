@@ -35,6 +35,11 @@ import { detectReviewMismatch } from './reviewMismatch';
 import { scoreEvidenceItem, scoreBandForRatio, formatScorePoints } from './evidenceScoring';
 
 // Android recovery diagnostics (?debug=1 overlay only; see src/diagnostics.ts).
+// The picker-testing instrumentation (persisted event store, picker-attempt
+// marker, picker-route experiments) was removed 2026-10-29 after the
+// Android picker defect was resolved on-device. The ?debug=1 panel stays
+// as the future diagnostic route (buildSha, boot/session counts,
+// navigation type).
 import {
   createDiagnostics,
   isDiagnosticsEnabledFromLocation,
@@ -42,21 +47,9 @@ import {
   getNavigationInfo,
   installDiagnosticListeners,
   safeStorage,
-  loadPersistedDiagnostics,
   DIAGNOSTIC_BOOT_SESSION_KEY,
   DIAGNOSTIC_BOOT_TOTAL_KEY,
-  summarizeFileForDiagnostics,
 } from './diagnostics';
-
-// Picker-attempt marker (2026-10-28, brief sections A/C): a synchronous
-// sessionStorage marker written at onClick before the picker opens, so
-// a page recreation during the picker is visible on the restore boot
-// even though the 72689dc photo hold never ran (change never fired).
-import {
-  markPickerOpened,
-  readPickerAttempt,
-  clearPickerAttempt,
-} from './pickerAttemptStore';
 
 // Android recovery: session-scoped restore (see src/assessmentRecovery.ts).
 import {
@@ -86,15 +79,6 @@ import {
   consumeSharedFile,
   clearSharedFile,
 } from './sharedFileStore';
-import {
-  pickViaFsa,
-  hasFsaPicker,
-  saveFsaHandle,
-  clearFsaHandle,
-  probeStoredHandle,
-  regrantStoredHandle,
-  pickerRoutesVisible,
-} from './fsaPicker';
 
 import { LANGUAGES, UI_LABELS, PHASE_1_QUESTIONS, TRIAGE_QUESTION, PHASE_2_QUESTIONS, PHASE_3_QUESTIONS, NYC_RESOURCES, CONSULATES, PROXIES, NARRATIVE_STARTERS, USCIS_FORMS, FEE_SCHEDULE_AS_OF, buildExecutiveSummary } from './constants';
 
@@ -254,14 +238,13 @@ export default function App() {
   // Set when Review compressed an oversize photo instead of refusing
   // it (2026-10-28). Cleared on the next pick and on Start Over.
   const [photoResizedNotice, setPhotoResizedNotice] = useState('');
-  // Picker-route experiments (src/fsaPicker.ts). Visible only with ?debug=1
-  // while PICKER_ROUTES_PUBLIC is false; normal users never see them.
-  const [routesVisible] = useState(() => pickerRoutesVisible(isDiagnosticsEnabledFromLocation()));
-  const [fsaHandleStored, setFsaHandleStored] = useState(false);
-  // Recreation notice (2026-10-28, brief section C): shown only when a
-  // picker attempt marker exists on boot AND no held file was found —
-  // i.e. the page was recreated during the picker, before the photo
-  // arrived. Attempt count itself is diagnostics-only, never shown here.
+  // Recreation notice (2026-10-28): shown only when the recovery snapshot
+  // said the picker was open at boot AND no held file was found — i.e.
+  // the page was recreated during the picker, before the photo arrived.
+  // Since 2026-10-29 the signal is the recovery payload's pickerOpened
+  // flag (written synchronously at input onClick, consumed on restore);
+  // the separate picker-attempt marker was testing instrumentation and
+  // was removed after the picker defect was resolved on-device.
   const [pickerRecreatedNotice, setPickerRecreatedNotice] = useState('');
   // Set by the boot restore effect when the recovery snapshot says the
   // picker was open on PHOTO. Read by the photo restore effect to
@@ -344,8 +327,6 @@ export default function App() {
       clearRecovery(sessionStore());
       void clearPhotoFile();
       void clearSharedFile();
-      void clearFsaHandle();
-      clearPickerAttempt();
       setRestoredNotice('');
       setPhotoRestoredNotice('');
       setPhotoSharedNotice('');
@@ -364,15 +345,16 @@ export default function App() {
   // counters) — see src/diagnostics.ts privacy contract.
   const diagnosticsRef = useRef<any>(null);
   if (diagnosticsRef.current === null) {
-    // Pass sessionStorage so every record persists synchronously across
-    // boots (brief section A). In the node harness sessionStorage is
-    // absent and safeStorage returns null, preserving in-memory-only
-    // behaviour for tests.
-    diagnosticsRef.current = createDiagnostics(safeStorage((() => { try { return sessionStorage; } catch { return null; } })()));
+    // The debug panel is in-memory only (no persisted event store since
+    // 2026-10-29). The overlay shows buildSha, boot/session counts,
+    // navigation type, and the current boot's events.
+    diagnosticsRef.current = createDiagnostics();
   }
+  // diagReasonRef is retained only so handleInterviewComplete stays
+  // byte-identical (a brittle test slices that function; it must not be
+  // edited). It no longer feeds any diagnostic recording.
   const diagReasonRef = useRef('navigation');
   const diagBootDoneRef = useRef(false);
-  const diagFirstStageRef = useRef(true);
   useEffect(() => {
     if (diagBootDoneRef.current) return;
     diagBootDoneRef.current = true;
@@ -393,59 +375,25 @@ export default function App() {
     diag.navigationType = nav.type;
     diag.wasDiscarded = nav.wasDiscarded;
     diag.record('boot', { stage, navigationType: nav.type, wasDiscarded: nav.wasDiscarded, bootSession: diag.bootSessionCount });
-    // Persisted diagnostics (brief section A): prepend the previous
-    // boot's events, labelled previousBoot in their detail, so the
-    // debug panel can show a previous-boot picker-open with no
-    // picker-change after it. Then record a feature-detect only
-    // (no API call) for showOpenFilePicker, which settles empirically
-    // on the actual device whether the File System Access picker
-    // route is even available on that browser.
+    // Non-fatal user message for otherwise-unhandled errors. This is
+    // user-facing (not a debug log line): the banner reassures the
+    // applicant that progress is safe. The picker-testing lifecycle
+    // telemetry (pagehide/pageshow/focus/blur/visibilitychange records)
+    // was removed 2026-10-29.
+    let bannerCleanup: (() => void) | null = null;
     try {
-      const prev = loadPersistedDiagnostics(sessionStore);
-      if (prev.length > 0) {
-        diag.log.events.unshift(...prev.map((e: any) => ({ ...e, detail: { ...(e.detail || {}), previousBoot: true } })));
-      }
-    } catch { /* persisted diagnostics are best-effort */ }
-    try {
-      const hasPickerApi = typeof (globalThis as any).showOpenFilePicker === 'function';
-      diag.record('picker-api', { showOpenFilePicker: hasPickerApi });
-    } catch { /* feature-detect must never break boot */ }
-    // Debug only: after a recreation, report whether a stored
-    // File System Access handle survived and what permission it has.
-    try {
-      if (isDiagnosticsEnabledFromLocation()) {
-        void probeStoredHandle(diag.record).then((found) => setFsaHandleStored(found)).catch(() => { /* best-effort */ });
-      }
-    } catch { /* probe must never break boot */ }
-    const cleanups: Array<() => void> = [];
-    try {
-      cleanups.push(installDiagnosticListeners(window, diag.record, ['pagehide', 'pageshow', 'focus', 'blur', 'popstate']));
-      cleanups.push(installDiagnosticListeners(window, diag.record, ['error', 'unhandledrejection']));
-      cleanups.push(installDiagnosticListeners(document, diag.record, ['visibilitychange']));
+      bannerCleanup = installDiagnosticListeners(window, () => {}, ['error', 'unhandledrejection'], () => {
+        setGlobalNotice(t('globalError', 'Something went wrong, but your progress is safe. You can continue.'));
+      });
     } catch { /* diagnostics must never break the app */ }
     try {
       if (isDiagnosticsEnabledFromLocation()) diag.mountOverlay();
     } catch { /* ignore */ }
     return () => {
-      for (const c of cleanups) {
-        try { c(); } catch { /* ignore */ }
-      }
+      try { if (bannerCleanup) bannerCleanup(); } catch { /* ignore */ }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  // Stage transitions with reason. The reason ref is set by navigation
-  // handlers before they change stage ('next' / 'back' / 'start-over' /
-  // 'complete'); anything else records as 'navigation'. The first run
-  // (mount) is skipped — boot already recorded the initial stage.
-  useEffect(() => {
-    if (diagFirstStageRef.current) {
-      diagFirstStageRef.current = false;
-      return;
-    }
-    const diag = diagnosticsRef.current;
-    if (diag) diag.record('stage', { stage, reason: diagReasonRef.current });
-    diagReasonRef.current = 'navigation';
-  }, [stage]);
 
   /** Plain-text rendering of the structured assessment for the packet. */
   const renderAssessmentText = (a: any): string => {
@@ -501,7 +449,6 @@ export default function App() {
     const store = sessionStore();
     const restored = loadRecovery(store, { allowedLangs: SUPPORTED_LANGS });
     if (restored) {
-      diagReasonRef.current = 'restore';
       setLang(restored.language);
       setAnswers((prev: Record<string, string>) => ({ ...prev, ...restored.answers }));
       setPhotoEvidenceKey(restored.docType);
@@ -518,15 +465,14 @@ export default function App() {
       } else {
         setRestoredNotice(t('recoveryRestored', 'Your assessment progress was restored.'));
       }
-      const diag = diagnosticsRef.current;
-      if (diag) diag.record('restore', { stage: restored.stage, pickerOpened: restored.pickerOpened });
-      // Consume the picker marker so it does not repeat on later reloads.
+      // Consume the picker-opened flag so it does not repeat on later
       saveRecovery(store, { stage: restored.stage, language: restored.language, answers: restored.answers, docType: restored.docType, pickerOpened: false });
     }
     // Save on hide/pagehide from the latest-state ref (an effect closure
-    // would otherwise capture stale state). The picker marker is
+    // would otherwise capture stale state). The picker-opened flag is
     // preserved while the saved stage is PHOTO (it is only meaningful
-    // there); leaving PHOTO clears it.
+    // there); leaving PHOTO clears it. (The non-fatal error banner is
+    // installed once by the diagnostics boot effect above.)
     const saveFromRef = () => {
       const s = recoveryStateRef.current;
       const marker = s.stage === 'PHOTO' ? loadPickerMarker(sessionStore()) : false;
@@ -542,18 +488,9 @@ export default function App() {
       document.addEventListener('visibilitychange', onVis);
       window.addEventListener('pagehide', onHide);
     } catch { /* listeners are best-effort */ }
-    // Non-fatal user message for otherwise-unhandled errors. Recording is
-    // done by the diagnostics listeners; this pair only shows the banner.
-    let bannerCleanup: (() => void) | null = null;
-    try {
-      bannerCleanup = installDiagnosticListeners(window, () => {}, ['error', 'unhandledrejection'], () => {
-        setGlobalNotice(t('globalError', 'Something went wrong, but your progress is safe. You can continue.'));
-      });
-    } catch { /* ignore */ }
     return () => {
       try { document.removeEventListener('visibilitychange', onVis); } catch { /* ignore */ }
       try { window.removeEventListener('pagehide', onHide); } catch { /* ignore */ }
-      try { if (bannerCleanup) bannerCleanup(); } catch { /* ignore */ }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -691,7 +628,6 @@ export default function App() {
   const question = questions[currentQ];
 
   const handleNextQuestion = () => {
-    diagReasonRef.current = 'next';
     if (currentQ < questions.length - 1) {
       setCurrentQ(currentQ + 1);
     } else {
@@ -717,7 +653,6 @@ export default function App() {
   };
 
   const handlePrevQuestion = () => {
-    diagReasonRef.current = 'back';
     if (stage === 'PHOTO') {
       setStage('PHASE4');
       setCurrentQ(0);
@@ -776,19 +711,21 @@ export default function App() {
           setPhotoEvidenceKey((prev: string) => prev || stored.evidenceKey || '');
           setRestoredNotice('');
           setPhotoRestoredNotice(t('photoRestored', 'Your selected document was restored after the page was recreated. You can review it now.'));
-          clearPickerAttempt();
           setPickerRecreatedNotice('');
         } catch {
           // A malformed held record must never break the photo step.
         }
         return;
       }
-      // No held file: recreation during the picker, if a marker says so.
+      // No held file: recreation during the picker, if the recovery
+      // snapshot said the picker was open when this boot restored.
+      // (Since 2026-10-29 the recovery payload's pickerOpened flag —
+      // written synchronously at input onClick — is the signal; the
+      // separate picker-attempt marker was testing instrumentation and
+      // was removed.) On any read failure, fall back to the generic
+      // boot notice set by the restore effect.
       try {
-        const attempt = readPickerAttempt();
-        if (attempt || pickerRecreatedCandidateRef.current) {
-          const diag = diagnosticsRef.current;
-          if (diag) diag.record('picker-recreation-detected', { attemptCount: attempt ? attempt.attemptCount : 1, stage: 'PHOTO', method: attempt ? attempt.method : 'input' });
+        if (pickerRecreatedCandidateRef.current) {
           setRestoredNotice('');
           setPickerRecreatedNotice(t('pickerRecreated', 'The page was recreated while the picker was open, before your photo arrived. Your answers are saved. Please pick the photo again.'));
         }
@@ -855,9 +792,6 @@ export default function App() {
       setPhotoSharedNotice(inProgress
         ? t('photoShared', 'A photo you shared was received. You can review it now.')
         : t('photoSharedStart', 'A photo you shared was received. You can review it now, or use Back to complete the questionnaire first and then return to this step to review it.'));
-      const diag = diagnosticsRef.current;
-      if (diag) diag.record('shared-file-received', { stage: 'PHOTO', ...summarizeFileForDiagnostics(file) });
-      diagReasonRef.current = 'shared-file';
       setStage('PHOTO');
     }).catch(() => {
       // consumeSharedFile never throws by contract; defence in depth.
@@ -866,54 +800,6 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /** DEBUG-ONLY route experiment: File System Access picker (src/fsaPicker.ts).
-   * Everything before pickViaFsa() is synchronous so the click's user
-   * activation is intact when showOpenFilePicker runs. The marker is
-   * written first, exactly like the <input> route, so a recreation during
-   * THIS picker is detected and labelled method 'fsa'. A landed file takes
-   * the same hold + clear rules as the <input> route. */
-  const handleFsaPick = () => {
-    markPickerOpened(photoEvidenceKey || null, undefined, 'fsa');
-    saveRecovery(sessionStore(), { stage, language: lang, answers, docType: photoEvidenceKey, pickerOpened: true });
-    const diag = diagnosticsRef.current;
-    if (diag) diag.record('picker-open', { stage, method: 'fsa' });
-    void pickViaFsa().then((r) => {
-      const d = diagnosticsRef.current;
-      clearPickerAttempt();
-      if (r.status === 'picked') {
-        if (d) d.record('picker-change', { stage, method: 'fsa', hasFile: true, ...summarizeFileForDiagnostics(r.file) });
-        setPickerRecreatedNotice('');
-        setPhotoFile(r.file);
-        void savePhotoFile(r.file, photoEvidenceKey);
-        void saveFsaHandle(r.handle, photoEvidenceKey).then((ok) => {
-          if (d) d.record('fsa-handle-saved', { ok });
-          setFsaHandleStored(ok);
-        });
-        setPhotoRestoredNotice('');
-        setImageReview(null);
-        setReviewError('');
-      } else if (r.status === 'cancelled') {
-        if (d) d.record('picker-cancel', { stage, method: 'fsa' });
-      } else if (r.status === 'unsupported') {
-        if (d) d.record('fsa-error', { errorName: 'Unsupported', stage: 'picker' });
-      } else if (d) {
-        d.record('fsa-error', { errorName: r.errorName, stage: r.stage });
-      }
-    }).catch(() => { /* pickViaFsa never rejects; defence in depth */ });
-  };
-
-  /** DEBUG-ONLY: re-grant read access to the stored handle (needs this tap
-   * as its user gesture) and adopt the file if the grant works. */
-  const handleFsaRegrant = () => {
-    const diag = diagnosticsRef.current;
-    void regrantStoredHandle(diag ? diag.record : () => {}).then((got) => {
-      if (!got) return;
-      setPhotoFile(got.file);
-      setPhotoEvidenceKey((prev: string) => prev || got.evidenceKey || '');
-      setPhotoRestoredNotice(t('photoRestored', 'Your selected document was restored after the page was recreated. You can review it now.'));
-    }).catch(() => { /* best-effort */ });
-  };
-
   /** PHOTO file selection (Android recovery). Cancellation — including a
    * change event with no files — never touches stage, language, answers,
    * or document type. The input value is reset after handling so the same
@@ -921,22 +807,22 @@ export default function App() {
    * recoverable message; it never resets the assessment. */
   const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     try {
-      const diag = diagnosticsRef.current;
-      if (diag) diag.record('picker-change', { stage, method: e.target.id === 'iru-photo-camera-input' ? 'camera' : 'input', hasFile: !!(e.target.files && e.target.files[0]), ...summarizeFileForDiagnostics(e.target.files && e.target.files[0]) });
       const picked = e.target.files && e.target.files[0] ? e.target.files[0] : null;
       setPhotoFile(e.target.files && e.target.files[0] ? e.target.files[0] : null);
       if (picked) {
-        // The pick resolved, so the attempt marker is no longer needed
-        // (brief section A clear rule), and any recreation notice from
-        // a previous boot is superseded by the landed file.
-        clearPickerAttempt();
+        // The pick resolved, so the picker-opened flag is no longer needed
+        // (a later restore must not show the recreation notice), and any
+        // recreation notice from a previous boot is superseded by the
+        // landed file. The recovery snapshot is re-saved with the flag
+        // cleared so debounced/hide saves never revive it.
+        saveRecovery(sessionStore(), { stage, language: lang, answers, docType: photoEvidenceKey, pickerOpened: false });
         setPickerRecreatedNotice('');
         // Browser-local hold so a later page recreation restores this
         // file. Fire-and-forget: savePhotoFile never throws and never
         // blocks the UI; a failed hold leaves the in-state file usable
         // in this page. Choosing another file replaces the held file.
         // An empty change (cancel) does not touch the held file, and
-        // does not clear the marker on its own — cancellation clears
+        // does not clear the flag on its own — cancellation clears
         // via onCancel, which is the explicit cancel path. This keeps
         // the clear rule consistent: picked => clear, cancelled => clear.
         void savePhotoFile(picked, photoEvidenceKey);
@@ -989,22 +875,14 @@ export default function App() {
         reviewFile = compressed.blob;
         reviewMimeType = compressed.mimeType;
         setPhotoResizedNotice(t('photoResized', 'Your photo was resized in your browser so it could be reviewed. The original file was not changed.'));
-        const diagC = diagnosticsRef.current;
-        if (diagC) diagC.record('review-compressed', { stage });
       } else {
-        const diagV = diagnosticsRef.current;
-        if (diagV) diagV.record('review-validate', { ok: false });
         setReviewError(validation.message);
         return;
       }
     } else if (validation.ok === false) {
-      const diagV = diagnosticsRef.current;
-      if (diagV) diagV.record('review-validate', { ok: false });
       setReviewError(validation.message);
       return;
     }
-    const diagR = diagnosticsRef.current;
-    if (diagR) diagR.record('review-start', { stage });
     setReviewing(true);
     let phase: 'read' | 'fetch' | 'parse' = 'read';
     try {
@@ -1026,7 +904,6 @@ export default function App() {
           lang,
         }),
       });
-      if (diagR) diagR.record('review-response', { status: response.status, ok: response.ok });
       if (!response.ok) {
         // Distinguishable, recoverable message per failure class; the
         // user can retry, pick another file, or skip this step.
@@ -1065,7 +942,6 @@ export default function App() {
         // Retry can reuse the held file after a recreation.
         void clearPhotoFile();
         void clearSharedFile();
-      void clearFsaHandle();
         setPhotoRestoredNotice('');
         setPhotoSharedNotice('');
       } else {
@@ -1073,7 +949,6 @@ export default function App() {
       }
     } catch (e) {
       console.error('Photo review error:', e);
-      if (diagR) diagR.record('review-error', { phase, errorName: e && (e as any).name ? String((e as any).name) : 'unknown' });
       setReviewError(
         phase === 'read'
           ? MESSAGE_PHOTO_READ_FAILURE
@@ -1086,14 +961,11 @@ export default function App() {
 
   // ── Complete reset ───────────────────────────────────────────────────────
   const handleStartOver = () => {
-    diagReasonRef.current = 'start-over';
     // Android recovery: start over clears ONLY the recovery key (never
     // payment keys — clearRecovery removes exactly one namespaced key),
     // plus the browser-local held photo file (explicitly, alongside it).
     clearRecovery(sessionStore());
     void clearPhotoFile();
-      void clearFsaHandle();
-    clearPickerAttempt();
     setRestoredNotice('');
     setPhotoRestoredNotice('');
     setPhotoResizedNotice('');
@@ -2629,30 +2501,19 @@ export default function App() {
                     accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,.pdf"
                     className="sr-only"
                     onClick={() => {
-                      // Picker-attempt marker FIRST, synchronously, before
-                      // anything else: sessionStorage.setItem completes
-                      // before the browser hands control to the picker
-                      // intent, so it can survive a page recreation
-                      // during the picker (brief section A). Then save
-                      // synchronously BEFORE the picker opens, so a page
-                      // discard while the picker is foreground still
-                      // restores progress. The picker-opened marker tells
+                      // Save synchronously BEFORE the picker opens, so a
+                      // page discard while the picker is foreground still
+                      // restores progress. The picker-opened flag tells
                       // boot restore to ask for the document again.
-                      markPickerOpened(photoEvidenceKey || null);
                       saveRecovery(sessionStore(), { stage, language: lang, answers, docType: photoEvidenceKey, pickerOpened: true });
-                      const diag = diagnosticsRef.current;
-                      if (diag) diag.record('picker-open', { stage });
                     }}
                     onCancel={() => {
-                      // Cancellation clears the attempt marker (brief
-                      // section A clear rule) but is otherwise a no-op
-                      // for assessment state by design: it must never
-                      // reset stage, language, answers, or document
-                      // type. (Do not depend on this event firing —
-                      // recovery covers the no-event case.)
-                      clearPickerAttempt();
-                      const diag = diagnosticsRef.current;
-                      if (diag) diag.record('picker-cancel', { stage });
+                      // Cancellation clears the picker-opened flag but is
+                      // otherwise a no-op for assessment state by design:
+                      // it must never reset stage, language, answers, or
+                      // document type. (Do not depend on this event
+                      // firing — recovery covers the no-event case.)
+                      saveRecovery(sessionStore(), { stage, language: lang, answers, docType: photoEvidenceKey, pickerOpened: false });
                     }}
                     onChange={handlePhotoChange}
                   />
@@ -2660,47 +2521,6 @@ export default function App() {
                     {photoFile ? photoFile.name : (ui.photoChoose || 'Choose a photo…')}
                   </span>
                 </label>
-
-                {routesVisible && (
-                  <div className="p-3 rounded-xl bg-slate-900 text-slate-100 text-sm space-y-2" data-testid="picker-experiments">
-                    <p className="m-0 font-semibold">Picker experiments (debug only, not shown to normal users)</p>
-                    {hasFsaPicker() && (
-                      <button type="button" onClick={handleFsaPick} className="block w-full px-4 py-3 rounded-lg bg-indigo-500 text-white font-medium text-left">
-                        Choose with alternate picker
-                      </button>
-                    )}
-                    <label htmlFor="iru-photo-camera-input" className="block w-full px-4 py-3 rounded-lg bg-indigo-500 text-white font-medium cursor-pointer">
-                      Take a photo with the camera
-                      <input
-                        id="iru-photo-camera-input"
-                        type="file"
-                        accept="image/*"
-                        capture="environment"
-                        className="sr-only"
-                        onClick={() => {
-                          markPickerOpened(photoEvidenceKey || null, undefined, 'camera');
-                          saveRecovery(sessionStore(), { stage, language: lang, answers, docType: photoEvidenceKey, pickerOpened: true });
-                          const diag = diagnosticsRef.current;
-                          if (diag) diag.record('picker-open', { stage, method: 'camera' });
-                        }}
-                        onCancel={() => {
-                          clearPickerAttempt();
-                          const diag = diagnosticsRef.current;
-                          if (diag) diag.record('picker-cancel', { stage, method: 'camera' });
-                        }}
-                        onChange={handlePhotoChange}
-                      />
-                    </label>
-                    {fsaHandleStored && (
-                      <button type="button" onClick={handleFsaRegrant} className="block w-full px-4 py-3 rounded-lg bg-slate-700 text-white font-medium text-left">
-                        Re-check saved file access
-                      </button>
-                    )}
-                    <button type="button" onClick={() => { try { window.location.reload(); } catch { /* ignore */ } }} className="block w-full px-4 py-3 rounded-lg bg-slate-700 text-white font-medium text-left">
-                      Reload page (simulates a recreation)
-                    </button>
-                  </div>
-                )}
 
                 <p className="text-sm text-slate-600 leading-relaxed">
                   {t('pickerGuidance', 'To close the file picker, tap its X or back arrow. Once you are back in IRU, use IRU’s own Back and Continue buttons. Your phone’s Back gesture may take you out of this page.')}

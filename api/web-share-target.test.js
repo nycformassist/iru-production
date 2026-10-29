@@ -223,10 +223,9 @@ test('service worker: a non-share request is untouched (no respondWith, no cache
   assert.ok(!/fetch\(/.test(swSrc.replace(/addEventListener/g, '')), 'worker makes no network fetch');
 });
 
-test('app boot: shared file is consumed once, lands on PHOTO, and is diagnosed privacy-safely', () => {
+test('app boot: shared file is consumed once and lands on PHOTO', () => {
   assert.match(app, /consumeSharedFile\(\)/);
-  assert.match(app, /shared-file-received/);
-  assert.match(app, /summarizeFileForDiagnostics\(file\)/);
+  assert.ok(!app.includes('shared-file-received'), 'the shared-file debug event was testing instrumentation (removed 2026-10-29)');
   assert.match(app, /setStage\('PHOTO'\)/);
   assert.match(app, /photoSharedNotice/);
   // The shared notice never shows a file name: it is a fixed string.

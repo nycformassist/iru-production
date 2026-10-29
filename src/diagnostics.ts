@@ -24,31 +24,6 @@
 // output, or payment data. Error events record the error NAME only,
 // never the message or stack, because messages can embed user data.
 
-/**
- * Non-sensitive description of a picked file for the debug log (2026-10-28):
- * MIME class and a coarse size bucket ONLY. Never the file name, contents,
- * or any preview. Lets a device test show WHY a selection failed (HEIC,
- * empty type from a cloud provider, oversize) without logging the document.
- */
-export function summarizeFileForDiagnostics(
-  file: { type?: unknown; size?: unknown } | null | undefined,
-): { mimeClass: string; sizeBucket: string } {
-  if (!file) return { mimeClass: 'none', sizeBucket: 'none' };
-  const type = typeof file.type === 'string' ? file.type.toLowerCase() : '';
-  const known = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'application/pdf'];
-  let mimeClass = 'other';
-  if (type === '') mimeClass = 'empty';
-  else if (known.includes(type)) mimeClass = type;
-  else if (type === 'image/heic' || type === 'image/heif') mimeClass = 'heic';
-  const size = typeof file.size === 'number' && Number.isFinite(file.size) ? file.size : -1;
-  let sizeBucket = 'unknown';
-  if (size === 0) sizeBucket = 'empty';
-  else if (size > 0 && size < 1024 * 1024) sizeBucket = '<1MB';
-  else if (size >= 1024 * 1024 && size < 3 * 1024 * 1024) sizeBucket = '1-3MB';
-  else if (size >= 3 * 1024 * 1024) sizeBucket = '>=3MB';
-  return { mimeClass, sizeBucket };
-}
-
 export const DIAGNOSTIC_PARAM = 'debug';
 export const DIAGNOSTIC_VALUE = '1';
 export const DIAGNOSTIC_EVENT_LIMIT = 30;
@@ -184,75 +159,6 @@ export function getNavigationInfo(
   };
 }
 
-/**
- * Persisted diagnostics key (2026-10-28, brief section A). The
- * in-memory ring buffer resets on every boot, which is exactly the
- * boot that needs the previous boot's log when a page is recreated
- * during the picker. Persisting the buffer synchronously in
- * sessionStorage on every record lets the restore boot prepend the
- * previous boot's events (labelled previousBoot in their detail) so
- * the debug panel can show "picker-open with no picker-change".
- * Payload is privacy-safe by construction: callers pass only stage
- * names, event names, booleans, counters, MIME classes, size buckets,
- * HTTP statuses, and error NAMES — never file names, contents,
- * answers, addresses, messages, or stacks. This function additionally
- * drops any detail value that is not a string/number/boolean, so a
- * future caller cannot smuggle sensitive data into the persisted log.
- */
-export const DIAGNOSTIC_PERSIST_KEY = 'iru_diagnostics_v1';
-
-export function persistDiagnosticEvents(
-  storage: StorageLike | null | undefined,
-  events: DiagnosticEvent[],
-): void {
-  if (!storage) return;
-  try {
-    const safe = events.slice(-DIAGNOSTIC_EVENT_LIMIT).map((e) => {
-      const detail: DiagnosticDetail = {};
-      const src = e.detail || {};
-      for (const key of Object.keys(src)) {
-        const v = src[key];
-        if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
-          detail[key] = v;
-        }
-      }
-      return { ts: typeof e.ts === 'number' ? e.ts : 0, type: typeof e.type === 'string' ? e.type : 'unknown', detail };
-    });
-    storage.setItem(DIAGNOSTIC_PERSIST_KEY, JSON.stringify(safe));
-  } catch {
-    // Persisting must never break recording.
-  }
-}
-
-/** Load persisted events, or [] when absent/malformed. Never throws. */
-export function loadPersistedDiagnostics(
-  storage: StorageLike | null | undefined,
-): DiagnosticEvent[] {
-  if (!storage) return [];
-  try {
-    const raw = storage.getItem(DIAGNOSTIC_PERSIST_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as Array<Partial<DiagnosticEvent>>;
-    if (!Array.isArray(parsed)) return [];
-    const out: DiagnosticEvent[] = [];
-    for (const e of parsed) {
-      if (typeof e.type !== 'string') continue;
-      const detail: DiagnosticDetail = {};
-      const src = (e.detail || {}) as Record<string, unknown>;
-      for (const key of Object.keys(src)) {
-        const v = src[key];
-        if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
-          detail[key] = v;
-        }
-      }
-      out.push({ ts: typeof e.ts === 'number' ? e.ts : 0, type: e.type, detail });
-    }
-    return out;
-  } catch {
-    return [];
-  }
-}
-
 /** Bounded ring buffer: keeps only the latest `limit` events. */
 export function createEventLog(limit: number = DIAGNOSTIC_EVENT_LIMIT): DiagnosticLog {
   const events: DiagnosticEvent[] = [];
@@ -338,11 +244,13 @@ export function installDiagnosticListeners(
  * Create a diagnostics handle. No DOM or storage is touched here; the app
  * fills in counters/navigation data after guarded reads, and mounts the
  * overlay only when ?debug=1 is present. record() auto-refreshes the
- * overlay when mounted.
+ * overlay when mounted. The event log is in-memory only: the persisted
+ * cross-boot event store (2026-10-28 picker testing) was removed on
+ * 2026-10-29 after the Android picker defect was resolved on-device;
+ * the ?debug=1 panel remains as the future diagnostic route with
+ * buildSha, boot/session counts, and navigation type.
  */
-export function createDiagnostics(
-  persistStorage?: StorageLike | null,
-): DiagnosticsHandle {
+export function createDiagnostics(): DiagnosticsHandle {
   const log = createEventLog(DIAGNOSTIC_EVENT_LIMIT);
   let overlay: {
     element: unknown;
@@ -354,15 +262,6 @@ export function createDiagnostics(
     log,
     record: (type: string, detail: DiagnosticDetail = {}) => {
       log.record(type, detail);
-      // Persist synchronously on every record when a storage was
-      // supplied (the app passes sessionStorage). No-arg callers
-      // (including the node test harness) keep the old in-memory-only
-      // behaviour. Persistence never throws into recording.
-      try {
-        if (persistStorage) persistDiagnosticEvents(persistStorage, log.events);
-      } catch {
-        /* ignore */
-      }
       try {
         if (overlay) overlay.render();
       } catch {
