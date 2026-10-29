@@ -12,6 +12,15 @@ import {
   MESSAGE_PHOTO_BAD_RESPONSE,
 } from './photoValidation';
 
+// Client-side photo compression (2026-10-28, owner ruling): a large
+// photo is shrunk in the browser at Review time, before any refusal,
+// so a consumer never has to downsize a file themselves. See
+// src/photoCompression.ts for scope and limits.
+import {
+  compressPhotoFile,
+  isCompressiblePhoto,
+} from './photoCompression';
+
 // Android recovery diagnostics (?debug=1 overlay only; see src/diagnostics.ts).
 import {
   createDiagnostics,
@@ -221,6 +230,9 @@ export default function App() {
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoEvidenceKey, setPhotoEvidenceKey] = useState('');
   const [photoRestoredNotice, setPhotoRestoredNotice] = useState('');
+  // Set when Review compressed an oversize photo instead of refusing
+  // it (2026-10-28). Cleared on the next pick and on Start Over.
+  const [photoResizedNotice, setPhotoResizedNotice] = useState('');
   // Picker-route experiments (src/fsaPicker.ts). Visible only with ?debug=1
   // while PICKER_ROUTES_PUBLIC is false; normal users never see them.
   const [routesVisible] = useState(() => pickerRoutesVisible(isDiagnosticsEnabledFromLocation()));
@@ -835,6 +847,7 @@ export default function App() {
         void savePhotoFile(picked, photoEvidenceKey);
         setPhotoRestoredNotice('');
       }
+      setPhotoResizedNotice('');
       setImageReview(null);
       setReviewError('');
       // Reset the input so re-selecting the same file fires change again.
@@ -860,8 +873,35 @@ export default function App() {
     // base64 payload would exceed the ~4.5 MB platform body limit are
     // refused here with a specific message, instead of a request the
     // server (or the platform) would reject with a generic error.
+    // 2026-10-28 compression exception: an oversize IMAGE is not
+    // refused outright. It is first shrunk in the browser (canvas,
+    // no network, no new stored copy); only if compression fails or
+    // still does not fit is the original oversize message shown.
+    // PDFs, HEIC, and unsupported types keep the refusal unchanged.
+    setPhotoResizedNotice('');
     const validation = validatePhotoFile(photoFile);
-    if (validation.ok === false) {
+    let reviewFile: File | Blob = photoFile;
+    let reviewMimeType = photoFile.type || 'image/jpeg';
+    if (validation.ok === false && validation.reason === 'oversize' && isCompressiblePhoto(photoFile)) {
+      let compressed = null;
+      try {
+        compressed = await compressPhotoFile(photoFile);
+      } catch {
+        compressed = null;
+      }
+      if (compressed) {
+        reviewFile = compressed.blob;
+        reviewMimeType = compressed.mimeType;
+        setPhotoResizedNotice(t('photoResized', 'Your photo was resized in your browser so it could be reviewed. The original file was not changed.'));
+        const diagC = diagnosticsRef.current;
+        if (diagC) diagC.record('review-compressed', { stage });
+      } else {
+        const diagV = diagnosticsRef.current;
+        if (diagV) diagV.record('review-validate', { ok: false });
+        setReviewError(validation.message);
+        return;
+      }
+    } else if (validation.ok === false) {
       const diagV = diagnosticsRef.current;
       if (diagV) diagV.record('review-validate', { ok: false });
       setReviewError(validation.message);
@@ -876,7 +916,7 @@ export default function App() {
         const r = new FileReader();
         r.onload = () => resolve(r.result as string);
         r.onerror = reject;
-        r.readAsDataURL(photoFile);
+        r.readAsDataURL(reviewFile);
       });
       const imageBase64 = dataUrl.split(',')[1] || '';
       phase = 'fetch';
@@ -885,7 +925,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           imageBase64,
-          mimeType: photoFile.type || 'image/jpeg',
+          mimeType: reviewMimeType,
           relatedEvidenceKey: photoEvidenceKey || undefined,
           lang,
         }),
@@ -943,6 +983,7 @@ export default function App() {
     clearPickerAttempt();
     setRestoredNotice('');
     setPhotoRestoredNotice('');
+    setPhotoResizedNotice('');
     setPickerRecreatedNotice('');
     setGlobalNotice('');
     setStage('LANG');
@@ -2311,6 +2352,13 @@ export default function App() {
                 <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-sm text-emerald-900 flex items-start justify-between gap-3">
                   <span>{photoRestoredNotice}</span>
                   <button onClick={() => setPhotoRestoredNotice('')} className="font-medium shrink-0" aria-label="Dismiss">×</button>
+                </div>
+              )}
+
+              {photoResizedNotice && (
+                <div className="p-3 rounded-xl bg-indigo-50 border border-indigo-200 text-sm text-indigo-900 flex items-start justify-between gap-3">
+                  <span>{photoResizedNotice}</span>
+                  <button onClick={() => setPhotoResizedNotice('')} className="font-medium shrink-0" aria-label="Dismiss">×</button>
                 </div>
               )}
 
