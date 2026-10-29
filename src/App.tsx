@@ -27,6 +27,13 @@ import {
 // evidence key; never flags on uncertain/empty categories.
 import { detectReviewMismatch } from './reviewMismatch';
 
+// Scoring redesign (2026-10-29, owner-authorized): evidence-aware scoring.
+// Pure functions; the score reflects strength of evidence across the four
+// states (Reported / Provided / Reviewed / Verified-never-by-IRU). It is an
+// awareness aid, not a validated metric, and automated review can never
+// verify — it can only modestly support or contradict a claim.
+import { scoreEvidenceItem, scoreBandForRatio, formatScorePoints } from './evidenceScoring';
+
 // Android recovery diagnostics (?debug=1 overlay only; see src/diagnostics.ts).
 import {
   createDiagnostics,
@@ -1570,26 +1577,41 @@ export default function App() {
   };
 
   const calculateReadinessScore = () => {
-    // Scored from the corrected answers (defect-closure P2): a fact
-    // correction changes the score exactly as it changes the analysis.
+    // Evidence-aware scoring (2026-10-29 redesign, owner-authorized):
+    // scored from the corrected answers (defect-closure P2) PLUS the
+    // strength of review evidence per item (see src/evidenceScoring.ts).
+    // A fact correction changes the score exactly as it changes the
+    // analysis; a reviewed photo can modestly support (+0.25) or
+    // contradict (-0.5) a claim, but automated review can never verify.
     const eff = answersWithCorrections(answers, factRecord);
     let score = 0;
     let total = 0;
     let alternativesCounted = 0; // C4: items that earned half credit via an alternative
+    // Latest reviewed upload per evidence key (same "latest wins" rule as
+    // the checklist rows), so the score and the report always agree.
+    const reviewForKey = (key: string) => {
+      const itemUploads = uploads.filter(u => u.key === key);
+      const reviewed = itemUploads.find(u => u.review);
+      return reviewed ? reviewed.review : null;
+    };
     const check = (key: string) => {
       // Not-applicable items never count against readiness (fix #9);
       // a provided ('yes') answer still counts.
       if (eff[key] && eff[key] !== 'yes' && notApplicableReason(key)) return;
       if (eff[key]) {
         total++;
-        if (eff[key] === 'yes') {
-          score++;
-        } else if (PROXIES[key]) {
-          const selectedProxies = PROXIES[key].items.filter((i: any) => eff[i.id] === 'yes');
-          if (selectedProxies.length > 0) {
-            score += 0.5;  // Secondary docs carry half weight vs primary
-            alternativesCounted++;
-          }
+        const proxySelected = PROXIES[key]
+          ? PROXIES[key].items.some((i: any) => eff[i.id] === 'yes')
+          : false;
+        const { points } = scoreEvidenceItem({
+          key,
+          claimed: eff[key] === 'yes',
+          proxyClaimed: eff[key] !== 'yes' && proxySelected,
+          review: reviewForKey(key),
+        });
+        score += points;
+        if (eff[key] !== 'yes' && proxySelected) {
+          alternativesCounted++;  // Secondary docs carry half weight vs primary
         }
       }
     };
@@ -1759,7 +1781,12 @@ export default function App() {
   const generateHtml = () => {
     const htmlLang = ({ EN: 'en', ES: 'es', ZH: 'zh', HT: 'ht', AR: 'ar' } as Record<string, string>)[lang] || 'en';
     const { score, total, alternativesCounted } = calculateReadinessScore();
-    const readinessPercent = Math.round((score / total) * 100);
+    // Evidence-aware display (2026-10-29 redesign): a coarse band plus the
+    // points total, not a percent — the score can modestly exceed the item
+    // count when matching, legible reviews support claims, and a percent
+    // would imply false precision (or an impossible >100%).
+    const scoreBandKey = scoreBandForRatio(score / total);
+    const scorePoints = formatScorePoints(score);
 
     const resourcesHtml = resources.map((res: ResourceOrg) => {
       const layerLabel = res.layer === 'statewide' ? t('pktLayerStatewide', 'Statewide') : (res.borough || t('pktLayerLocal', 'Local'));
@@ -1996,9 +2023,9 @@ export default function App() {
           <h1 class="font-serif">${ui.packetTitle}</h1>
           <p>${ui.humanAnchorSeal} • ${new Date().toLocaleDateString()}</p>
           <div style="margin-top: 1rem; display: inline-block; background-color: #eef2ff; color: #4f46e5; padding: 0.5rem 1rem; border-radius: 9999px; font-weight: 700; font-size: 0.875rem;">
-            ${ui.readinessScore}: ${readinessPercent}% (${score} of ${total} evidence items) <span style="font-weight:400;font-size:0.75rem;">${escapeHtml(t('pktHeuristicNote', '(approximate document-completeness heuristic — not a validated metric)'))}</span>
+            ${ui.readinessScore}: ${escapeHtml(t(scoreBandKey, 'Strong'))} (${scorePoints} of ${total} evidence items) <span style="font-weight:400;font-size:0.75rem;">${escapeHtml(t('pktHeuristicNote', '(approximate document-completeness heuristic — not a validated metric)'))}</span>
           </div>
-          <p style="margin:0.5rem 0 0 0;font-size:0.75rem;color:#64748b;">${escapeHtml(t('pktScoreReviewNote', 'Automated photo reviews do not change this score. It is based on your questionnaire answers only.'))}</p>
+          <p style="margin:0.5rem 0 0 0;font-size:0.75rem;color:#64748b;">${escapeHtml(t('pktScoreReviewNote', 'Automated photo reviews can move this score modestly based on what was observed. They never verify a document, and the score is not a legal determination or a prediction of any outcome.'))}</p>
           ${alternativesCounted > 0 ? `<p style="margin:0.5rem 0 0 0;font-size:0.75rem;color:#64748b;">${escapeHtml(t('pktAltCreditNote', 'Where you identified an alternative document, it counts as half credit. That reflects what you reported, not a review: IRU has not verified any document.'))}</p>` : ''}
         </div>
         ${factRecord && factRecord.outputsStale ? `
@@ -2818,13 +2845,16 @@ export default function App() {
                 header's promise above holds on this page too. ── */}
             {(() => {
               const { score, total, alternativesCounted } = calculateReadinessScore();
-              const readinessPercent = Math.round((score / total) * 100);
+              // Evidence-aware display (2026-10-29 redesign): coarse band +
+              // points, not a percent — see the printable packet comment.
+              const scoreBandKey = scoreBandForRatio(score / total);
+              const scorePoints = formatScorePoints(score);
               return (
                 <div className="mt-8 mb-8 text-left">
                   <div className="inline-block bg-indigo-50 text-indigo-700 px-4 py-2 rounded-full font-bold text-sm">
-                    {ui.readinessScore}: {readinessPercent}% ({score} of {total} evidence items) <span className="font-normal text-xs">{t('pktHeuristicNote', '(approximate document-completeness heuristic — not a validated metric)')}</span>
+                    {ui.readinessScore}: {t(scoreBandKey, 'Strong')} ({scorePoints} of {total} evidence items) <span className="font-normal text-xs">{t('pktHeuristicNote', '(approximate document-completeness heuristic — not a validated metric)')}</span>
                   </div>
-                  <p className="text-xs text-slate-500 mt-2">{t('pktScoreReviewNote', 'Automated photo reviews do not change this score. It is based on your questionnaire answers only.')}</p>
+                  <p className="text-xs text-slate-500 mt-2">{t('pktScoreReviewNote', 'Automated photo reviews can move this score modestly based on what was observed. They never verify a document, and the score is not a legal determination or a prediction of any outcome.')}</p>
                   {alternativesCounted > 0 && (
                     <p className="text-xs text-slate-500 mt-2" data-testid="alt-credit-note">{t('pktAltCreditNote', 'Where you identified an alternative document, it counts as half credit. That reflects what you reported, not a review: IRU has not verified any document.')}</p>
                   )}

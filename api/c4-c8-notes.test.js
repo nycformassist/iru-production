@@ -22,10 +22,16 @@ const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
 const consts = readFileSync(new URL('../src/constants.tsx', import.meta.url), 'utf8');
 
 describe('C4: half-credit explanation', () => {
-  it('weights are unchanged: yes = 1, ticked alternative = 0.5', () => {
-    const fn = app.slice(app.indexOf('const calculateReadinessScore'), app.indexOf('const calculateReadinessScore') + 1700);
-    assert.ok(/if \(eff\[key\] === 'yes'\) \{\s*score\+\+;/.test(fn));
-    assert.ok(/score \+= 0\.5;[^\n]*\n\s*alternativesCounted\+\+;/.test(fn), 'the counter increments exactly where 0.5 is awarded');
+  it('base weights preserved under the evidence-aware redesign (2026-10-29, owner-authorized)', () => {
+    // The per-item base weights live in the pure scorer now; the redesign
+    // keeps them identical (yes = 1, ticked alternative = 0.5) and only
+    // adds modest review-evidence adjustments on top.
+    const scorer = readFileSync(new URL('../src/evidenceScoring.ts', import.meta.url), 'utf8');
+    assert.ok(/const BASE_CLAIMED = 1;/.test(scorer), 'reported claim still earns the base point');
+    assert.ok(/const BASE_PROXY = 0\.5;/.test(scorer), 'proxy alternative still earns half credit');
+    const fn = app.slice(app.indexOf('const calculateReadinessScore'), app.indexOf('const calculateReadinessScore') + 2600);
+    assert.ok(fn.includes('scoreEvidenceItem('), 'per-item scoring delegates to the evidence-aware scorer');
+    assert.ok(/alternativesCounted\+\+;/.test(fn), 'the counter still increments where half credit is awarded');
     assert.ok(fn.includes('return { score, total: total || 1, alternativesCounted };'));
   });
 

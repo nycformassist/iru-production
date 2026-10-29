@@ -64,20 +64,27 @@ test('gap2: triage row distinguishes reviewed from unreviewed yes claims', () =>
   assert.ok(app.includes('triageClaimedNotProvided'), 'unreviewed yes gets the claimed-not-provided sentence');
 });
 
-// ── Gap #3: score formula untouched, scope explicit ──────────────────────
+// ── Gap #3: scoring redesign (2026-10-29, owner-authorized) ───────────────
+// The owner REVERSED the freeze: reviews now modestly inform the score as
+// evidence, without ever verifying anything. The formula consults review
+// evidence through the pure scorer; the scope line says so explicitly.
 
-test('gap3: scoring formula does not consult the review', () => {
+test('gap3: scoring consults review evidence as evidence, never as verification', () => {
   const fnStart = app.indexOf('const calculateReadinessScore');
   assert.ok(fnStart !== -1, 'calculateReadinessScore exists');
-  const fnEnd = app.indexOf('};', app.indexOf('return { score, total, alternativesCounted }', fnStart));
+  const fnEnd = app.indexOf('return { score, total: total || 1, alternativesCounted };', fnStart);
   const fnSrc = app.slice(fnStart, fnEnd);
-  assert.ok(!fnSrc.includes('imageReview'), 'score never reads imageReview');
-  assert.ok(!fnSrc.includes('uploads'), 'score never reads uploads');
+  assert.ok(fnSrc.includes('scoreEvidenceItem('), 'score consults per-item review evidence');
+  assert.ok(fnSrc.includes('reviewForKey'), 'latest reviewed upload per key feeds the score');
 });
 
-test('gap3: score scope is stated next to the score', () => {
+test('gap3: score scope is stated next to the score (reviews move it modestly; never verify)', () => {
   assert.ok(app.includes('pktScoreReviewNote'), 'score-scope note key used');
-  assert.ok(constants.includes('pktScoreReviewNote: "Automated photo reviews do not change this score. It is based on your questionnaire answers only."'));
+  const en = /pktScoreReviewNote: "([^"]+)"/.exec(constants)[1];
+  assert.ok(/can move this score modestly/i.test(en), 'reviews can move the score modestly');
+  assert.ok(/never verify/i.test(en), 'reviews never verify');
+  assert.ok(/not a legal determination/i.test(en), 'not a legal determination');
+  assert.ok(!/do not change this score/i.test(en), 'old freeze wording is gone');
 });
 
 // ── Gap #4: claimed-but-not-provided sentence ────────────────────────────

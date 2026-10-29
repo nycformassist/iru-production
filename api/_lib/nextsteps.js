@@ -530,7 +530,8 @@ export function buildPacketNextSteps(ctx, lang = 'EN') {
     ...(unconfirmed > 0 ? [s.pktUnconfirmed(unconfirmed)] : []),
     // Report gap #2 (next-steps part): state plainly how many document
     // photos received an automated review — observations only, verified
-    // by no one, and not part of the score.
+    // by no one. Scoring redesign (2026-10-29): reviews now modestly
+    // inform the score as evidence, without ever verifying anything.
     ...(reviewedCount > 0 ? [s.pktReviewsSummary(reviewedCount)] : []),
     s.pktNotEstablished1,
     s.pktNotEstablished2,

@@ -79,3 +79,35 @@ export function detectReviewMismatch(
   }
   return { mismatch: false };
 }
+
+export interface MatchResult {
+  match: boolean;
+}
+
+/**
+ * Returns { match: true } when the detected document category clearly
+ * belongs to the selected evidence key. Conservative by design: never
+ * matches on an empty or uncertain category. For broad keys (persecution
+ * proof, relationship proof) whose supporting documents legitimately vary,
+ * a certain, non-conflicting category counts as a match — the review found
+ * a legible, identifiable document that does not belong elsewhere.
+ * Never throws. A match is support, never verification.
+ */
+export function detectReviewMatch(
+  selectedKey: string | null | undefined,
+  documentCategory: string | null | undefined,
+): MatchResult {
+  const key = String(selectedKey || '').trim();
+  const cat = String(documentCategory || '').trim().toLowerCase();
+  if (!key || !cat || UNCERTAIN_CATEGORIES.has(cat)) return { match: false };
+  // A known document pattern decides by home key.
+  for (const { re, key: home } of HOME_PATTERNS) {
+    if (re.test(cat)) return { match: home === key };
+  }
+  // Broad keys: a certain, non-conflicting category is supporting.
+  if (BROAD_KEYS.has(key)) return { match: true };
+  // Specific keys: the category must contain the item's own keywords.
+  const kws = KEY_KEYWORDS[key];
+  if (kws) return { match: kws.some((k) => cat.includes(k)) };
+  return { match: false };
+}
