@@ -19,7 +19,7 @@ export const maxDuration = 60;
 import { GoogleGenAI } from "@google/genai";
 import { createLimiter, clientIp } from "./_lib/ratelimit.js";
 import { EVIDENCE_KEYS } from "./_lib/evidence.js";
-import { sanitizeVisionReview } from "./_lib/vision.js";
+import { sanitizeVisionReview, resolveReviewAssociation } from "./_lib/vision.js";
 
 // Re-exported for tests and for /api/analyze (shared validation contract).
 export { sanitizeVisionReview };
@@ -205,6 +205,13 @@ export default async function handler(req, res) {
       console.log(`[iru] image review: schema validation failed (${sanitized.error})`);
       return res.status(502).json({ error: 'Review unavailable. Please try again later.' });
     }
+    // Report gap #5: the model's relatedReadinessItem is only a proposal. An
+    // uncertain or conflicting model inference must never silently establish
+    // the photo↔checklist association — default to the user's selected key.
+    // linkSource is display-only (dropped by /api/analyze re-sanitization).
+    const assoc = resolveReviewAssociation(relatedEvidenceKey, sanitized.data.relatedReadinessItem);
+    sanitized.data.relatedReadinessItem = assoc.linkedKey;
+    sanitized.data.linkSource = assoc.source;
     // Audit log: status + category only. Never image bytes, never extracted PII.
     console.log(`[iru] image review complete: category=${sanitized.data.documentCategory.slice(0, 60)}`);
     return res.status(200).json({ ok: true, review: sanitized.data });

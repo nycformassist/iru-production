@@ -177,3 +177,25 @@ export function matchReviewsToGap(key, imageReviews) {
   if (!Array.isArray(imageReviews)) return [];
   return imageReviews.filter(r => r && r.relatedReadinessItem === key);
 }
+
+/**
+ * Resolve which checklist item a reviewed photo is linked to (report gap #5).
+ *
+ * The vision model proposes relatedReadinessItem, but an uncertain model
+ * inference must never silently establish a match. Rules:
+ * - model value absent/'none'/unknown  -> default to the user's selected key
+ * - model value conflicts with the user's selected key -> user's key wins
+ * - model value agrees with the user's selected key, or no key was selected
+ *   -> the model's value stands
+ * Returns { linkedKey, source } where source is 'user' or 'model', so the
+ * packet can show the association explicitly and traceably. Never throws.
+ */
+export function resolveReviewAssociation(selectedKey, modelRelated) {
+  const sel = EVIDENCE_KEYS.includes(selectedKey) ? selectedKey : null;
+  const modRaw = String(modelRelated || '').trim();
+  const mod = modRaw && modRaw !== 'none' && EVIDENCE_KEYS.includes(modRaw) ? modRaw : null;
+  if (mod && (!sel || mod === sel)) return { linkedKey: mod, source: 'model' };
+  if (sel) return { linkedKey: sel, source: 'user' };
+  if (mod) return { linkedKey: mod, source: 'model' };
+  return { linkedKey: 'none', source: 'model' };
+}

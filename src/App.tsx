@@ -21,6 +21,12 @@ import {
   isCompressiblePhoto,
 } from './photoCompression';
 
+// Report gap #1 (2026-10-29): claimed-vs-detected document mismatch
+// detection. Pure, conservative: only flags when the detected category is
+// a specific recognized document type that does not match the selected
+// evidence key; never flags on uncertain/empty categories.
+import { detectReviewMismatch } from './reviewMismatch';
+
 // Android recovery diagnostics (?debug=1 overlay only; see src/diagnostics.ts).
 import {
   createDiagnostics,
@@ -1023,13 +1029,28 @@ export default function App() {
       phase = 'parse';
       const data = await response.json();
       if (data && data.ok && data.review) {
-        setImageReview(data.review);
+        // Report gap #1: claimed-vs-detected mismatch. If the detected
+        // category clearly does not match the selected evidence type,
+        // append an observational note to inconsistencies (localized, in
+        // the current language) so it reaches the packet AND the model
+        // via the imageReviews payload. Never asserts inauthenticity.
+        const review = { ...data.review };
+        try {
+          if (detectReviewMismatch(photoEvidenceKey, review.documentCategory).mismatch) {
+            const itemLabel = (ui.evidenceItemNames && ui.evidenceItemNames[photoEvidenceKey]) || photoEvidenceKey || '';
+            const note = t('photoMismatchNote', 'You listed {item}, but the photo appears to show {category}. Confirm with a qualified reviewer that this document supports what you claimed.')
+              .replace('{item}', itemLabel)
+              .replace('{category}', String(review.documentCategory || ''));
+            review.inconsistencies = [...(review.inconsistencies || []), note];
+          }
+        } catch { /* mismatch detection must never break review receipt */ }
+        setImageReview(review);
         // Checklist (#10): keep every reviewed upload, tagged to its
         // evidence key (latest upload per key wins), so later uploads
         // never erase earlier ones from the analysis or the packet.
         setUploads(prev => {
           const withoutKey = prev.filter(u => u.key !== (photoEvidenceKey || ''));
-          return [...withoutKey, { key: photoEvidenceKey || '', fileName: photoFile ? photoFile.name : '', review: data.review }];
+          return [...withoutKey, { key: photoEvidenceKey || '', fileName: photoFile ? photoFile.name : '', review }];
         });
         // Successful review: the blob is no longer needed (the review
         // result is kept in uploads). Clear the browser-local hold.
@@ -1612,8 +1633,21 @@ export default function App() {
       if (ans === 'yes') {
         statusText = st.reportedNotVerified || 'Reported — not verified';
         statusKind = 'amber';
-        nextStepText = nextStepYes;
-        nextStepHtml = nextStepYes;
+        // Report gap #2: a 'yes' with a successful automated review must not
+        // render identically to a 'yes' with no photo. Append the localized
+        // review-status note; the "not verified" status stays intact.
+        // Report gap #4: a 'yes' with no upload gets a direct factual
+        // sentence — reported but not provided — never accusatory.
+        const reviewedUpload = uploads.some(u => u.key === key && u.review);
+        if (reviewedUpload) {
+          const note = ui.imageInformedGap || 'An uploaded photo was reviewed for this item. The observations informed the guidance above — nothing has been verified.';
+          nextStepText = `${nextStepYes} ${note}`;
+          nextStepHtml = `${nextStepYes} ${escapeHtml(note)}`;
+        } else {
+          const cnp = t('triageClaimedNotProvided', 'You reported having this document, but no document was provided in this session.');
+          nextStepText = `${nextStepYes} ${cnp}`;
+          nextStepHtml = `${nextStepYes} ${escapeHtml(cnp)}`;
+        }
       } else if (ans === 'unknown') {
         statusText = st.unknown || 'Unknown';
         statusKind = 'gray';
@@ -1692,6 +1726,17 @@ export default function App() {
     const unconfirmed = factRecord ? Object.values(factRecord.facts).filter((f: any) => f.status === 'extracted-unconfirmed').length : 0;
     const pct = assessment && typeof assessment.readinessPercent === 'number' ? assessment.readinessPercent : null;
     const verifiedOrgs = resourceResult && !resourceResult.isInternational ? (resourceResult.local || []) : [];
+    // Report gaps #1/#2/#6: claimed-vs-detected mismatches (recomputed here
+    // with the same conservative helper used at review time) and the count
+    // of automated reviews feed the next-steps text.
+    const reviewedUploads = uploads.filter(u => u.review);
+    const mismatches = reviewedUploads.map(u => {
+      if (!detectReviewMismatch(u.key, u.review.documentCategory).mismatch) return null;
+      return {
+        item: (ui.evidenceItemNames && ui.evidenceItemNames[u.key]) || u.key,
+        category: String(u.review.documentCategory || ''),
+      };
+    }).filter(Boolean);
     return buildPacketNextStepsForLang({
       caseType: (assessment && assessment.caseType) || answers.case_type,
       readinessPercent: pct,
@@ -1706,6 +1751,8 @@ export default function App() {
       resourcesKind: verifiedOrgs.length > 0 ? 'verified' : resourceResult && resourceResult.isInternational ? 'international' : 'none',
       localResourcesName: ui.localResources,
       conflictLabels,
+      reviewedCount: reviewedUploads.length,
+      mismatches,
     }, lang);
   };
 
@@ -1951,6 +1998,7 @@ export default function App() {
           <div style="margin-top: 1rem; display: inline-block; background-color: #eef2ff; color: #4f46e5; padding: 0.5rem 1rem; border-radius: 9999px; font-weight: 700; font-size: 0.875rem;">
             ${ui.readinessScore}: ${readinessPercent}% (${score} of ${total} evidence items) <span style="font-weight:400;font-size:0.75rem;">${escapeHtml(t('pktHeuristicNote', '(approximate document-completeness heuristic — not a validated metric)'))}</span>
           </div>
+          <p style="margin:0.5rem 0 0 0;font-size:0.75rem;color:#64748b;">${escapeHtml(t('pktScoreReviewNote', 'Automated photo reviews do not change this score. It is based on your questionnaire answers only.'))}</p>
           ${alternativesCounted > 0 ? `<p style="margin:0.5rem 0 0 0;font-size:0.75rem;color:#64748b;">${escapeHtml(t('pktAltCreditNote', 'Where you identified an alternative document, it counts as half credit. That reflects what you reported, not a review: IRU has not verified any document.'))}</p>` : ''}
         </div>
         ${factRecord && factRecord.outputsStale ? `
@@ -2003,6 +2051,19 @@ export default function App() {
           <div style="background-color: #f8fafc; padding: 1.25rem; border: 1px solid #e2e8f0; border-radius: 0.75rem; font-size: 0.875rem; color: #334155;">
             <p style="margin: 0 0 0.5rem 0;"><strong>${escapeHtml(t('photoCategory', 'Category'))}:</strong> ${escapeHtml(String(imageReview.documentCategory || ''))}</p>
             <p style="margin: 0 0 0.5rem 0;"><strong>${escapeHtml(t('photoLegibility', 'Legibility'))}:</strong> ${escapeHtml(String(imageReview.legibility || ''))} &nbsp; <strong>${escapeHtml(t('photoAppearsComplete', 'Appears complete'))}:</strong> ${escapeHtml(String(imageReview.appearsComplete || ''))}</p>
+            ${(() => {
+              // Report gap #5: make the photo↔checklist association explicit
+              // and traceable — which item it was linked to, and whether
+              // that came from the user's selection or the model.
+              const linkKey = imageReview.relatedReadinessItem;
+              const linkLabel = (ui.evidenceItemNames && ui.evidenceItemNames[linkKey]) || EVIDENCE_ITEM_NAMES[linkKey] || '';
+              const linkText = linkLabel
+                ? (imageReview.linkSource === 'user'
+                    ? t('photoLinkedToUser', 'Linked to checklist item: {item} (based on your selection).')
+                    : t('photoLinkedToModel', 'Linked to checklist item: {item} (based on the automated review).')).replace('{item}', linkLabel)
+                : t('photoLinkedToNone', 'Not linked to a specific checklist item.');
+              return `<p style="margin: 0 0 0.5rem 0; font-size: 0.8rem; color: #64748b;">${escapeHtml(linkText)}</p>`;
+            })()}
             ${(imageReview.inconsistencies || []).length > 0 ? `<ul style="margin: 0 0 0.5rem 0; padding-left: 1.25rem;">${(imageReview.inconsistencies || []).map((x: any) => `<li>${escapeHtml(String(x))}</li>`).join('')}</ul>` : ''}
             ${(imageReview.limitations || []).length > 0 ? `<ul style="margin: 0; padding-left: 1.25rem; color: #64748b;">${(imageReview.limitations || []).map((x: any) => `<li>${escapeHtml(String(x))}</li>`).join('')}</ul>` : ''}
             <p style="margin: 0.75rem 0 0 0; font-size: 0.8rem; color: #64748b; font-style: italic;">${escapeHtml(ui.photoPrivacy || '')} ${escapeHtml(t('pktPhotoDisclaimer', 'This review does not establish authenticity or legal sufficiency.'))}</p>
@@ -2012,7 +2073,18 @@ export default function App() {
         <div class="section">
           <h3 class="section-title font-serif">${escapeHtml(t('checklistTitle', 'Document checklist'))}</h3>
           <ul style="margin: 0; padding-left: 1.25rem; font-size: 0.875rem; color: #334155;">
-            ${buildChecklistItems().map((row: any) => `<li style="margin-bottom: 0.5rem;"><strong>${escapeHtml(row.label)}</strong>${row.expected !== row.label ? ` — ${escapeHtml(row.expected)}` : ''} — ${row.state === 'reviewed' ? escapeHtml(t('checklistReviewed', 'Reviewed (automated review only — not verified)')) + (row.review ? ` (${escapeHtml(t('photoCategory', 'Category'))}: ${escapeHtml(String(row.review.documentCategory || ''))}; ${escapeHtml(t('photoLegibility', 'Legibility'))}: ${escapeHtml(String(row.review.legibility || ''))})` : '') : row.state === 'uploaded' ? escapeHtml(t('checklistUploaded', 'Uploaded — not reviewed')) : escapeHtml(t('checklistNeeded', 'Needed'))}</li>`).join('')}
+            ${buildChecklistItems().map((row: any) => {
+              // Report gap #1: explicit claimed-vs-detected mismatch warning
+              // in the checklist row (the note also lives in the review's
+              // inconsistencies, which reach the model).
+              const mismatch = row.state === 'reviewed' && row.review
+                ? detectReviewMismatch(row.key, row.review.documentCategory).mismatch
+                : false;
+              const mismatchLine = mismatch
+                ? `<div style="margin-top:0.25rem;font-size:0.8rem;color:#92400e;font-weight:600;">⚠️ ${escapeHtml(t('photoMismatchNote', 'You listed {item}, but the photo appears to show {category}. Confirm with a qualified reviewer that this document supports what you claimed.').replace('{item}', row.label).replace('{category}', String(row.review.documentCategory || '')))}</div>`
+                : '';
+              return `<li style="margin-bottom: 0.5rem;"><strong>${escapeHtml(row.label)}</strong>${row.expected !== row.label ? ` — ${escapeHtml(row.expected)}` : ''} — ${row.state === 'reviewed' ? escapeHtml(t('checklistReviewed', 'Reviewed (automated review only — not verified)')) + (row.review ? ` (${escapeHtml(t('photoCategory', 'Category'))}: ${escapeHtml(String(row.review.documentCategory || ''))}; ${escapeHtml(t('photoLegibility', 'Legibility'))}: ${escapeHtml(String(row.review.legibility || ''))})` : '') : row.state === 'uploaded' ? escapeHtml(t('checklistUploaded', 'Uploaded — not reviewed')) : escapeHtml(t('checklistNeeded', 'Needed'))}${mismatchLine}</li>`;
+            }).join('')}
           </ul>
           ${uploads.filter(u => !u.key).length > 0 ? `<p style="font-size: 0.875rem; color: #334155;">${escapeHtml(t('checklistUntagged', 'Uploaded document (type not chosen)'))} × ${uploads.filter(u => !u.key).length}</p>` : ''}
         </div>
@@ -2752,6 +2824,7 @@ export default function App() {
                   <div className="inline-block bg-indigo-50 text-indigo-700 px-4 py-2 rounded-full font-bold text-sm">
                     {ui.readinessScore}: {readinessPercent}% ({score} of {total} evidence items) <span className="font-normal text-xs">{t('pktHeuristicNote', '(approximate document-completeness heuristic — not a validated metric)')}</span>
                   </div>
+                  <p className="text-xs text-slate-500 mt-2">{t('pktScoreReviewNote', 'Automated photo reviews do not change this score. It is based on your questionnaire answers only.')}</p>
                   {alternativesCounted > 0 && (
                     <p className="text-xs text-slate-500 mt-2" data-testid="alt-credit-note">{t('pktAltCreditNote', 'Where you identified an alternative document, it counts as half credit. That reflects what you reported, not a review: IRU has not verified any document.')}</p>
                   )}
@@ -2967,6 +3040,9 @@ export default function App() {
                         </div>
                         {row.state === 'reviewed' && row.review && (
                           <p className="text-xs text-slate-500 mt-0.5">{t('photoCategory', 'Category')}: {String(row.review.documentCategory || '')} · {t('photoLegibility', 'Legibility')}: {String(row.review.legibility || '')}</p>
+                        )}
+                        {row.state === 'reviewed' && row.review && detectReviewMismatch(row.key, row.review.documentCategory).mismatch && (
+                          <p className="text-xs text-amber-800 font-semibold mt-0.5">⚠️ {t('photoMismatchNote', 'You listed {item}, but the photo appears to show {category}. Confirm with a qualified reviewer that this document supports what you claimed.').replace('{item}', row.label).replace('{category}', String(row.review.documentCategory || ''))}</p>
                         )}
                         {row.state === 'uploaded' && row.fileName && (
                           <p className="text-xs text-slate-500 mt-0.5">{row.fileName}</p>

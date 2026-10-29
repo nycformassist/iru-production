@@ -103,6 +103,7 @@ const STR = {
     pktChecklistConflicts: (n) => `Resolve the ${n} conflicting item(s) in your information, then regenerate any affected outputs.`,
     pktChecklistUnconfirmed: (n) => `Confirm the ${n} document-provided value(s) marked as needing confirmation.`,
     pktChecklistGaps: 'Work through the evidence gaps above in priority order; for each one, use the listed primary evidence or an accepted alternative.',
+    pktReviewsSummary: (n) => `${n} document photo(s) received an automated review. These reviews are observations only — nothing has been verified.`,
     pktChecklistFormReview: (id) => `Review your ${id} draft field by field against the official blank form and your records; correct mistakes in your information and regenerate so you hold only the latest version.`,
     pktChecklistFormGeneric: 'If you prepare a form draft, review it field by field before any use.',
     pktChecklistConfirm: 'Confirm the current form editions, instructions, fees, and any deadline that may apply to you with an official source (uscis.gov) or a qualified professional.',
@@ -113,6 +114,7 @@ const STR = {
     questionUnconfirmed: (n) => `${n} value(s) in my information came from my documents and have not been confirmed yet. How should they be verified before anyone relies on them?`,
     questionGaps: (n) => `${n} evidence item(s) in my report are still missing. Which matter most in my situation, and what alternatives are acceptable if I cannot get the usual documents?`,
     questionForm: (id) => `Before I sign or submit anything for the ${id}, what should I double-check given my situation?`,
+    questionMismatch: (item, category) => `A photo I provided appears to show ${category} while I listed ${item} — what should I confirm before relying on it?`,
   },
   ES: {
     title: 'SUS PRÓXIMOS PASOS — CÓMO USAR ESTE INFORME',
@@ -174,6 +176,7 @@ const STR = {
     pktChecklistConflicts: (n) => `Resuelva los ${n} elemento(s) en conflicto en su información y luego regenere cualquier resultado afectado.`,
     pktChecklistUnconfirmed: (n) => `Confirme los ${n} valor(es) proporcionados por documentos marcados como que necesitan confirmación.`,
     pktChecklistGaps: 'Trabaje en las brechas de evidencia anteriores en orden de prioridad; para cada una, use la evidencia principal indicada o una alternativa aceptada.',
+    pktReviewsSummary: (n) => `${n} foto(s) de documentos recibieron una revisión automatizada. Estas revisiones son solo observaciones — nada ha sido verificado.`,
     pktChecklistFormReview: (id) => `Revise su borrador de ${id} campo por campo contra el formulario oficial en blanco y sus registros; corrija los errores en su información y regenere para tener solo la versión más reciente.`,
     pktChecklistFormGeneric: 'Si prepara un borrador de formulario, revíselo campo por campo antes de cualquier uso.',
     pktChecklistConfirm: 'Confirme las ediciones actuales de los formularios, las instrucciones, las tarifas y cualquier fecha límite que pueda aplicarle con una fuente oficial (uscis.gov) o un profesional calificado.',
@@ -184,6 +187,7 @@ const STR = {
     questionUnconfirmed: (n) => `${n} valor(es) de mi información provienen de mis documentos y aún no han sido confirmados. ¿Cómo deben verificarse antes de que alguien confíe en ellos?`,
     questionGaps: (n) => `Aún faltan ${n} elemento(s) de evidencia en mi informe. ¿Cuáles son los más importantes en mi situación y qué alternativas se aceptan si no puedo obtener los documentos habituales?`,
     questionForm: (id) => `Antes de firmar o presentar algo para el ${id}, ¿qué debo verificar dos veces dada mi situación?`,
+    questionMismatch: (item, category) => `La foto que proporcioné parece mostrar ${category} mientras indiqué ${item}. ¿Qué debo confirmar antes de confiar en ello?`,
   },
   ZH: {
     title: '您的后续步骤 — 如何使用本报告',
@@ -245,6 +249,7 @@ const STR = {
     pktChecklistConflicts: (n) => `解决您信息中 ${n} 个冲突项目，然后重新生成任何受影响的输出。`,
     pktChecklistUnconfirmed: (n) => `确认标为需要确认的 ${n} 个文件提供值。`,
     pktChecklistGaps: '按优先级顺序处理上方的证据缺口；对于每一个，使用所列的主要证据或被接受的替代文件。',
+    pktReviewsSummary: (n) => `${n} 张证件照片已接受自动审核。这些审核仅为观察结果——没有任何内容得到核实。`,
     pktChecklistFormReview: (id) => `将您的 ${id} 草稿逐字段与官方空白表格和您的记录进行核对；更正信息中的错误并重新生成，以便您只持有最新版本。`,
     pktChecklistFormGeneric: '如果您准备表格草稿，请在使用前逐字段审核。',
     pktChecklistConfirm: '向官方来源（uscis.gov）或合格专业人士确认当前的表格版本、说明、费用以及任何可能适用于您的截止日期。',
@@ -255,6 +260,7 @@ const STR = {
     questionUnconfirmed: (n) => `我的信息中有 ${n} 个值来自我的文件，且尚未得到确认。在任何人依赖它们之前，应如何核实？`,
     questionGaps: (n) => `我的报告中仍缺少 ${n} 项证据。在我的情况下哪些最重要？如果我无法获得常规文件，可以接受哪些替代材料？`,
     questionForm: (id) => `在为 ${id} 签署或提交任何内容之前，根据我的情况，我应该仔细复查什么？`,
+    questionMismatch: (item, category) => `我提供的照片显示的似乎是${category}，而我填写的是${item}——在依赖它之前，我应该确认什么？`,
   },
   HT: {
     title: 'PWOSHEN ETAP OU YO — KIJAN POU ITILIZE RAPÒ SA A',
@@ -316,6 +322,7 @@ const STR = {
     pktChecklistConflicts: (n) => `Rezoud ${n} atik ki an konfli nan enfòmasyon ou, apre rejenere nenpòt rezilta ki afekte.`,
     pktChecklistUnconfirmed: (n) => `Konfime ${n} valè dokiman te bay ki make kòm bezwen konfimasyon.`,
     pktChecklistGaps: 'Travay sou twou prèv ki anwo yo nan lòd priyorite; pou chak youn, itilize prèv prensipal ki liste a oswa yon altènatif yo aksepte.',
+    pktReviewsSummary: (n) => `${n} foto dokiman te resevwa yon revizyon otomatik. Revizyon sa yo se obsèvasyon sèlman — anyen pa verifye.`,
     pktChecklistFormReview: (id) => `Revize bouyon ${id} ou a chan pa chan kont fòm ofisyèl vid la ak dosye ou yo; korije erè nan enfòmasyon ou epi rejenere pou ou kenbe sèlman dènye vèsyon an.`,
     pktChecklistFormGeneric: 'Si ou prepare yon bouyon fòm, revize li chan pa chan anvan nenpòt itilizasyon.',
     pktChecklistConfirm: 'Konfime edisyon fòm aktyèl yo, enstriksyon yo, frè yo, ak nenpòt dat limit ki ka aplike pou ou ak yon sous ofisyèl (uscis.gov) oswa yon pwofesyonèl kalifye.',
@@ -326,6 +333,7 @@ const STR = {
     questionUnconfirmed: (n) => `${n} valè nan enfòmasyon mwen soti nan dokiman mwen epi yo poko konfime. Kijan yo ta dwe verifye anvan nenpòt moun konte sou yo?`,
     questionGaps: (n) => `${n} atik prèv toujou manke nan rapò mwen an. Kilès ki pi enpòtan nan sitiyasyon mwen, epi ki altènativ yo aksepte si mwen pa ka jwenn dokiman abityèl yo?`,
     questionForm: (id) => `Anvan mwen siyen oswa soumèt anyen pou ${id} la, kisa mwen ta dwe verifye de fwa dapre sitiyasyon mwen?`,
+    questionMismatch: (item, category) => `Foto mwen te bay la sanble montre ${category} pandan mwen te endike ${item} — kisa mwen ta dwe konfime anvan mwen konte sou li?`,
   },
   AR: {
     title: 'خطواتك التالية — كيفية استخدام هذا التقرير',
@@ -387,6 +395,7 @@ const STR = {
     pktChecklistConflicts: (n) => `قم بحل ${n} من العناصر المتعارضة في معلوماتك، ثم أعد إنشاء أي مخرجات متأثرة.`,
     pktChecklistUnconfirmed: (n) => `أكّد ${n} من القيم المقدمة من المستندات والمُعلّمة بأنها تحتاج إلى تأكيد.`,
     pktChecklistGaps: 'اعمل على فجوات الأدلة أعلاه بترتيب الأولوية؛ لكل واحدة، استخدم الدليل الأساسي المدرج أو بديلًا مقبولًا.',
+    pktReviewsSummary: (n) => `${n} من صور المستندات خضعت لمراجعة آلية. هذه المراجعات هي ملاحظات فقط — لم يتم التحقق من أي شيء.`,
     pktChecklistFormReview: (id) => `راجع مسودة ${id} الخاصة بك حقلًا بحقل مقابل النموذج الرسمي الفارغ وسجلاتك؛ وصحح الأخطاء في معلوماتك وأعد الإنشاء حتى تحتفظ بأحدث إصدار فقط.`,
     pktChecklistFormGeneric: 'إذا أعددت مسودة نموذج، فراجعها حقلًا بحقل قبل أي استخدام.',
     pktChecklistConfirm: 'أكّد إصدارات النماذج الحالية والتعليمات والرسوم وأي موعد نهائي قد ينطبق عليك مع مصدر رسمي (uscis.gov) أو محترف مؤهل.',
@@ -397,6 +406,7 @@ const STR = {
     questionUnconfirmed: (n) => `${n} من القيم في معلوماتي جاءت من مستنداتي ولم تُؤكد بعد. كيف ينبغي التحقق منها قبل أن يعتمد عليها أي شخص؟`,
     questionGaps: (n) => `${n} من عناصر الأدلة ما زالت مفقودة في تقريري. أيها الأكثر أهمية في حالتي، وما البدائل المقبولة إذا لم أتمكن من الحصول على المستندات المعتادة؟`,
     questionForm: (id) => `قبل أن أوقّع أو أقدّم أي شيء بشأن ${id}، ما الذي يجب أن أتحقق منه مرتين بالنظر إلى حالتي؟`,
+    questionMismatch: (item, category) => `الصورة التي قدمتها تبدو أنها تُظهر ${category} بينما ذكرت ${item} — ما الذي يجب أن أؤكده قبل الاعتماد عليه؟`,
   },
 };
 
@@ -418,11 +428,17 @@ function searchPathsFor(lang) {
  * form — plus the standing deadlines/risks question. These are
  * questions for the professional, never legal conclusions by IRU.
  */
-function buildProfessionalQuestions(s, { conflictLabels = [], unconfirmed = 0, gapCount = 0, formId = null } = {}) {
+function buildProfessionalQuestions(s, { conflictLabels = [], unconfirmed = 0, gapCount = 0, formId = null, mismatches = [] } = {}) {
   const qs = [];
   if (conflictLabels.length > 0) qs.push(s.questionConflicts(conflictLabels.slice(0, 3).join('; ')));
   if (unconfirmed > 0) qs.push(s.questionUnconfirmed(unconfirmed));
   if (gapCount > 0) qs.push(s.questionGaps(gapCount));
+  // Report gap #6: tailor one question per claimed-vs-detected document
+  // mismatch (capped at 3, like conflicts). Phrased as an observation —
+  // never a legal conclusion by IRU.
+  for (const m of mismatches.slice(0, 3)) {
+    if (m && m.item && m.category) qs.push(s.questionMismatch(m.item, m.category));
+  }
   if (formId) qs.push(s.questionForm(formId));
   qs.push(s.questionDeadlines);
   return qs;
@@ -503,6 +519,8 @@ export function buildPacketNextSteps(ctx, lang = 'EN') {
   const unconfirmed = ctx.unconfirmed || 0;
   const pct = typeof ctx.readinessPercent === 'number' ? ctx.readinessPercent : null;
   const form = ctx.form || null;
+  const reviewedCount = ctx.reviewedCount || 0;
+  const mismatches = Array.isArray(ctx.mismatches) ? ctx.mismatches : [];
 
   const understand = [
     s.pktUnderstandIntro(ctx.caseType || 'immigration'),
@@ -510,6 +528,10 @@ export function buildPacketNextSteps(ctx, lang = 'EN') {
     s.pktEvidenceItems(ctx.evidenceItemCount || 0),
     ...(conflicts > 0 ? [s.pktConflicts(conflicts)] : []),
     ...(unconfirmed > 0 ? [s.pktUnconfirmed(unconfirmed)] : []),
+    // Report gap #2 (next-steps part): state plainly how many document
+    // photos received an automated review — observations only, verified
+    // by no one, and not part of the score.
+    ...(reviewedCount > 0 ? [s.pktReviewsSummary(reviewedCount)] : []),
     s.pktNotEstablished1,
     s.pktNotEstablished2,
   ];
@@ -548,6 +570,7 @@ export function buildPacketNextSteps(ctx, lang = 'EN') {
       unconfirmed,
       gapCount: ctx.evidenceItemCount || 0,
       formId: form ? form.id : null,
+      mismatches,
     }),
     resourcesIntro,
     searchPaths: searchPathsFor(lang),
