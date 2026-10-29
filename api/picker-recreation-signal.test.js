@@ -114,3 +114,22 @@ test('recreation notice wording is unchanged in all five languages', () => {
     'EN notice must be byte-identical',
   );
 });
+
+test('pickerTroubleshoot note exists in all five languages (2026-10-29)', () => {
+  // Owner-approved troubleshooting note for budget-phone picker flakiness.
+  // Must exist in EN/ES/ZH/HT/AR; EN wording is byte-exact per approval.
+  const blocks = constants.split(/\n(?=  (?:EN|ES|ZH|HT|AR): \{)/);
+  const langs = ['EN', 'ES', 'ZH', 'HT', 'AR'];
+  for (const lang of langs) {
+    const b = blocks.find(x => x.startsWith('  ' + lang + ': {'));
+    assert.ok(b, `${lang} UI_LABELS block exists`);
+    const m = b.match(/pickerTroubleshoot: "((?:[^"\\]|\\.)*)"/);
+    assert.ok(m && m[1].length >= 20, `${lang} pickerTroubleshoot present and non-empty`);
+  }
+  const en = blocks.find(x => x.startsWith('  EN: {')).match(/pickerTroubleshoot: "((?:[^"\\]|\\.)*)"/)[1];
+  assert.equal(en, 'If the photo picker keeps closing without attaching your photo, restart your phone to free up memory, then try again.');
+});
+
+test('photo step renders the pickerTroubleshoot note', () => {
+  assert.ok(app.includes("t('pickerTroubleshoot'"), 'photo step renders pickerTroubleshoot');
+});

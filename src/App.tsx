@@ -2525,6 +2525,9 @@ export default function App() {
                 <p className="text-sm text-slate-600 leading-relaxed">
                   {t('pickerGuidance', 'To close the file picker, tap its X or back arrow. Once you are back in IRU, use IRU’s own Back and Continue buttons. Your phone’s Back gesture may take you out of this page.')}
                 </p>
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  {t('pickerTroubleshoot', 'If the photo picker keeps closing without attaching your photo, restart your phone to free up memory, then try again.')}
+                </p>
                 <label htmlFor="iru-doc-type-select" className="block text-sm font-medium text-slate-700">
                   {t('docTypeLabel', 'Choose the type of document or evidence.')}
                 </label>
