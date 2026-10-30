@@ -246,11 +246,19 @@ test('app clear rules: shared file clears on Start Over, packet, and successful 
 });
 
 test('app: shared arrival is triggered by the store alone, never by URL parameters', () => {
-  // Payment-security guards forbid App.tsx from parsing URL
-  // parameters; the ?shared=1 redirect flag is informational only.
-  assert.ok(!/location\.search/.test(app), 'no location.search in App.tsx');
-  assert.ok(!/URLSearchParams/.test(app), 'no URLSearchParams in App.tsx');
-  assert.ok(!/history\.replaceState/.test(app), 'no history.replaceState in App.tsx');
+  // The SHARE TARGET flow (?shared=1) must not parse URL parameters —
+  // the trigger is the shared-file store alone. (Phase 2 adds a
+  // separate Stripe-return handler that reads ?checkout=success as a
+  // trigger for server verification; that is scoped to the paywall
+  // journey and does not affect share-target arrival.)
+  // Extract the share-target section and verify it has no URL parsing.
+  const shareIdx = app.indexOf('Web Share Target arrival');
+  assert.ok(shareIdx !== -1, 'share-target section exists');
+  const shareSection = app.slice(shareIdx, shareIdx + 3000);
+  assert.ok(!/location\.search/.test(shareSection), 'share-target section: no location.search');
+  assert.ok(!/URLSearchParams/.test(shareSection), 'share-target section: no URLSearchParams');
+  assert.ok(!/shared=1/.test(shareSection) || shareSection.includes('does\n  // NOT read the URL'),
+    'share-target section documents that it does not read the URL flag');
 });
 
 test('app: no questionnaire gating or record invention for a shared file', () => {

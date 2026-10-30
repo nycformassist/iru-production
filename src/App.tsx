@@ -81,6 +81,7 @@ import {
 } from './sharedFileStore';
 
 import { LANGUAGES, UI_LABELS, PHASE_1_QUESTIONS, TRIAGE_QUESTION, PHASE_2_QUESTIONS, PHASE_3_QUESTIONS, NYC_RESOURCES, CONSULATES, PROXIES, NARRATIVE_STARTERS, USCIS_FORMS, FEE_SCHEDULE_AS_OF, buildExecutiveSummary } from './constants';
+import { EntryScreen, GuideFlow, PackageSelect, EvalIntake, EvalReport, RecoverFlow, pt as ppt, suggestForms, getStoredToken, setStoredToken, getEvalToken, setEvalToken, getFormTokens, setFormToken } from './paywall';
 
 // Nationwide layered resource model (local → statewide → national → fallback).
 import { resolveResources, resolveResourcesForLocation, ResourceResult, ResourceOrg, localizedResourceText, localizedNationalDescription } from './resources';
@@ -211,7 +212,53 @@ export default function App() {
   // Write on every language change (WS2). A failed analyze/checkout request
   // never touches lang, so it cannot reset the persisted choice.
   useEffect(() => { persistLang(lang); }, [lang]);
-  const [stage, setStage] = useState<'LANG' | 'PHASE1' | 'TRIAGE' | 'PHASE2' | 'PHASE3' | 'PHASE4' | 'PHOTO' | 'ANALYZING' | 'PACKET'>('LANG');
+  const [stage, setStage] = useState<'LANG' | 'PHASE1' | 'TRIAGE' | 'PHASE2' | 'PHASE3' | 'PHASE4' | 'PHOTO' | 'ANALYZING' | 'PACKET' | 'ENTRY' | 'GUIDE' | 'PACKAGES' | 'EVAL_INTAKE' | 'EVAL_REPORT' | 'RECOVER'>(() => PAYWALL_UI_ON() ? 'ENTRY' : 'LANG');
+  // Stripe return: after checkout, Stripe redirects to
+  // /?checkout=success&entitlement=<id>. Verify the entitlement
+  // server-side (authoritative) and route to the right stage.
+  useEffect(() => {
+    if (!PAYWALL_UI_ON()) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('checkout') !== 'success') return;
+    const entitlementId = params.get('entitlement');
+    // Clean the URL (remove the params, keep the token in storage).
+    window.history.replaceState({}, '', window.location.pathname);
+    (async () => {
+      try {
+        // Try evaluation token first, then form tokens.
+        const evalToken = getEvalToken();
+        if (evalToken) {
+          const r = await fetch('/api/entitlement-status', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ entitlementToken: evalToken }),
+          });
+          const d = await r.json().catch(() => null);
+          if (d && d.paid && d.scope && d.scope.kind === 'evaluation') {
+            setStage('EVAL_INTAKE' as any);
+            return;
+          }
+        }
+        const formTokens = getFormTokens();
+        for (const f of Object.keys(formTokens)) {
+          const r = await fetch('/api/entitlement-status', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ entitlementToken: formTokens[f] }),
+          });
+          const d = await r.json().catch(() => null);
+          if (d && d.paid) {
+            setStage('LANG' as any);
+            return;
+          }
+        }
+        // No valid entitlement found — back to entry.
+        setStage('ENTRY' as any);
+      } catch {
+        setStage('ENTRY' as any);
+      }
+    })();
+  }, []);
+  // Paywall journey data (carried between ENTRY/GUIDE/PACKAGES/EVAL stages).
+  const [paywallData, setPaywallData] = useState<{ forms?: string[]; answers?: Record<string, string>; fromEval?: boolean }>({});
   const [currentQ, setCurrentQ] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [resources, setResources] = useState<any[]>([]);
@@ -1154,6 +1201,37 @@ export default function App() {
   };
 
   /**
+   * Paywall journey navigation (Phase 2, D1). Carries data between
+   * ENTRY/GUIDE/PACKAGES/EVAL stages. After Stripe return, the token
+   * is in localStorage; the caller routes to EVAL_INTAKE or LANG.
+   */
+  const handlePaywallNavigate = (next: string, data?: any) => {
+    if (data) setPaywallData((prev) => ({ ...prev, ...data }));
+    setStage(next as any);
+  };
+
+  /**
+   * Build package offers for PackageSelect from the server pricing
+   * table (single source of truth). Called at render time when the
+   * PACKAGES stage is active.
+   */
+  const buildPackageOffers = () => {
+    const offer = buildOffer(lang);
+    const hasEval = !!getEvalToken();
+    return offer.options.map((o: any) => ({
+      sku: o.sku,
+      name: o.name,
+      desc: o.sku === 'evaluation' ? ppt('pkgEvalDesc', lang as any)
+        : o.sku === 'one_form' ? ppt('pkgOneFormDesc', lang as any)
+        : ppt('pkgBundleDesc', lang as any),
+      totalCents: o.totalCents,
+      chargeCents: hasEval ? Math.max(0, o.totalCents - 100) : o.totalCents,
+      savingsNote: o.savingsNote || (o.sku === 'bundle' ? ppt('pkgBundleSave', lang as any) : undefined),
+      forms: o.forms,
+    }));
+  };
+
+  /**
    * Test-mode checkout for a B2C SKU (B2C §3). The server computes every
    * amount from its pricing table — the client names only the product
    * and, for upgrades, presents the token of the purchase it builds on.
@@ -1194,13 +1272,14 @@ export default function App() {
         throw new Error(t('errCheckoutUnavailable', 'Checkout unavailable. Please try again later.'));
       }
       // Keep the buyer's credential(s) for the return + later delivery.
+      // D2: localStorage for retained access; server remains authoritative.
       if (data.sku === SKUS.EVALUATION) {
-        sessionStorage.setItem('iru_evaluation_token', data.entitlementToken);
+        setEvalToken(data.entitlementToken);
       } else if (data.scope && data.scope.kind === 'forms' && Array.isArray(data.scope.forms)) {
-        for (const f of data.scope.forms) saveFormToken(f, data.entitlementToken);
+        for (const f of data.scope.forms) setFormToken(f, data.entitlementToken);
       } else {
-        sessionStorage.setItem('iru_entitlement_token', data.entitlementToken);
-        sessionStorage.setItem('iru_entitlement_id', data.entitlementId);
+        setStoredToken(data.entitlementToken);
+        try { localStorage.setItem('iru_entitlement_id', data.entitlementId); } catch { /* ignore */ }
       }
       window.location.href = data.checkoutUrl;
     } catch (e: any) {
@@ -2037,6 +2116,74 @@ export default function App() {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
+
+  // Phase 2 paywall journey: render buyer stages instead of the normal
+  // app chrome when the paywall flag is on. The production build
+  // (flag off) never reaches these branches.
+  if (PAYWALL_UI_ON()) {
+    const pwLang = lang as 'EN' | 'ES' | 'ZH' | 'HT' | 'AR';
+    const pwNav = handlePaywallNavigate;
+    if (stage === 'ENTRY') {
+      return (
+        <div className="min-h-screen bg-white">
+          <div className="max-w-3xl mx-auto text-center pt-8">
+            <img src="/seal.png" alt="SMRG" className="w-20 h-20 mx-auto mb-4 object-contain" />
+          </div>
+          <EntryScreen lang={pwLang} onNavigate={pwNav} />
+        </div>
+      );
+    }
+    if (stage === 'GUIDE') {
+      return (
+        <div className="min-h-screen bg-white">
+          <GuideFlow lang={pwLang} onNavigate={pwNav} />
+        </div>
+      );
+    }
+    if (stage === 'PACKAGES') {
+      return (
+        <div className="min-h-screen bg-white">
+          <PackageSelect
+            lang={pwLang}
+            onNavigate={pwNav}
+            offers={buildPackageOffers()}
+            hasEvalCredit={!!getEvalToken()}
+            onCheckout={(sku) => handleCheckout(sku)}
+            checkoutBusy={checkoutBusy}
+          />
+        </div>
+      );
+    }
+    if (stage === 'EVAL_INTAKE') {
+      return (
+        <div className="min-h-screen bg-white">
+          <EvalIntake lang={pwLang} onNavigate={pwNav} />
+        </div>
+      );
+    }
+    if (stage === 'EVAL_REPORT') {
+      return (
+        <div className="min-h-screen bg-white">
+          <EvalReport
+            lang={pwLang}
+            onNavigate={pwNav}
+            forms={paywallData.forms || ['I-589', 'I-765']}
+            answers={paywallData.answers || {}}
+          />
+        </div>
+      );
+    }
+    if (stage === 'RECOVER') {
+      return (
+        <div className="min-h-screen bg-white">
+          <RecoverFlow lang={pwLang} onNavigate={pwNav} />
+        </div>
+      );
+    }
+    // After purchase, the buyer enters the normal preparation flow
+    // (LANG → …) with their entitlement. Gating is enforced server-side
+    // on every paid API call; the client routes by token presence.
+  }
 
   return (
     <div

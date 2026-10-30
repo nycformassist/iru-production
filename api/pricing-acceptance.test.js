@@ -212,11 +212,23 @@ describe('source guards (case 7 + offer UI amounts)', () => {
   const checkoutSrc = readFileSync(new URL('./checkout.js', import.meta.url), 'utf8');
 
   it('the client never treats ?checkout=success as proof of payment', () => {
-    assert.ok(!appSrc.includes('location.search'), 'App.tsx never reads the return URL query');
-    assert.ok(!appSrc.includes("checkout=success"), 'App.tsx contains no success-URL entitlement logic');
-    assert.ok(!appSrc.includes('URLSearchParams'), 'no query-param parsing that could grant entitlement');
-    // Entitlement state comes only from the server status endpoint:
-    assert.ok(appSrc.includes('/api/entitlement-status'));
+    // The client MAY read the return URL as a trigger, but it must NEVER
+    // grant entitlement from URL params alone. Every grant path must go
+    // through server-side verification via /api/entitlement-status.
+    // (Phase 2: the Stripe return handler reads ?checkout=success only to
+    // trigger a server verification; the stage is set from the server
+    // response, never from the URL.)
+    assert.ok(appSrc.includes('/api/entitlement-status'), 'entitlement state comes from the server status endpoint');
+    // No direct URL-to-entitlement assignment: the success param must not
+    // appear in a setStage/setPurchaseState call without a fetch first.
+    const urlReadIdx = appSrc.indexOf('checkout');
+    if (urlReadIdx !== -1) {
+      const snippet = appSrc.slice(Math.max(0, urlReadIdx - 2000), urlReadIdx + 2000);
+      assert.ok(snippet.includes('/api/entitlement-status'),
+        'any ?checkout=success handling must verify via the server before routing');
+      assert.ok(!/setStage\(['"]LANG['"]\)[^}]*checkout/.test(snippet.replace(/\s+/g, ' ')),
+        'LANG stage is never set directly from the URL param');
+    }
   });
 
   it('the Stripe success URL carries the entitlement ID, never the bearer token', () => {

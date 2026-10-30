@@ -152,13 +152,14 @@ test('App diagnostics wiring exists and records no sensitive identifiers', () =>
   assert.ok(appSrc.includes('isDiagnosticsEnabledFromLocation()'), 'overlay must be gated on ?debug=1 via the diagnostics module');
   assert.ok(appSrc.includes("diag.record('boot'"), 'boot event must be recorded');
   // Standing entitlement guards (see also language-completion +
-  // pricing-acceptance source guards): App.tsx itself must never read
-  // the return URL query or parse URL parameters, so ?checkout=success
-  // cannot grant anything. The ?debug=1 read lives in the diagnostics
-  // module, which only gates the debug overlay.
-  assert.ok(!appSrc.includes('location.search'), 'App.tsx must not read location.search');
-  assert.ok(!appSrc.includes('URLSearchParams'), 'App.tsx must not parse URL parameters');
-  assert.ok(!appSrc.includes('checkout=success'), 'App.tsx must not handle checkout=success');
+  // pricing-acceptance source guards): App.tsx must never GRANT
+  // entitlement from the return URL. Phase 2 reads ?checkout=success
+  // only as a trigger for server-side verification via
+  // /api/entitlement-status — the URL alone grants nothing.
+  // The ?debug=1 read lives in the diagnostics module, which only
+  // gates the debug overlay.
+  assert.ok(appSrc.includes("fetch('/api/entitlement-status'"), 'return-URL handling must verify via the server');
+  assert.ok(!/setPurchaseState\(\{\s*hasEvaluation:\s*true/.test(appSrc), 'no client-side paid marking from URL');
   const recordLines = appSrc.split('\n').filter((l) => l.includes('.record('));
   // Picker-testing instrumentation removed 2026-10-29: the only
   // remaining debug record is the boot event (buildSha + counters +

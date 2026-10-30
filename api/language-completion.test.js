@@ -252,12 +252,35 @@ describe('language persistence (WS2)', () => {
     assert.ok(!appSrc.includes("setLang('EN')"), 'nothing ever resets lang to EN');
   });
 
-  it('the ONLY localStorage usage in src/ is the language key (no applicant data)', () => {
+  it('localStorage holds ONLY the language key and commerce tokens (no applicant data)', () => {
+    // D2 (owner 2026-10-30): entitlement tokens persist in localStorage
+    // for retained access; the server remains authoritative. These are
+    // commerce credentials, never applicant immigration data. The guard
+    // still bans any other localStorage usage.
+    const allowedKeys = ['LANG_STORAGE_KEY', 'iru_entitlement_token', 'iru_evaluation_token', 'iru_form_tokens', 'iru_entitlement_id'];
+    // Key constants defined in the file (indirect usage via helpers is OK
+    // if the file defines only allowed key constants).
     const srcDir = join(HERE, '..', 'src');
     for (const f of readdirSync(srcDir)) {
       const text = readFileSync(join(srcDir, f), 'utf8');
       for (const m of text.matchAll(/localStorage\.(getItem|setItem|removeItem)\(([^)]*)\)/g)) {
-        assert.ok(m[2].includes('LANG_STORAGE_KEY'), `${f}: localStorage used with non-lang key: ${m[0]}`);
+        const arg = m[2].trim();
+        // Direct literal key, key constant, or a helper parameter (the
+        // helpers in paywall.tsx take `key` and are called only with
+        // the allowed constants defined in that file).
+        const isHelperParam = /^key(,|\))/.test(arg) || arg === 'key';
+        const ok = isHelperParam || allowedKeys.some((k) => arg.includes(k));
+        assert.ok(ok, `${f}: localStorage used with non-allowed key: ${m[0]}`);
+      }
+      // If a file uses the helper-param pattern, verify it defines only
+      // allowed key constants.
+      if (/localStorage\.(getItem|setItem|removeItem)\(key\)/.test(text)) {
+        const constKeys = [...text.matchAll(/(?:const|let)\s+\w+\s*=\s*['"]([^'"]+)['"]/g)].map((mm) => mm[1]);
+        for (const k of constKeys) {
+          if (k.startsWith('iru_')) {
+            assert.ok(allowedKeys.includes(k), `${f}: defines non-allowed storage key constant: ${k}`);
+          }
+        }
       }
     }
   });
@@ -293,7 +316,7 @@ describe('checkout return (combined WS2 case)', () => {
     persistLang('HT'); // applicant chose Haitian Creole before checkout
 
     // Server side: checkout created a RESERVED (unpaid) evaluation
-    // entitlement; the browser holds only its token in sessionStorage.
+    // entitlement; the browser holds only its token in localStorage (D2).
     const store = createEntitlementStore();
     const { entitlement, token } = store.create({ sku: 'evaluation', amountCents: 100, scope: { kind: 'evaluation' } });
     store.attachSession(entitlement.id, 'cs_test_synthetic');
@@ -306,14 +329,14 @@ describe('checkout return (combined WS2 case)', () => {
     // (a) Language restored from persistence — NOT reset to English.
     assert.equal(loadPersistedLang(), 'HT');
 
-    // (b1) The client never reads the return URL: no URL-param parsing
-    // exists in App.tsx, so ?checkout=success cannot mark anything paid.
-    assert.ok(!appSrc.includes('URLSearchParams'), 'App.tsx does not parse URL parameters');
-    assert.ok(!appSrc.includes('location.search'), 'App.tsx does not read location.search');
-    assert.ok(!appSrc.includes('checkout=success'), 'App.tsx has no success-parameter handling');
+    // (b1) The client may read the return URL as a TRIGGER (Phase 2), but
+    // the success parameter alone grants nothing: every routing decision
+    // goes through server-side verification via /api/entitlement-status.
+    // The URL never sets purchase state directly.
+    assert.ok(appSrc.includes("fetch('/api/entitlement-status'"), 'return handling verifies via the server status endpoint');
+    assert.ok(!/setPurchaseState\(\{\s*hasEvaluation:\s*true/.test(appSrc), 'no client-side paid marking');
     assert.ok(appSrc.includes("useState<{ hasEvaluation: boolean; ownedForms: string[] }>({ hasEvaluation: false, ownedForms: [] })"),
       'purchase state initializes unpaid/empty');
-    assert.ok(!/setPurchaseState\(\{\s*hasEvaluation:\s*true/.test(appSrc), 'no client-side paid marking');
 
     // (b2) The URL carries an entitlement ID, not the bearer token:
     // even looked up as a token it resolves to nothing.
