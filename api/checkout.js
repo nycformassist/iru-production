@@ -187,7 +187,10 @@ async function handler(req, res, store = entitlementStore) {
     ' IRU_DB_URL=' + Boolean(process.env.IRU_DB_URL) +
     ' IRU_STORE_BACKEND=' + Boolean(process.env.IRU_STORE_BACKEND));
   if (!secretKey) {
-    return res.status(503).json({ error: 'Checkout is not configured.' });
+    return res.status(503).json({ error: 'Checkout is not configured.',
+      _diag: { stripeKey: Boolean(process.env.IRU_STRIPE_KEY),
+               dbUrl: Boolean(process.env.IRU_DB_URL),
+               storeBackend: process.env.IRU_STORE_BACKEND || 'missing' } });
   }
   if (secretKey.startsWith('sk_live') || secretKey.startsWith('rk_live')) {
     // Owner gate: live payments require separate explicit authorization.
