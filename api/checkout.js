@@ -207,6 +207,7 @@ async function handler(req, res, store = entitlementStore) {
   // Fail closed when no durable backend is configured: never create a
   // paid purchase state the app cannot persist (see lib/paymentStore.js).
   const storeGate = assertPaidStoreAvailable();
+  console.log('[iru] storeGate: ok=' + storeGate.ok + ' reason=' + (storeGate.backend && storeGate.backend.reason));
   if (!storeGate.ok) {
     return res.status(503).json({ error: 'Checkout is not configured.' });
   }
@@ -369,6 +370,7 @@ async function handler(req, res, store = entitlementStore) {
       // Real Stripe path only: the origin is validated here, fail
       // closed — there is no localhost fallback anywhere in this file.
       const origin = resolveAppOrigin();
+      console.log('[iru] origin check: ok=' + origin.ok + ' origin=' + (origin.origin || 'none'));
       if (!origin.ok) {
         store.void(entitlement.id, 'checkout-origin-invalid');
         return res.status(503).json({ error: 'Checkout is not configured.' });
