@@ -573,7 +573,7 @@ describe('P6: webhook resolves failed and expired checkouts (mocks)', () => {
   let ipSeq = 0;
 
   beforeEach(async () => {
-    process.env.STRIPE_SECRET_KEY = 'sk_test_defect_closure';
+    process.env.IRU_STRIPE_KEY = 'sk_test_defect_closure';
     // Payment-hardening gate: paid handlers require an explicit store backend.
     process.env.IRU_STORE_BACKEND = 'memory';
     process.env.IRU_ALLOW_EPHEMERAL_STORE = 'true';

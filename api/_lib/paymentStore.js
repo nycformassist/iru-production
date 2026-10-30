@@ -3,7 +3,7 @@
  *
  * HONEST STATUS (payment-hardening directive 2026-10-24; Phase 1 2026-10-30):
  * the Postgres snapshot backend is implemented (api/_lib/store-postgres.js,
- * sql/schema.sql) but no database is provisioned yet — set IRU_DATABASE_URL
+ * sql/schema.sql) but no database is provisioned yet — set IRU_DB_URL
  * to activate it. Until then this module does NOT make the in-memory store
  * durable. It does three things:
  *
@@ -27,7 +27,7 @@
  *    event, so Stripe redelivery still fulfills after provisioning.
  *
  * Provisioning requirement (exact): a Postgres service (or equivalent
- * durable store) + IRU_DATABASE_URL + the `pg` driver dependency + a
+ * durable store) + IRU_DB_URL + the `pg` driver dependency + a
  * migration creating one versioned snapshot row (or one row per
  * entitlement/event/exception/intent with unique constraints) + the
  * handler load/save wiring described above + a test-mode delivery run.
@@ -49,15 +49,15 @@ export function resolvePaymentBackend(env = process.env) {
     };
   }
   if (kind === 'postgres') {
-    if (env.IRU_DATABASE_URL) {
+    if (env.IRU_DB_URL) {
       return {
         available: true, kind: 'postgres', durable: true,
-        reason: 'Postgres snapshot backend (IRU_DATABASE_URL). Commerce snapshot with compare-and-swap versioning.',
+        reason: 'Postgres snapshot backend (IRU_DB_URL). Commerce snapshot with compare-and-swap versioning.',
       };
     }
     return {
       available: false, kind: 'postgres', durable: false,
-      reason: 'Postgres backend selected but IRU_DATABASE_URL is not set. Refusing paid paths.',
+      reason: 'Postgres backend selected but IRU_DB_URL is not set. Refusing paid paths.',
     };
   }
   if (kind) {

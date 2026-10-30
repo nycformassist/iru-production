@@ -75,7 +75,7 @@ function baseRecord() {
 let savedEnv;
 before(() => {
   savedEnv = { ...process.env };
-  process.env.STRIPE_SECRET_KEY = 'sk_test_local_only';
+  process.env.IRU_STRIPE_KEY = 'sk_test_local_only';
   process.env.IRU_ASSESSMENT_PRICE_CENTS = '4995';
   // Payment-hardening gate: paid handlers require an explicit store backend.
   process.env.IRU_STORE_BACKEND = 'memory';

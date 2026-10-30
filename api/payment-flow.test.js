@@ -113,7 +113,7 @@ describe('checkout → webhook → status → delivery flow (handlers, injected 
   let savedEnv;
   before(() => {
     savedEnv = { ...process.env };
-    process.env.STRIPE_SECRET_KEY = 'sk_test_local_only';
+    process.env.IRU_STRIPE_KEY = 'sk_test_local_only';
     // Payment-hardening gate: paid handlers require an explicit store backend.
     process.env.IRU_STORE_BACKEND = 'memory';
     process.env.IRU_ALLOW_EPHEMERAL_STORE = 'true';
@@ -206,12 +206,12 @@ describe('checkout → webhook → status → delivery flow (handlers, injected 
   });
 
   it('live Stripe keys are refused — test mode only', async () => {
-    process.env.STRIPE_SECRET_KEY = 'sk_live_should_never_be_used';
+    process.env.IRU_STRIPE_KEY = 'sk_live_should_never_be_used';
     const res = mockRes();
     await checkoutHandler(mockReq(), res);
     assert.equal(res.statusCode, 500);
     assert.match(res.body.error, /not authorized/);
-    process.env.STRIPE_SECRET_KEY = 'sk_test_local_only';
+    process.env.IRU_STRIPE_KEY = 'sk_test_local_only';
   });
 
   it('no price is available when the server env does not configure one', async () => {
@@ -226,7 +226,7 @@ describe('checkout → webhook → status → delivery flow (handlers, injected 
 describe('paywall gate on form generation (§11 no double consumption)', () => {
   it('with PAYWALL_ENABLED, generation requires a paid entitlement and consumes it once', async () => {
     process.env.PAYWALL_ENABLED = 'true';
-    process.env.STRIPE_SECRET_KEY = 'sk_test_local_only';
+    process.env.IRU_STRIPE_KEY = 'sk_test_local_only';
     process.env.IRU_ASSESSMENT_PRICE_CENTS = '4995';
     // Payment-hardening gate: paid handlers require an explicit store backend.
     process.env.IRU_STORE_BACKEND = 'memory';

@@ -181,7 +181,7 @@ async function handler(req, res, store = entitlementStore) {
     return res.status(413).json({ error: 'Request too large.' });
   }
 
-  const secretKey = process.env.STRIPE_SECRET_KEY || '';
+  const secretKey = process.env.IRU_STRIPE_KEY || '';
   if (!secretKey) {
     return res.status(503).json({ error: 'Checkout is not configured.' });
   }

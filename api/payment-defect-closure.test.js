@@ -43,7 +43,7 @@ let savedEnv;
 
 before(() => {
   savedEnv = { ...process.env };
-  process.env.STRIPE_SECRET_KEY = 'sk_test_local_only';
+  process.env.IRU_STRIPE_KEY = 'sk_test_local_only';
   process.env.STRIPE_WEBHOOK_SECRET = 'whsec_test_defect_closure';
   process.env.IRU_STORE_BACKEND = 'memory';
   process.env.IRU_ALLOW_EPHEMERAL_STORE = 'true';

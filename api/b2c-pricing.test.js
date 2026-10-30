@@ -60,7 +60,7 @@ async function buyAndPay(body) {
 
 describe('B2C pricing structure (owner-set, server-enforced)', () => {
   before(() => {
-    process.env.STRIPE_SECRET_KEY = 'sk_test_local_only';
+    process.env.IRU_STRIPE_KEY = 'sk_test_local_only';
     // Payment-hardening gate: paid handlers require an explicit store backend.
     process.env.IRU_STORE_BACKEND = 'memory';
     process.env.IRU_ALLOW_EPHEMERAL_STORE = 'true';

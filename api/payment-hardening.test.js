@@ -39,7 +39,7 @@ let savedEnv;
 
 before(() => {
   savedEnv = { ...process.env };
-  process.env.STRIPE_SECRET_KEY = 'sk_test_local_only';
+  process.env.IRU_STRIPE_KEY = 'sk_test_local_only';
   process.env.STRIPE_WEBHOOK_SECRET = 'whsec_test_hardening';
   process.env.IRU_ASSESSMENT_PRICE_CENTS = '4995';
   process.env.IRU_STORE_BACKEND = 'memory';
@@ -419,12 +419,12 @@ describe('fail-closed configuration', () => {
     const savedGateway = globalThis.__IRU_STRIPE_GATEWAY__;
     const savedOrigin = process.env.IRU_APP_ORIGIN;
     const savedAllow = process.env.IRU_ALLOW_LOCAL_ORIGIN;
-    const savedKey = process.env.STRIPE_SECRET_KEY;
+    const savedKey = process.env.IRU_STRIPE_KEY;
     try {
       delete globalThis.__IRU_STRIPE_GATEWAY__;
       delete process.env.IRU_APP_ORIGIN;
       delete process.env.IRU_ALLOW_LOCAL_ORIGIN;
-      process.env.STRIPE_SECRET_KEY = 'sk_test_local_only';
+      process.env.IRU_STRIPE_KEY = 'sk_test_local_only';
       let fetchCalled = false;
       const realFetch = globalThis.fetch;
       globalThis.fetch = async () => { fetchCalled = true; return { ok: true, json: async () => ({ id: 'sess_never', url: 'https://x' }) }; };
@@ -440,25 +440,25 @@ describe('fail-closed configuration', () => {
       globalThis.__IRU_STRIPE_GATEWAY__ = savedGateway;
       if (savedOrigin !== undefined) process.env.IRU_APP_ORIGIN = savedOrigin; else delete process.env.IRU_APP_ORIGIN;
       if (savedAllow !== undefined) process.env.IRU_ALLOW_LOCAL_ORIGIN = savedAllow; else delete process.env.IRU_ALLOW_LOCAL_ORIGIN;
-      process.env.STRIPE_SECRET_KEY = savedKey;
+      process.env.IRU_STRIPE_KEY = savedKey;
     }
   });
 });
 
 describe('provider interface (paymentStore)', () => {
-  it('backend selection is explicit: memory requires the ephemeral allowance; postgres needs IRU_DATABASE_URL; unset is unavailable', async () => {
+  it('backend selection is explicit: memory requires the ephemeral allowance; postgres needs IRU_DB_URL; unset is unavailable', async () => {
     const mod = await import('./_lib/paymentStore.js');
     assert.equal(mod.resolvePaymentBackend({ IRU_STORE_BACKEND: 'memory', IRU_ALLOW_EPHEMERAL_STORE: 'true' }).kind, 'memory');
     assert.equal(mod.resolvePaymentBackend({ IRU_STORE_BACKEND: 'memory', IRU_ALLOW_EPHEMERAL_STORE: 'true' }).durable, false);
     assert.equal(mod.resolvePaymentBackend({ IRU_STORE_BACKEND: 'memory' }).available, false);
     // Phase 1: the Postgres snapshot backend is implemented; it is
     // available exactly when a database URL is configured.
-    const pg = mod.resolvePaymentBackend({ IRU_STORE_BACKEND: 'postgres', IRU_DATABASE_URL: 'postgres://x' });
+    const pg = mod.resolvePaymentBackend({ IRU_STORE_BACKEND: 'postgres', IRU_DB_URL: 'postgres://x' });
     assert.equal(pg.available, true);
     assert.equal(pg.durable, true);
     const pgNoUrl = mod.resolvePaymentBackend({ IRU_STORE_BACKEND: 'postgres' });
     assert.equal(pgNoUrl.available, false);
-    assert.match(pgNoUrl.reason, /IRU_DATABASE_URL/);
+    assert.match(pgNoUrl.reason, /IRU_DB_URL/);
     assert.equal(mod.resolvePaymentBackend({}).available, false);
   });
 

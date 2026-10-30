@@ -25,8 +25,8 @@ import { createMemorySnapshotBackend, assertPaidStoreAvailable } from './payment
 /** Returns a snapshot backend instance, or null when not configured. */
 export function getSnapshotBackend(env = process.env) {
   const kind = env.IRU_STORE_BACKEND;
-  if (kind === 'postgres' && env.IRU_DATABASE_URL) {
-    return createPostgresSnapshotBackend(env.IRU_DATABASE_URL);
+  if (kind === 'postgres' && env.IRU_DB_URL) {
+    return createPostgresSnapshotBackend(env.IRU_DB_URL);
   }
   if (kind === 'memory' && env.IRU_ALLOW_EPHEMERAL_STORE === 'true') {
     return createMemorySnapshotBackend();
@@ -50,7 +50,7 @@ export function _clearBackendCache() {
 }
 
 function backendFor(env = process.env) {
-  const key = `${env.IRU_STORE_BACKEND || ''}|${env.IRU_DATABASE_URL || ''}|${env.IRU_ALLOW_EPHEMERAL_STORE || ''}`;
+  const key = `${env.IRU_STORE_BACKEND || ''}|${env.IRU_DB_URL || ''}|${env.IRU_ALLOW_EPHEMERAL_STORE || ''}`;
   if (cachedBackend && cachedEnvKey === key) return cachedBackend;
   if (cachedBackend && cachedEnvKey === 'test') return cachedBackend;
   cachedBackend = getSnapshotBackend(env);

@@ -82,7 +82,7 @@ async function statusOf(token, reqOver = {}) {
 
 describe('pricing acceptance — gap coverage (directive §5)', () => {
   before(() => {
-    process.env.STRIPE_SECRET_KEY = 'sk_test_local_only';
+    process.env.IRU_STRIPE_KEY = 'sk_test_local_only';
     // Payment-hardening gate: paid handlers require an explicit store backend.
     process.env.IRU_STORE_BACKEND = 'memory';
     process.env.IRU_ALLOW_EPHEMERAL_STORE = 'true';
@@ -196,13 +196,13 @@ describe('pricing acceptance — gap coverage (directive §5)', () => {
   });
 
   it('D3 (app scope): restricted live keys (rk_live) are refused exactly like sk_live', async () => {
-    process.env.STRIPE_SECRET_KEY = 'rk_live_should_never_be_used';
+    process.env.IRU_STRIPE_KEY = 'rk_live_should_never_be_used';
     try {
       const res = await checkout({ sku: SKUS.EVALUATION });
       assert.equal(res.statusCode, 500);
       assert.match(res.body.error, /not authorized/);
     } finally {
-      process.env.STRIPE_SECRET_KEY = 'sk_test_local_only';
+      process.env.IRU_STRIPE_KEY = 'sk_test_local_only';
     }
   });
 });

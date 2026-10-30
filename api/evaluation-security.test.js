@@ -71,7 +71,7 @@ function syntheticRecord() {
 describe('evaluation protection (PAYWALL_ENABLED)', () => {
   before(() => {
     process.env.PAYWALL_ENABLED = 'true';
-    process.env.STRIPE_SECRET_KEY = 'sk_test_local_only';
+    process.env.IRU_STRIPE_KEY = 'sk_test_local_only';
     // Payment-hardening gate: paid handlers require an explicit store backend.
     process.env.IRU_STORE_BACKEND = 'memory';
     process.env.IRU_ALLOW_EPHEMERAL_STORE = 'true';
@@ -208,7 +208,7 @@ describe('evaluation quotas (paywall off — abuse controls still apply)', () =>
   });
 
   it('test 9: checkout attempts are rate-limited per source', async () => {
-    process.env.STRIPE_SECRET_KEY = 'sk_test_local_only';
+    process.env.IRU_STRIPE_KEY = 'sk_test_local_only';
     process.env.IRU_STORE_BACKEND = 'memory';
     process.env.IRU_ALLOW_EPHEMERAL_STORE = 'true';
     globalThis.__IRU_STRIPE_GATEWAY__ = {
