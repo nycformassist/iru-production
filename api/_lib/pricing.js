@@ -1,6 +1,7 @@
 /**
- * lib/pricing.js — B2C pricing & entitlement structure (owner-set,
- * 2026-10-21 directive). Pure data + pure functions; imported by BOTH
+ * lib/pricing.js — B2C pricing & entitlement structure (owner-set;
+ * bundle and add-on repriced per the 2026-10-29 owner ruling: bundle
+ * $149.95, add-on $50.00). Pure data + pure functions; imported by BOTH
  * the server (checkout enforcement) and the client (offer display) so
  * the amounts a consumer sees are the amounts the server charges.
  *
@@ -16,11 +17,11 @@
  * - One-form Complete Preparation: $99.95 TOTAL (incl. the $1) for ONE
  *   selected form (I-589 XOR I-765). Upgrade charge after evaluation:
  *   $98.95.
- * - Two-form bundle: $129.95 TOTAL (incl. the $1) for BOTH forms.
- *   Upgrade charge after evaluation: $128.95. Savings vs two separate
- *   one-form purchases (2 × $99.95 = $199.90): $69.95.
+ * - Two-form bundle: $149.95 TOTAL (incl. the $1) for BOTH forms.
+ *   Upgrade charge after evaluation: $148.95. Savings vs two separate
+ *   one-form purchases (2 × $99.95 = $199.90): $49.95.
  * - Second-form add-on: after a completed one-form purchase, the other
- *   form for $30.00 more (total paid becomes $129.95).
+ *   form for $50.00 more (total paid becomes $149.95).
  * No recurring billing, no hidden charges, no automatic upgrades.
  */
 
@@ -56,21 +57,21 @@ export const PRICING = {
   },
   bundle: {
     sku: SKUS.BUNDLE,
-    chargeCents: 12895,
-    totalCents: 12995,
+    chargeCents: 14895,
+    totalCents: 14995,
     creditedCents: 100,
     name: 'IRU Complete Preparation — Both Forms (Bundle)',
     scope: 'Complete preparation of BOTH Form I-589 and Form I-765, each as a reviewable DRAFT PDF, with corrections and regeneration and completion summaries. Includes your $1.00 evaluation payment as a credit.',
     separateTotalCents: 19990, // 2 × $99.95
-    savingsCents: 6995, // 19990 − 12995
+    savingsCents: 4995, // 19990 − 14995
   },
   secondForm: {
     sku: SKUS.SECOND_FORM,
-    chargeCents: 3000,
-    totalCents: 12995, // $99.95 already paid + $30.00
+    chargeCents: 5000,
+    totalCents: 14995, // $99.95 already paid + $50.00
     creditedCents: 0,
     name: 'IRU Second Form Add-On',
-    scope: 'Adds preparation of the second form (the one not covered by your one-form purchase) on the same terms: reviewable DRAFT PDF, corrections and regeneration, completion summary. After this purchase your total paid is $129.95 — the same as the two-form bundle.',
+    scope: 'Adds preparation of the second form (the one not covered by your one-form purchase) on the same terms: reviewable DRAFT PDF, corrections and regeneration, completion summary. After this purchase your total paid is $149.95 — the same as the two-form bundle.',
   },
 };
 
@@ -111,7 +112,7 @@ const OFFER_I18N = {
       evaluation: 'Una evaluación inicial limitada: las categorías amplias de brechas de preparación e información faltante en su caso, lo que agregaría la preparación completa y su próximo paso. No incluye el flujo completo de preparación ni ningún formulario preparado.',
       oneForm: 'Preparación completa de UN formulario que usted seleccione — Formulario I-589 o Formulario I-765 — como un PDF BORRADOR revisable, con correcciones y regeneración y un resumen de finalización. Incluye su pago de evaluación de $1.00 como crédito.',
       bundle: 'Preparación completa de AMBOS formularios, I-589 e I-765, cada uno como un PDF BORRADOR revisable, con correcciones y regeneración y resúmenes de finalización. Incluye su pago de evaluación de $1.00 como crédito.',
-      secondForm: 'Agrega la preparación del segundo formulario (el que no cubre su compra de un formulario) en los mismos términos: PDF BORRADOR revisable, correcciones y regeneración, resumen de finalización. Después de esta compra, su total pagado es $129.95 — lo mismo que el paquete de dos formularios.',
+      secondForm: 'Agrega la preparación del segundo formulario (el que no cubre su compra de un formulario) en los mismos términos: PDF BORRADOR revisable, correcciones y regeneración, resumen de finalización. Después de esta compra, su total pagado es $149.95 — lo mismo que el paquete de dos formularios.',
     },
     creditedToward: 'cualquiera de las compras completas',
     formsIncludedOne: 'exactamente un formulario — Formulario I-589 O Formulario I-765, a su elección',
@@ -134,7 +135,7 @@ const OFFER_I18N = {
       evaluation: '有限的初步评估：您案件中准备缺口和缺失信息的广泛类别、完整准备将增加的内容，以及您的下一步。它不包括完整的准备流程或任何已准备的表格。',
       oneForm: '完整准备您选择的一个表格 — I-589 表格或 I-765 表格 — 制成可审核的草稿 PDF，附更正、重新生成和完成总结。包含您的 1.00 美元评估付款作为抵扣。',
       bundle: '完整准备 I-589 和 I-765 两个表格，每个都制成可审核的草稿 PDF，附更正、重新生成和完成总结。包含您的 1.00 美元评估付款作为抵扣。',
-      secondForm: '以相同条款添加第二个表格（您的单表格购买未涵盖的那个）的准备：可审核的草稿 PDF、更正和重新生成、完成总结。此次购买后，您的总付款为 129.95 美元 — 与双表格套餐相同。',
+      secondForm: '以相同条款添加第二个表格（您的单表格购买未涵盖的那个）的准备：可审核的草稿 PDF、更正和重新生成、完成总结。此次购买后，您的总付款为 149.95 美元 — 与双表格套餐相同。',
     },
     creditedToward: '任一完整购买',
     formsIncludedOne: '恰好一个表格 — I-589 表格或 I-765 表格，由您选择',
@@ -157,7 +158,7 @@ const OFFER_I18N = {
       evaluation: 'Yon evalyasyon inisyal limite: kategori laj twou preparasyon ak enfòmasyon ki manke nan ka ou, sa preparasyon konplè ta ajoute, ak pwochen etap ou. Li pa gen pwosesis preparasyon konplè a oswa okenn fòm prepare.',
       oneForm: 'Preparasyon konplè YON fòm ou chwazi — Fòm I-589 oswa Fòm I-765 — kòm yon PDF BOUYON ou ka revize, ak koreksyon ak rejenerasyon ak yon rezime konplezyon. Li gen ladan pemman evalyasyon $1.00 ou a kòm yon kredi.',
       bundle: 'Preparasyon konplè TOU DE fòm yo, I-589 ak I-765, chak kòm yon PDF BOUYON ou ka revize, ak koreksyon ak rejenerasyon ak rezime konplezyon. Li gen ladan pemman evalyasyon $1.00 ou a kòm yon kredi.',
-      secondForm: 'Ajoute preparasyon dezyèm fòm nan (sa acha yon sèl fòm ou a pa kouvri) sou menm kondisyon yo: PDF BOUYON ou ka revize, koreksyon ak rejenerasyon, rezime konplezyon. Apre acha sa a, total ou peye a se $129.95 — menm jan ak pakè de fòm nan.',
+      secondForm: 'Ajoute preparasyon dezyèm fòm nan (sa acha yon sèl fòm ou a pa kouvri) sou menm kondisyon yo: PDF BOUYON ou ka revize, koreksyon ak rejenerasyon, rezime konplezyon. Apre acha sa a, total ou peye a se $149.95 — menm jan ak pakè de fòm nan.',
     },
     creditedToward: 'nenpòt acha konplè',
     formsIncludedOne: 'egzakteman yon fòm — Fòm I-589 OSWA Fòm I-765, chwa ou',
@@ -180,7 +181,7 @@ const OFFER_I18N = {
       evaluation: 'تقييم أولي محدود: الفئات الواسعة لفجوات الإعداد والمعلومات المفقودة في قضيتك، وما سيضيفه الإعداد الكامل، وخطوتك التالية. لا يتضمن سير عمل الجاهزية الكامل أو أي نموذج معدّ.',
       oneForm: 'الإعداد الكامل لنموذج واحد تختاره — نموذج I-589 أو نموذج I-765 — كملف PDF مسودة قابل للمراجعة، مع التصحيحات وإعادة الإنشاء وملخص الإكمال. يتضمن دفعة التقييم بقيمة 1.00 دولار كرصيد.',
       bundle: 'الإعداد الكامل لكلا النموذجين I-589 وI-765، كل منهما كملف PDF مسودة قابل للمراجعة، مع التصحيحات وإعادة الإنشاء وملخصات الإكمال. يتضمن دفعة التقييم بقيمة 1.00 دولار كرصيد.',
-      secondForm: 'يضيف إعداد النموذج الثاني (غير المشمول بشراء النموذج الواحد) بنفس الشروط: ملف PDF مسودة قابل للمراجعة، تصحيحات وإعادة إنشاء، ملخص إكمال. بعد هذا الشراء يصبح مجموع ما دفعته 129.95 دولار — وهو نفس سعر حزمة النموذجين.',
+      secondForm: 'يضيف إعداد النموذج الثاني (غير المشمول بشراء النموذج الواحد) بنفس الشروط: ملف PDF مسودة قابل للمراجعة، تصحيحات وإعادة إنشاء، ملخص إكمال. بعد هذا الشراء يصبح مجموع ما دفعته 149.95 دولار — وهو نفس سعر حزمة النموذجين.',
     },
     creditedToward: 'أي شراء كامل',
     formsIncludedOne: 'نموذج واحد بالضبط — نموذج I-589 أو نموذج I-765، باختيارك',

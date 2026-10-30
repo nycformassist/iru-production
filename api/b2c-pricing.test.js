@@ -80,9 +80,9 @@ describe('B2C pricing structure (owner-set, server-enforced)', () => {
     assert.equal(one.totalCents, 9995);
     assert.equal(one.afterEvaluationChargeCents, 9895);
     assert.match(one.formsIncluded, /exactly one form/i);
-    assert.equal(bundle.totalCents, 12995);
-    assert.equal(bundle.afterEvaluationChargeCents, 12895);
-    assert.match(bundle.savingsNote, /\$69\.95/);
+    assert.equal(bundle.totalCents, 14995);
+    assert.equal(bundle.afterEvaluationChargeCents, 14895);
+    assert.match(bundle.savingsNote, /\$49\.95/);
     assert.equal(formatCents(PRICING.bundle.separateTotalCents), '$199.90');
     // The bundle must never be represented as two forms for $99.95:
     assert.notEqual(bundle.totalCents, one.totalCents);
@@ -102,23 +102,23 @@ describe('B2C pricing structure (owner-set, server-enforced)', () => {
     assert.deepEqual(res.body.scope, { kind: 'forms', forms: ['I-589'] });
   });
 
-  it('test 4: bundle checkout totals $129.95 with the $1 evaluation credited', async () => {
+  it('test 4: bundle checkout totals $149.95 with the $1 evaluation credited', async () => {
     const evaluation = await buyAndPay({ sku: SKUS.EVALUATION });
     const res = await checkout({ sku: SKUS.BUNDLE, entitlementToken: evaluation.token });
     assert.equal(res.statusCode, 200);
-    assert.equal(res.body.amountCents, 12895, 'upgrade charge is $128.95');
+    assert.equal(res.body.amountCents, 14895, 'upgrade charge is $148.95');
     assert.equal(res.body.creditedCents, 100);
-    assert.equal(res.body.totalCents, 12995, 'buyer total is exactly $129.95');
+    assert.equal(res.body.totalCents, 14995, 'buyer total is exactly $149.95');
     assert.deepEqual(res.body.scope, { kind: 'forms', forms: ['I-589', 'I-765'] });
   });
 
-  it('test 5: second-form add-on after a one-form purchase charges exactly $30 and covers the other form', async () => {
+  it('test 5: second-form add-on after a one-form purchase charges exactly $50 and covers the other form', async () => {
     const evaluation = await buyAndPay({ sku: SKUS.EVALUATION });
     const oneForm = await buyAndPay({ sku: SKUS.ONE_FORM, formId: 'I-765', entitlementToken: evaluation.token });
     const res = await checkout({ sku: SKUS.SECOND_FORM, entitlementToken: oneForm.token });
     assert.equal(res.statusCode, 200);
-    assert.equal(res.body.amountCents, 3000, 'add-on charge is exactly $30.00');
-    assert.equal(res.body.totalCents, 12995, 'total paid becomes $129.95');
+    assert.equal(res.body.amountCents, 5000, 'add-on charge is exactly $50.00');
+    assert.equal(res.body.totalCents, 14995, 'total paid becomes $149.95');
     assert.deepEqual(res.body.scope, { kind: 'forms', forms: ['I-589'] }, 'add-on covers the form NOT already owned');
   });
 
@@ -191,7 +191,7 @@ describe('B2C pricing structure (owner-set, server-enforced)', () => {
     assert.equal(st.statusCode, 200);
     assert.equal(st.body.usable, true);
     assert.deepEqual(st.body.entitlement.scope, { kind: 'forms', forms: ['I-589', 'I-765'] });
-    assert.equal(st.body.entitlement.totalCents, 12995);
+    assert.equal(st.body.entitlement.totalCents, 14995);
     assert.equal(st.body.entitlement.creditedCents, 100);
     // Deliver one form: still usable for the other; then exhausted.
     assert.equal(entitlementStore.consumeForForm(bundle.token, 'I-589').ok, true);
@@ -209,7 +209,7 @@ describe('B2C pricing structure (owner-set, server-enforced)', () => {
 describe('scoped entitlement semantics (store level)', () => {
   it('a bundle delivers each covered form once; the wrong form and replays are refused', () => {
     const store = createEntitlementStore(() => 42_000);
-    const { token } = store.create({ sku: SKUS.BUNDLE, amountCents: 12895, sessionId: 's_bundle', scope: { kind: 'forms', forms: ['I-589', 'I-765'] } });
+    const { token } = store.create({ sku: SKUS.BUNDLE, amountCents: 14895, sessionId: 's_bundle', scope: { kind: 'forms', forms: ['I-589', 'I-765'] } });
     assert.equal(store.peekForForm(token, 'I-589').ok, false, 'unpaid cannot be used');
     store.markPaidBySession('s_bundle', 'evt_bundle');
     assert.equal(store.peekForForm(token, 'I-589').ok, true);

@@ -12,7 +12,7 @@ import { PRICING, SKUS, formatCents } from './_lib/pricing.js';
 // (directive §5). Fills the gaps NOT already proven by
 // b2c-pricing.test.js / payment-flow.test.js / evaluation-security.test.js:
 //  - case 1: evaluation checkout carries evaluation scope + $1.00 exactly
-//  - case 4: add-on union coverage = both forms; paid chain totals $129.95
+//  - case 4: add-on union coverage = both forms; paid chain totals $149.95
 //  - case 5(d)/8: an abandoned unpaid upgrade checkout is VOIDED
 //    (superseded) and replaced — never stacked; one live session only
 //  - case 5(e): the bearer token alone is the credential — identical
@@ -113,16 +113,16 @@ describe('pricing acceptance — gap coverage (directive §5)', () => {
     // in evaluation-security.test.js test 2 via analyze.js mode 'limited'.)
   });
 
-  it('case 4: one-form + add-on union covers BOTH forms and the paid chain totals exactly $129.95', async () => {
+  it('case 4: one-form + add-on union covers BOTH forms and the paid chain totals exactly $149.95', async () => {
     const evaluation = await buyAndPay({ sku: SKUS.EVALUATION });
     const oneForm = await buyAndPay({ sku: SKUS.ONE_FORM, formId: 'I-765', entitlementToken: evaluation.token });
     const addon = await buyAndPay({ sku: SKUS.SECOND_FORM, entitlementToken: oneForm.token });
-    assert.equal(addon.checkout.amountCents, 3000);
+    assert.equal(addon.checkout.amountCents, 5000);
     const covered = [...oneForm.checkout.scope.forms, ...addon.checkout.scope.forms].sort();
     assert.deepEqual(covered, ['I-589', 'I-765'], 'resulting coverage is both forms');
     const paidChain = evaluation.checkout.amountCents + oneForm.checkout.amountCents + addon.checkout.amountCents;
-    assert.equal(paidChain, 12995, '100 + 9895 + 3000 = $129.95 total');
-    assert.equal(addon.checkout.totalCents, 12995);
+    assert.equal(paidChain, 14995, '100 + 9895 + 5000 = $149.95 total');
+    assert.equal(addon.checkout.totalCents, 14995);
   });
 
   it('case 5(d)/8: an abandoned unpaid upgrade checkout is VOIDED and replaced — only one live session; after payment a repeat is 409', async () => {
@@ -162,7 +162,7 @@ describe('pricing acceptance — gap coverage (directive §5)', () => {
       { headers: { 'x-forwarded-for': '198.51.100.24' } },
     );
     assert.equal(upgrade.statusCode, 200);
-    assert.equal(upgrade.body.amountCents, 12895);
+    assert.equal(upgrade.body.amountCents, 14895);
   });
 
   it('case 6 (handler level): a webhook signed with the WRONG secret is rejected 400 and applies nothing', async () => {
@@ -236,6 +236,6 @@ describe('source guards (case 7 + offer UI amounts)', () => {
     }
     // The amount due after the $1 credit is the charge itself:
     assert.equal(PRICING.oneForm.chargeCents, 9895);
-    assert.equal(PRICING.bundle.chargeCents, 12895);
+    assert.equal(PRICING.bundle.chargeCents, 14895);
   });
 });

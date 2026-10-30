@@ -548,7 +548,7 @@ describe('P5 journey — EN, $1 evaluation → one-form upgrade → add-on', () 
     delete process.env.PAYWALL_ENABLED;
   });
 
-  it('the full sequence in one journey: $1 evaluation delivered → I-589 upgrade generates, I-765 refused 402 → $30 add-on → I-765 generates; chain totals $129.95', async () => {
+  it('the full sequence in one journey: $1 evaluation delivered → I-589 upgrade generates, I-765 refused 402 → $50 add-on → I-765 generates; chain totals $149.95', async () => {
     process.env.PAYWALL_ENABLED = 'true';
     try {
       const record = makeRecord({
@@ -603,11 +603,11 @@ describe('P5 journey — EN, $1 evaluation → one-form upgrade → add-on', () 
       assert.equal(refusedAfter.statusCode, 402);
       assert.equal(refusedAfter.body.reason, 'state-CONSUMED');
 
-      // Step 6: second-form add-on ($30.00) covers exactly the other form.
+      // Step 6: second-form add-on ($50.00) covers exactly the other form.
       const addon = await buyAndPay({ sku: SKUS.SECOND_FORM, entitlementToken: oneForm.token }, '10.21.5.6');
-      assert.equal(addon.checkout.amountCents, 3000);
+      assert.equal(addon.checkout.amountCents, 5000);
       assert.deepEqual(addon.checkout.scope, { kind: 'forms', forms: ['I-765'] });
-      assert.equal(addon.checkout.totalCents, 12995);
+      assert.equal(addon.checkout.totalCents, 14995);
 
       // Step 7: both forms have now generated end-to-end.
       const gen765 = await generateViaHandler('I-765', addon.token, record, '10.21.5.7');
@@ -616,10 +616,10 @@ describe('P5 journey — EN, $1 evaluation → one-form upgrade → add-on', () 
       assert.equal(await fieldText(bytes765, F765.family), 'Ellis', 'I-765 draft carries the persona name');
       assert.equal(await fieldText(bytes765, F765.dob), '05/17/1990');
 
-      // The paid chain is exactly $129.95 — never two forms for $99.95.
+      // The paid chain is exactly $149.95 — never two forms for $99.95.
       assert.equal(
         evaluation.checkout.amountCents + oneForm.checkout.amountCents + addon.checkout.amountCents,
-        12995);
+        14995);
     } finally {
       delete process.env.PAYWALL_ENABLED;
     }

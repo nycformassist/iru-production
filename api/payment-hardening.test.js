@@ -83,7 +83,7 @@ describe('GAP 1 — cross-SKU concurrent-upgrade family rule (store level)', () 
     const ev = store.create({ sku: SKUS.EVALUATION, amountCents: 100, sessionId: 'sess_ev1' });
     store.markPaidBySession('sess_ev1', 'evt_ev1');
     const one = store.create({ sku: SKUS.ONE_FORM, amountCents: 9895, sessionId: 'sess_one1', scope: { kind: 'forms', forms: ['I-589'] }, parentId: ev.entitlement.id });
-    const bun = store.create({ sku: SKUS.BUNDLE, amountCents: 12895, sessionId: 'sess_bun1', scope: { kind: 'forms', forms: ['I-589', 'I-765'] }, parentId: ev.entitlement.id });
+    const bun = store.create({ sku: SKUS.BUNDLE, amountCents: 14895, sessionId: 'sess_bun1', scope: { kind: 'forms', forms: ['I-589', 'I-765'] }, parentId: ev.entitlement.id });
     assert.equal(store.markPaidBySession('sess_one1', 'evt_one1').applied, true);
     const second = store.markPaidBySession('sess_bun1', 'evt_bun1');
     assert.equal(second.applied, false);
@@ -99,7 +99,7 @@ describe('GAP 1 — cross-SKU concurrent-upgrade family rule (store level)', () 
     const store = createEntitlementStore(() => 100_000);
     const ev = store.create({ sku: SKUS.EVALUATION, amountCents: 100, sessionId: 'sess_ev2' });
     store.markPaidBySession('sess_ev2', 'evt_ev2');
-    const bun = store.create({ sku: SKUS.BUNDLE, amountCents: 12895, sessionId: 'sess_bun2', scope: { kind: 'forms', forms: ['I-589', 'I-765'] }, parentId: ev.entitlement.id });
+    const bun = store.create({ sku: SKUS.BUNDLE, amountCents: 14895, sessionId: 'sess_bun2', scope: { kind: 'forms', forms: ['I-589', 'I-765'] }, parentId: ev.entitlement.id });
     const one = store.create({ sku: SKUS.ONE_FORM, amountCents: 9895, sessionId: 'sess_one2', scope: { kind: 'forms', forms: ['I-765'] }, parentId: ev.entitlement.id });
     assert.equal(store.markPaidBySession('sess_bun2', 'evt_bun2').applied, true);
     const second = store.markPaidBySession('sess_one2', 'evt_one2');
@@ -114,12 +114,12 @@ describe('GAP 1 — cross-SKU concurrent-upgrade family rule (store level)', () 
     store.markPaidBySession('sess_ev3', 'evt_ev3');
     const one = store.create({ sku: SKUS.ONE_FORM, amountCents: 9895, sessionId: 'sess_one3', scope: { kind: 'forms', forms: ['I-589'] }, parentId: ev.entitlement.id });
     store.markPaidBySession('sess_one3', 'evt_one3');
-    const add = store.create({ sku: SKUS.SECOND_FORM, amountCents: 3000, sessionId: 'sess_add3', scope: { kind: 'forms', forms: ['I-765'] }, parentId: one.entitlement.id });
+    const add = store.create({ sku: SKUS.SECOND_FORM, amountCents: 5000, sessionId: 'sess_add3', scope: { kind: 'forms', forms: ['I-765'] }, parentId: one.entitlement.id });
     const paid = store.markPaidBySession('sess_add3', 'evt_add3');
     assert.equal(paid.applied, true);
     assert.equal(store.peekByToken(add.token).ok, true);
     // ...but a bundle created against the evaluation root is now refused (transitive family).
-    const bun = store.create({ sku: SKUS.BUNDLE, amountCents: 12895, sessionId: 'sess_bun3', scope: { kind: 'forms', forms: ['I-589', 'I-765'] }, parentId: ev.entitlement.id });
+    const bun = store.create({ sku: SKUS.BUNDLE, amountCents: 14895, sessionId: 'sess_bun3', scope: { kind: 'forms', forms: ['I-589', 'I-765'] }, parentId: ev.entitlement.id });
     const refused = store.markPaidBySession('sess_bun3', 'evt_bun3');
     assert.equal(refused.applied, false);
     assert.ok(refused.exception);
@@ -131,8 +131,8 @@ describe('GAP 1 — cross-SKU concurrent-upgrade family rule (store level)', () 
     store.markPaidBySession('sess_ev4', 'evt_ev4');
     const one = store.create({ sku: SKUS.ONE_FORM, amountCents: 9895, sessionId: 'sess_one4', scope: { kind: 'forms', forms: ['I-589'] }, parentId: ev.entitlement.id });
     store.markPaidBySession('sess_one4', 'evt_one4');
-    const a1 = store.create({ sku: SKUS.SECOND_FORM, amountCents: 3000, sessionId: 'sess_add4a', scope: { kind: 'forms', forms: ['I-765'] }, parentId: one.entitlement.id });
-    const a2 = store.create({ sku: SKUS.SECOND_FORM, amountCents: 3000, sessionId: 'sess_add4b', scope: { kind: 'forms', forms: ['I-765'] }, parentId: one.entitlement.id });
+    const a1 = store.create({ sku: SKUS.SECOND_FORM, amountCents: 5000, sessionId: 'sess_add4a', scope: { kind: 'forms', forms: ['I-765'] }, parentId: one.entitlement.id });
+    const a2 = store.create({ sku: SKUS.SECOND_FORM, amountCents: 5000, sessionId: 'sess_add4b', scope: { kind: 'forms', forms: ['I-765'] }, parentId: one.entitlement.id });
     assert.equal(store.markPaidBySession('sess_add4a', 'evt_add4a').applied, true);
     const refused = store.markPaidBySession('sess_add4b', 'evt_add4b');
     assert.equal(refused.applied, false);
@@ -184,7 +184,7 @@ describe('store snapshot / restore (persistence mechanism)', () => {
     const one = store.create({ sku: SKUS.ONE_FORM, amountCents: 9895, sessionId: 'sess_snap_one', scope: { kind: 'forms', forms: ['I-589'] }, parentId: ev.entitlement.id });
     store.markPaidBySession('sess_snap_one', 'evt_snap_one');
     store.consumeForForm(one.token, 'I-589');
-    const bun = store.create({ sku: SKUS.BUNDLE, amountCents: 12895, sessionId: 'sess_snap_bun', scope: { kind: 'forms', forms: ['I-589', 'I-765'] }, parentId: ev.entitlement.id });
+    const bun = store.create({ sku: SKUS.BUNDLE, amountCents: 14895, sessionId: 'sess_snap_bun', scope: { kind: 'forms', forms: ['I-589', 'I-765'] }, parentId: ev.entitlement.id });
     store.markPaidBySession('sess_snap_bun', 'evt_snap_bun'); // refused → exception
     store.saveIntent('intent-snap', { entitlementId: one.entitlement.id, sessionId: 'sess_snap_one', sku: SKUS.ONE_FORM, checkoutUrl: 'https://checkout.stripe.test/pay' });
     const snap = store.snapshot();

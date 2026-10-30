@@ -13,11 +13,11 @@
 // - sku = one-form ($98.95 after the $1 credit; $99.95 total): requires
 //   the buyer's PAID evaluation entitlement token as proof of the
 //   credit; scope = exactly the selected form (I-589 XOR I-765).
-// - sku = bundle ($128.95 after credit; $129.95 total): same credit
+// - sku = bundle ($148.95 after credit; $149.95 total): same credit
 //   requirement; scope = both forms.
-// - sku = second-form add-on ($30.00): requires a PAID one-form
+// - sku = second-form add-on ($50.00): requires a PAID one-form
 //   entitlement token; scope = the OTHER form; buyer's total becomes
-//   $129.95.
+//   $149.95.
 // Duplicate protection: a second PAID upgrade on the same parent
 // entitlement is refused (409); abandoned unpaid upgrade checkouts are
 // voided and replaced, never double-charged.

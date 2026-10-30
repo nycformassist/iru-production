@@ -317,7 +317,7 @@ describe('WS5 (d) access isolation at the HTTP layer', () => {
       // The form-already-delivered reason is the BUNDLE case: one form
       // delivered, the entitlement still RESERVED for the other form.
       const bundle = entitlementStore.create({
-        sku: 'iru-bundle', amountCents: 12895, sessionId: 'sess_ws5_bundle',
+        sku: 'iru-bundle', amountCents: 14895, sessionId: 'sess_ws5_bundle',
         scope: { kind: 'forms', forms: ['I-589', 'I-765'] },
       });
       entitlementStore.markPaidBySession('sess_ws5_bundle', 'evt_ws5_bundle');
