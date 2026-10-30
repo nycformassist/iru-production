@@ -35,7 +35,9 @@ export function checkPaywallAgreement(body, env = process.env) {
 
 /** Returns { ok: true, origin } or { ok: false, reason }. */
 export function resolveAppOrigin(env = process.env) {
-  const raw = env.IRU_APP_ORIGIN;
+  // Prefer explicit IRU_APP_ORIGIN; fall back to Vercel's automatic VERCEL_URL
+  // (present on every deployment) so Preview doesn't need manual updates.
+  const raw = env.IRU_APP_ORIGIN || (env.VERCEL_URL ? `https://${env.VERCEL_URL}` : '');
   if (!raw || typeof raw !== 'string' || raw.trim() === '') {
     return { ok: false, reason: 'missing-origin' };
   }
