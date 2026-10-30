@@ -182,6 +182,10 @@ async function handler(req, res, store = entitlementStore) {
   }
 
   const secretKey = process.env.IRU_STRIPE_KEY || '';
+  // Diagnostic logging per Vercel support (boolean only, no values).
+  console.log('[iru] env check: IRU_STRIPE_KEY=' + Boolean(process.env.IRU_STRIPE_KEY) +
+    ' IRU_DB_URL=' + Boolean(process.env.IRU_DB_URL) +
+    ' IRU_STORE_BACKEND=' + Boolean(process.env.IRU_STORE_BACKEND));
   if (!secretKey) {
     return res.status(503).json({ error: 'Checkout is not configured.' });
   }
