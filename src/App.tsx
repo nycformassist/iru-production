@@ -1218,7 +1218,17 @@ export default function App() {
   const buildPackageOffers = () => {
     const offer = buildOffer(lang);
     const hasEval = !!getEvalToken();
-    return offer.options.map((o: any) => ({
+    // Include the $1 evaluation as the first option (not in offer.options).
+    const evalOption = offer.evaluation ? [{
+      sku: offer.evaluation.sku,
+      name: offer.evaluation.name,
+      desc: ppt('pkgEvalDesc', lang as any),
+      totalCents: offer.evaluation.chargeCents,
+      chargeCents: offer.evaluation.chargeCents,
+      savingsNote: undefined,
+      forms: undefined,
+    }] : [];
+    return [...evalOption, ...offer.options.map((o: any) => ({
       sku: o.sku,
       name: o.name,
       desc: o.sku === 'evaluation' ? ppt('pkgEvalDesc', lang as any)
@@ -1228,7 +1238,7 @@ export default function App() {
       chargeCents: hasEval ? Math.max(0, o.totalCents - 100) : o.totalCents,
       savingsNote: o.savingsNote || (o.sku === 'bundle' ? ppt('pkgBundleSave', lang as any) : undefined),
       forms: o.forms,
-    }));
+    }))];
   };
 
   /**
