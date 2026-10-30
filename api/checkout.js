@@ -27,6 +27,7 @@
 // - Without configuration the endpoint reports itself unavailable.
 
 import { entitlementStore } from './_lib/entitlement.js';
+import { withDurableStore } from './_lib/withStore.js';
 import { createLimiter, clientIp } from './_lib/ratelimit.js';
 import { PRICING, SKUS, FORM_IDS } from './_lib/pricing.js';
 import { getFormEntry } from './_lib/forms/registry.js';
@@ -117,9 +118,9 @@ async function expireSupersededSessions(sessionIds, secretKey) {
  * evaluation was delivered) — and by matching the required scope kind.
  * Client-supplied claims about prior payments are never trusted.
  */
-function verifyPrerequisite(token, { kind, formsCount = null }) {
+function verifyPrerequisite(store, token, { kind, formsCount = null }) {
   if (!token || typeof token !== 'string') return null;
-  const ent = entitlementStore.getByToken(token);
+  const ent = store.getByToken(token);
   if (!ent || ent.paidAt == null) return null;
   if (ent.state === 'VOID' || ent.state === 'EXPIRED') return null;
   if (!ent.scope || ent.scope.kind !== kind) return null;
@@ -146,8 +147,8 @@ function verifyPrerequisite(token, { kind, formsCount = null }) {
  * to its original session. The paid-conflict check and the void sweep
  * for other abandoned attempts are unchanged.
  */
-function guardDuplicateUpgrade(parent, sku, excludeEntitlementId) {
-  const children = entitlementStore.childrenOf(parent.id);
+function guardDuplicateUpgrade(store, parent, sku, excludeEntitlementId) {
+  const children = store.childrenOf(parent.id);
   const paidUpgrade = children.find((c) => c.paidAt != null
     && (c.sku === SKUS.ONE_FORM || c.sku === SKUS.BUNDLE || c.sku === SKUS.SECOND_FORM));
   if (paidUpgrade) return { conflict: true, supersededSessionIds: [] };
@@ -155,13 +156,13 @@ function guardDuplicateUpgrade(parent, sku, excludeEntitlementId) {
   for (const c of children) {
     if (c.paidAt == null && c.sku === sku && c.state === 'RESERVED' && c.id !== excludeEntitlementId) {
       if (c.sessionId) supersededSessionIds.push(c.sessionId);
-      entitlementStore.void(c.id, 'superseded-by-new-checkout');
+      store.void(c.id, 'superseded-by-new-checkout');
     }
   }
   return { conflict: false, supersededSessionIds };
 }
 
-export default async function handler(req, res) {
+async function handler(req, res, store = entitlementStore) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -217,7 +218,7 @@ export default async function handler(req, res) {
     ? body.purchaseIntentKey
     : null;
   const intentEntitlementId = intentKey
-    ? (entitlementStore.getIntent(intentKey)?.entitlementId || null)
+    ? (store.getIntent(intentKey)?.entitlementId || null)
     : null;
   // Stripe session ids voided by this request's guard sweep, for
   // best-effort expiration after plan resolution.
@@ -237,11 +238,11 @@ export default async function handler(req, res) {
     const row = PRICING.evaluation;
     plan = { sku: row.sku, amountCents: row.chargeCents, scope: { kind: 'evaluation' }, parentId: null, creditedCents: 0, totalCents: row.totalCents, productName: row.name };
   } else if (requestedSku === SKUS.ONE_FORM || requestedSku === SKUS.BUNDLE) {
-    const parent = verifyPrerequisite(body.entitlementToken, { kind: 'evaluation' });
+    const parent = verifyPrerequisite(store, body.entitlementToken, { kind: 'evaluation' });
     if (!parent) {
       return res.status(402).json({ error: 'The $1 evaluation purchase is required first — its payment is credited toward this total.', reason: 'evaluation-required' });
     }
-    const guard = guardDuplicateUpgrade(parent, requestedSku, intentEntitlementId);
+    const guard = guardDuplicateUpgrade(store, parent, requestedSku, intentEntitlementId);
     supersededSessionIds = guard.supersededSessionIds;
     if (guard.conflict) {
       return res.status(409).json({ error: 'This purchase has already been completed. A second charge would duplicate it.', reason: 'already-purchased' });
@@ -258,11 +259,11 @@ export default async function handler(req, res) {
       plan = { sku: row.sku, amountCents: row.chargeCents, scope: { kind: 'forms', forms: [...FORM_IDS] }, parentId: parent.id, creditedCents: row.creditedCents, totalCents: row.totalCents, productName: row.name };
     }
   } else if (requestedSku === SKUS.SECOND_FORM) {
-    const parent = verifyPrerequisite(body.entitlementToken, { kind: 'forms', formsCount: 1 });
+    const parent = verifyPrerequisite(store, body.entitlementToken, { kind: 'forms', formsCount: 1 });
     if (!parent) {
       return res.status(402).json({ error: 'The second-form add-on requires your completed one-form purchase.', reason: 'one-form-required' });
     }
-    const guard = guardDuplicateUpgrade(parent, requestedSku, intentEntitlementId);
+    const guard = guardDuplicateUpgrade(store, parent, requestedSku, intentEntitlementId);
     supersededSessionIds = guard.supersededSessionIds;
     if (guard.conflict) {
       return res.status(409).json({ error: 'This purchase has already been completed. A second charge would duplicate it.', reason: 'already-purchased' });
@@ -300,9 +301,9 @@ export default async function handler(req, res) {
     ? plan.scope.forms[0]
     : null;
   if (intentKey) {
-    const prior = entitlementStore.getIntent(intentKey);
+    const prior = store.getIntent(intentKey);
     if (prior) {
-      const priorEnt = entitlementStore.getById(prior.entitlementId);
+      const priorEnt = store.getById(prior.entitlementId);
       if (priorEnt && priorEnt.state === 'RESERVED' && priorEnt.paidAt == null
         && prior.sku === plan.sku && (prior.formId || null) === planFormId
         && (prior.parentId || null) === (plan.parentId || null)) {
@@ -322,11 +323,11 @@ export default async function handler(req, res) {
       }
       // Stale intent (void, expired, paid, or consumed original):
       // drop it and mint a fresh checkout below.
-      entitlementStore.deleteIntent(intentKey);
+      store.deleteIntent(intentKey);
     }
   }
 
-  const { entitlement, token } = entitlementStore.create({
+  const { entitlement, token } = store.create({
     sku: plan.sku,
     amountCents: plan.amountCents,
     currency: 'usd',
@@ -365,14 +366,14 @@ export default async function handler(req, res) {
       // closed — there is no localhost fallback anywhere in this file.
       const origin = resolveAppOrigin();
       if (!origin.ok) {
-        entitlementStore.void(entitlement.id, 'checkout-origin-invalid');
+        store.void(entitlement.id, 'checkout-origin-invalid');
         return res.status(503).json({ error: 'Checkout is not configured.' });
       }
       session = await stripeCreateSession({ secretKey, amountCents: plan.amountCents, entitlementId: entitlement.id, productName: plan.productName, idempotencyKey, expiresAt, origin: origin.origin });
     }
-    entitlementStore.attachSession(entitlement.id, session.id);
+    store.attachSession(entitlement.id, session.id);
     if (intentKey) {
-      entitlementStore.saveIntent(intentKey, {
+      store.saveIntent(intentKey, {
         entitlementId: entitlement.id, sessionId: session.id, sku: plan.sku,
         formId: planFormId, parentId: plan.parentId || null,
         checkoutUrl: session.url, amountCents: plan.amountCents, totalCents: plan.totalCents,
@@ -394,7 +395,7 @@ export default async function handler(req, res) {
       mode: 'test',
     });
   } catch (err) {
-    entitlementStore.void(entitlement.id, 'checkout-session-failed');
+    store.void(entitlement.id, 'checkout-session-failed');
     console.error('[iru] checkout creation failed:', err && err.message ? err.message : err);
     return res.status(502).json({ error: 'Checkout unavailable. Please try again later.' });
   }
@@ -403,3 +404,8 @@ export default async function handler(req, res) {
 function safeParse(s) {
   try { return JSON.parse(s); } catch { return null; }
 }
+
+// Raw handler for unit tests (singleton default). Vercel serves the
+// durable-wrapped default: load → restore → run → save (CAS).
+export { handler };
+export default withDurableStore(handler);

@@ -1,9 +1,11 @@
 /**
  * lib/paymentStore.js — Durable-store provider interface + fail-closed gate.
  *
- * HONEST STATUS (payment-hardening directive 2026-10-24): no durable
- * backend is provisioned for this application today. This module does
- * NOT make the in-memory store durable. It does three things:
+ * HONEST STATUS (payment-hardening directive 2026-10-24; Phase 1 2026-10-30):
+ * the Postgres snapshot backend is implemented (api/_lib/store-postgres.js,
+ * sql/schema.sql) but no database is provisioned yet — set IRU_DATABASE_URL
+ * to activate it. Until then this module does NOT make the in-memory store
+ * durable. It does three things:
  *
  * 1. Backend selection is explicit (IRU_STORE_BACKEND). The only backend
  *    available in this tree is the in-memory test adapter, and it is
@@ -47,9 +49,15 @@ export function resolvePaymentBackend(env = process.env) {
     };
   }
   if (kind === 'postgres') {
+    if (env.IRU_DATABASE_URL) {
+      return {
+        available: true, kind: 'postgres', durable: true,
+        reason: 'Postgres snapshot backend (IRU_DATABASE_URL). Commerce snapshot with compare-and-swap versioning.',
+      };
+    }
     return {
       available: false, kind: 'postgres', durable: false,
-      reason: 'Postgres backend not provisioned in this tree: requires a Postgres service, IRU_DATABASE_URL, the pg driver dependency, and the snapshot-table migration. Refusing paid paths until provisioned.',
+      reason: 'Postgres backend selected but IRU_DATABASE_URL is not set. Refusing paid paths.',
     };
   }
   if (kind) {
@@ -80,13 +88,16 @@ export function createMemorySnapshotBackend() {
     kind: 'memory-snapshot',
     durable: false,
     async load() {
-      return snapshot ? JSON.parse(JSON.stringify(snapshot)) : null;
+      // Shape matches the Postgres backend: { version, snapshot }.
+      // Returns null when no snapshot exists yet.
+      return snapshot ? { version, snapshot: JSON.parse(JSON.stringify(snapshot)) } : null;
     },
     async loadVersion() {
       return version;
     },
     async save(next, expectedVersion) {
-      if (expectedVersion !== version) {
+      const expected = expectedVersion == null ? 0 : expectedVersion;
+      if (expected !== version) {
         return { ok: false, reason: 'version-conflict', version };
       }
       version += 1;

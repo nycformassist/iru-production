@@ -1,7 +1,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createEntitlementStore, entitlementStore } from './_lib/entitlement.js';
-import checkoutHandler from './checkout.js';
+import { handler as checkoutHandler } from './checkout.js';
 
 // Payment defect closure directive 2026-10-24 — regression tests for:
 //  (1) upgrade purchase-intent retry ordering (guard voided the intent's

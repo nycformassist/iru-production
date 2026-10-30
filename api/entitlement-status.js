@@ -8,12 +8,13 @@
 // stored only as SHA-256 hashes).
 
 import { entitlementStore } from './_lib/entitlement.js';
+import { withDurableStore } from './_lib/withStore.js';
 import { createLimiter, clientIp } from './_lib/ratelimit.js';
 import { assertPaidStoreAvailable } from './_lib/paymentStore.js';
 
 const limiter = createLimiter({ capacity: 10, windowMs: 10 * 60 * 1000 });
 
-export default async function handler(req, res) {
+async function handler(req, res, store = entitlementStore) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -32,9 +33,9 @@ export default async function handler(req, res) {
   const body = typeof req.body === 'string' ? safeParse(req.body) : (req.body || {});
   const token = body && typeof body.token === 'string' ? body.token : '';
   if (!token) return res.status(400).json({ error: 'Invalid submission.' });
-  const ent = entitlementStore.getByToken(token);
+  const ent = store.getByToken(token);
   if (!ent) return res.status(404).json({ error: 'Entitlement not found.' });
-  const view = entitlementStore.publicView(ent);
+  const view = store.publicView(ent);
   // Usable = paid, still RESERVED, and (for scoped form grants) at
   // least one covered form has not been delivered yet. Legacy grants
   // keep their original whole-token semantics.
@@ -53,3 +54,8 @@ export default async function handler(req, res) {
 function safeParse(s) {
   try { return JSON.parse(s); } catch { return null; }
 }
+
+// Raw handler for unit tests (singleton default). Vercel serves the
+// durable-wrapped default: load → restore → run → save (CAS).
+export { handler };
+export default withDurableStore(handler);

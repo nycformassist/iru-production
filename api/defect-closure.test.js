@@ -586,9 +586,9 @@ describe('P6: webhook resolves failed and expired checkouts (mocks)', () => {
         return { id, url: `https://checkout.stripe.test/${id}` };
       },
     };
-    checkoutHandler = (await import('./checkout.js')).default;
-    webhookHandler = (await import('./webhook.js')).default;
-    statusHandler = (await import('./entitlement-status.js')).default;
+    checkoutHandler = (await import('./checkout.js')).handler;
+    webhookHandler = (await import('./webhook.js')).handler;
+    statusHandler = (await import('./entitlement-status.js')).handler;
   });
 
   async function createEvaluationCheckout() {

@@ -1,9 +1,9 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import analyzeHandler from './analyze.js';
-import checkoutHandler from './checkout.js';
-import webhookHandler from './webhook.js';
-import statusHandler from './entitlement-status.js';
+import { handler as checkoutHandler } from './checkout.js';
+import { handler as webhookHandler } from './webhook.js';
+import { handler as statusHandler } from './entitlement-status.js';
 import generateHandler from './generate-form.js';
 import { signStripePayload } from './_lib/stripewebhook.js';
 import { SKUS } from './_lib/pricing.js';

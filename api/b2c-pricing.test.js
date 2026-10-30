@@ -1,8 +1,8 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import checkoutHandler from './checkout.js';
-import webhookHandler from './webhook.js';
-import statusHandler from './entitlement-status.js';
+import { handler as checkoutHandler } from './checkout.js';
+import { handler as webhookHandler } from './webhook.js';
+import { handler as statusHandler } from './entitlement-status.js';
 import { signStripePayload } from './_lib/stripewebhook.js';
 import { entitlementStore, createEntitlementStore } from './_lib/entitlement.js';
 import { PRICING, SKUS, buildOffer, formatCents } from './_lib/pricing.js';

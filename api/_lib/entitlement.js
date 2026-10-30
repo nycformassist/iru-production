@@ -34,7 +34,7 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { SKUS } from './pricing.js';
 
-export const ENTITLEMENT_STATES = ['RESERVED', 'CONSUMED', 'EXPIRED', 'VOID'];
+export const ENTITLEMENT_STATES = ['RESERVED', 'CONSUMED', 'EXPIRED', 'VOID', 'REVOKED'];
 export const DEFAULT_TTL_MS = 30 * 60 * 1000; // 30 minutes to complete checkout
 export const DEFAULT_CLAIM_WINDOW_MS = 30 * 24 * 60 * 60 * 1000; // 30 days to use a paid entitlement
 
@@ -56,6 +56,17 @@ export function createEntitlementStore(now = () => Date.now()) {
   // server keeps only its SHA-256 hash); a retry returns the original
   // session URL + entitlement id, not the token.
   const intents = new Map();
+  // Credit ledger (Phase 1): append-only record of the $1.00 evaluation
+  // credit lifecycle — grant on evaluation payment, redeem on upgrade,
+  // adjust on refund/revocation. Makes T10 (no double-spend) auditable,
+  // not just guarded. Entries: { id, rootEntitlementId, kind,
+  // amountCents, entitlementId, createdAt }.
+  const ledger = [];
+  // Recovery identities (Phase 1, D3(b)): email SHA-256 hash ->
+  // entitlement id. No raw emails at rest. The reissue flow looks up
+  // by hash; token delivery is a provider-independent interface
+  // (stubbed until Resend/another provider is wired).
+  const recoveryIdentities = new Map();
 
   /** Raw record read: no lazy-expiry flip (callers decide the semantics). */
   function rawBySessionId(sessionId) {
@@ -266,6 +277,25 @@ export function createEntitlementStore(now = () => Date.now()) {
       }
       if (eventId) processedEvents.add(eventId);
       ent.paidAt = now();
+      // Credit ledger (Phase 1): the $1.00 evaluation payment grants a
+      // credit against the family root; a one-form or bundle upgrade
+      // redeems it exactly once. The second-form add-on carries no
+      // credit (creditedCents 0). T10 double-spend is prevented by the
+      // family guards above; the ledger makes it auditable.
+      const rootId = rootIdOf(ent) || ent.id;
+      if (ent.sku === SKUS.EVALUATION) {
+        ledger.push({
+          id: `led_${randomBytes(9).toString('hex')}`,
+          rootEntitlementId: rootId, kind: 'grant', amountCents: 100,
+          entitlementId: ent.id, createdAt: now(),
+        });
+      } else if ((ent.sku === SKUS.ONE_FORM || ent.sku === SKUS.BUNDLE) && (ent.creditedCents || 0) > 0) {
+        ledger.push({
+          id: `led_${randomBytes(9).toString('hex')}`,
+          rootEntitlementId: rootId, kind: 'redeem', amountCents: ent.creditedCents,
+          entitlementId: ent.id, createdAt: now(),
+        });
+      }
       // A late fulfillment re-opens the record with a fresh claim
       // window measured from payment (not from the lapsed checkout).
       ent.state = 'RESERVED';
@@ -303,6 +333,89 @@ export function createEntitlementStore(now = () => Date.now()) {
       return rawBySessionId(sessionId);
     },
 
+    /** Credit-ledger entries for a family root (copies, oldest first). */
+    ledgerFor(rootEntitlementId) {
+      return ledger
+        .filter((e) => e.rootEntitlementId === rootEntitlementId)
+        .map((e) => ({ ...e }));
+    },
+
+    /** Net unredeemed credit (cents) for a family root. */
+    creditBalance(rootEntitlementId) {
+      let balance = 0;
+      for (const e of ledger) {
+        if (e.rootEntitlementId !== rootEntitlementId) continue;
+        if (e.kind === 'grant') balance += e.amountCents;
+        else if (e.kind === 'redeem' || e.kind === 'adjust') balance -= e.amountCents;
+      }
+      return balance;
+    },
+
+    /**
+     * Revoke a paid entitlement after a human-issued Stripe refund
+     * (T8). The refund itself is NEVER issued here — only recorded.
+     * Idempotent per event id. Access ends: state → REVOKED, and the
+     * ledger records an adjust entry for the refunded amount. The
+     * consumed evaluation credit is not restored (it was applied to a
+     * real purchase); the rule is documented here, not inferred.
+     */
+    revokeByRefund({ refundId, sessionId, eventId }) {
+      if (eventId && processedEvents.has(eventId)) return { applied: false, duplicate: true };
+      const ent = rawBySessionId(sessionId);
+      if (!ent) return { applied: false, duplicate: false, reason: 'unknown-session' };
+      if (ent.paidAt == null) return { applied: false, duplicate: false, reason: 'not-paid' };
+      if (ent.state === 'REVOKED') {
+        if (eventId) processedEvents.add(eventId);
+        return { applied: false, duplicate: true };
+      }
+      if (eventId) processedEvents.add(eventId);
+      ent.state = 'REVOKED';
+      ent.revokedAt = now();
+      ent.lastEventId = eventId || null;
+      const rootId = rootIdOf(ent) || ent.id;
+      ledger.push({
+        id: `led_${randomBytes(9).toString('hex')}`,
+        rootEntitlementId: rootId, kind: 'adjust', amountCents: ent.amountCents,
+        entitlementId: ent.id, createdAt: now(),
+        note: `refund ${refundId || 'manual'}`,
+      });
+      return { applied: true, duplicate: false, entitlement: { ...ent } };
+    },
+
+    /**
+     * Register an email hash for no-password recovery (D3(b)). Called
+     * at checkout time when the buyer optionally provides an email.
+     * Only the SHA-256 hash is kept — no raw emails at rest.
+     */
+    registerRecoveryIdentity({ entitlementId, email }) {
+      if (!entitlementId || !email || typeof email !== 'string') return { ok: false };
+      const emailHash = createHash('sha256').update(email.trim().toLowerCase()).digest('hex');
+      recoveryIdentities.set(emailHash, entitlementId);
+      return { ok: true };
+    },
+
+    /**
+     * Reissue a lost token via email hash (T9). Invalidates the old
+     * token and returns a fresh one-time raw token. Delivery of the
+     * token to the buyer is a provider-independent interface
+     * (see lib/recoveryDelivery.js — stubbed until a provider is wired).
+     */
+    reissueToken({ email }) {
+      if (!email || typeof email !== 'string') return { ok: false, reason: 'invalid-email' };
+      const emailHash = createHash('sha256').update(email.trim().toLowerCase()).digest('hex');
+      const entitlementId = recoveryIdentities.get(emailHash);
+      if (!entitlementId) return { ok: false, reason: 'unknown-identity' };
+      const ent = byId.get(entitlementId);
+      if (!ent || ent.paidAt == null) return { ok: false, reason: 'not-paid' };
+      if (ent.state === 'REVOKED') return { ok: false, reason: 'revoked' };
+      // Invalidate the old token, issue a fresh one.
+      byTokenHash.delete(ent.tokenHash);
+      const token = randomBytes(24).toString('base64url');
+      ent.tokenHash = hashToken(token);
+      byTokenHash.set(ent.tokenHash, ent.id);
+      return { ok: true, token, entitlementId: ent.id };
+    },
+
     /** Durable, observable payment exceptions (copies, newest last). */
     listExceptions() {
       return exceptions.map((e) => ({ ...e }));
@@ -337,29 +450,35 @@ export function createEntitlementStore(now = () => Date.now()) {
 
     /**
      * Full-state snapshot for the durable-backend interface
-     * (lib/paymentStore.js): entitlements, processed events,
-     * exceptions, and intents. Restore rebuilds every index.
+     * (lib/paymentStore.js): entitlements, credit ledger, processed
+     * events, exceptions, intents, and recovery identities. Restore
+     * rebuilds every index.
      */
     snapshot() {
       return JSON.parse(JSON.stringify({
         version: 1,
         entitlements: [...byId.values()],
+        ledger: ledger.map((e) => ({ ...e })),
         processedEvents: [...processedEvents],
         exceptions: exceptions.map((e) => ({ ...e })),
         intents: [...intents.entries()],
+        recoveryIdentities: [...recoveryIdentities.entries()],
       }));
     },
     restore(snap) {
       byId.clear(); byTokenHash.clear(); bySessionId.clear();
       processedEvents.clear(); exceptions.length = 0; intents.clear();
+      ledger.length = 0; recoveryIdentities.clear();
       for (const ent of snap.entitlements || []) {
         byId.set(ent.id, ent);
         byTokenHash.set(ent.tokenHash, ent.id);
         if (ent.sessionId) bySessionId.set(ent.sessionId, ent.id);
       }
+      for (const e of snap.ledger || []) ledger.push({ ...e });
       for (const e of snap.processedEvents || []) processedEvents.add(e);
       for (const e of snap.exceptions || []) exceptions.push({ ...e });
       for (const [k, v] of snap.intents || []) intents.set(k, { ...v });
+      for (const [k, v] of snap.recoveryIdentities || []) recoveryIdentities.set(k, v);
     },
 
     hasProcessedEvent(eventId) {

@@ -50,8 +50,8 @@ import { PDFDocument, PDFRawStream, decodePDFRawStream } from 'pdf-lib';
 
 import analyzeHandler from './analyze.js';
 import reviewImageHandler from './review-image.js';
-import checkoutHandler from './checkout.js';
-import webhookHandler from './webhook.js';
+import { handler as checkoutHandler } from './checkout.js';
+import { handler as webhookHandler } from './webhook.js';
 import generateHandler, { generateFormDraft } from './generate-form.js';
 import { createFactRecord, upsertFact } from './_lib/facts.js';
 import { sanitizeAnswers, minimizeForModel } from './_lib/privacy.js';

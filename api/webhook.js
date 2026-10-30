@@ -27,6 +27,7 @@
 //   idempotent, so a throttled delivery is redelivered, not lost.
 
 import { entitlementStore } from './_lib/entitlement.js';
+import { withDurableStore } from './_lib/withStore.js';
 import { verifyStripeSignature } from './_lib/stripewebhook.js';
 import { createLimiter, clientIp } from './_lib/ratelimit.js';
 import { assertPaidStoreAvailable } from './_lib/paymentStore.js';
@@ -42,7 +43,7 @@ function rawBodyOf(req) {
   return JSON.stringify(req.body || {});
 }
 
-export default async function handler(req, res) {
+async function handler(req, res, store = entitlementStore) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -98,20 +99,20 @@ export default async function handler(req, res) {
     // Defense-in-depth cross-checks against the persisted record,
     // before any grant. A mismatch is adjudicated as an exception
     // (event burned, grant refused, money flagged for manual refund).
-    const record = entitlementStore.getSessionRecord(sessionId);
+    const record = store.getSessionRecord(sessionId);
     if (!record) {
       return res.status(200).json({ received: true, applied: false, reason: 'unknown-session' });
     }
-    if (event.id && entitlementStore.hasProcessedEvent(event.id)) {
+    if (event.id && store.hasProcessedEvent(event.id)) {
       return res.status(200).json({ received: true, applied: false, duplicate: true });
     }
     const mismatch = checkSessionAgainstRecord(session, record);
     if (mismatch) {
-      const adjudicated = entitlementStore.adjudicateMismatch(sessionId, event.id, mismatch);
+      const adjudicated = store.adjudicateMismatch(sessionId, event.id, mismatch);
       console.log(`[iru] webhook ${event.type}: mismatch ${mismatch.reason} -> exception ${adjudicated.exception ? adjudicated.exception.id : 'n/a'}`);
       return res.status(200).json({ received: true, applied: false, exception: true, exceptionId: adjudicated.exception ? adjudicated.exception.id : null, reason: mismatch.reason });
     }
-    const result = entitlementStore.markPaidBySession(sessionId, event.id);
+    const result = store.markPaidBySession(sessionId, event.id);
     // Audit log: ids and outcome only — never amounts-account linkage beyond the session.
     console.log(`[iru] webhook ${event.type}: applied=${result.applied} duplicate=${!!result.duplicate}${result.reason ? ` reason=${result.reason}` : ''}${result.lateFulfilled ? ' late-fulfilled' : ''}${result.exception ? ` exception=${result.exception.id}` : ''}`);
     return res.status(200).json({
@@ -131,7 +132,7 @@ export default async function handler(req, res) {
     if (!session.id) return res.status(400).json({ error: 'Missing session id.' });
     // An expired session can never be paid: resolve the entitlement
     // terminally (VOID) so the buyer can start a clean checkout.
-    const result = entitlementStore.voidByExpiredSession(session.id, event.id);
+    const result = store.voidByExpiredSession(session.id, event.id);
     console.log(`[iru] webhook checkout.session.expired: applied=${result.applied} duplicate=${!!result.duplicate}${result.reason ? ` reason=${result.reason}` : ''}`);
     return res.status(200).json({ received: true, applied: result.applied, duplicate: !!result.duplicate });
   }
@@ -142,7 +143,7 @@ export default async function handler(req, res) {
     // A failed delayed payment does NOT end the entitlement: the buyer
     // may retry on the same session and a later success must still
     // mark it paid. The failure is recorded for audit only.
-    const result = entitlementStore.notePaymentFailedBySession(session.id, event.id);
+    const result = store.notePaymentFailedBySession(session.id, event.id);
     console.log(`[iru] webhook checkout.session.async_payment_failed: recorded=${result.applied} duplicate=${!!result.duplicate}${result.reason ? ` reason=${result.reason}` : ''}`);
     return res.status(200).json({ received: true, applied: result.applied, duplicate: !!result.duplicate });
   }
@@ -175,3 +176,8 @@ function checkSessionAgainstRecord(session, record) {
   }
   return null;
 }
+
+// Raw handler for unit tests (singleton default). Vercel serves the
+// durable-wrapped default: load → restore → run → save (CAS).
+export { handler };
+export default withDurableStore(handler);

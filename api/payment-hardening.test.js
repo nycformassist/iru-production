@@ -2,9 +2,9 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createEntitlementStore, entitlementStore } from './_lib/entitlement.js';
 import { signStripePayload } from './_lib/stripewebhook.js';
-import checkoutHandler from './checkout.js';
-import webhookHandler from './webhook.js';
-import statusHandler from './entitlement-status.js';
+import { handler as checkoutHandler } from './checkout.js';
+import { handler as webhookHandler } from './webhook.js';
+import { handler as statusHandler } from './entitlement-status.js';
 
 // Payment-hardening directive 2026-10-24 — reproduction + regression tests.
 // All local, synthetic, test-mode semantics only. The Stripe gateway is
@@ -446,14 +446,19 @@ describe('fail-closed configuration', () => {
 });
 
 describe('provider interface (paymentStore)', () => {
-  it('backend selection is explicit: memory requires the ephemeral allowance; postgres is unavailable until provisioned; unset is unavailable', async () => {
+  it('backend selection is explicit: memory requires the ephemeral allowance; postgres needs IRU_DATABASE_URL; unset is unavailable', async () => {
     const mod = await import('./_lib/paymentStore.js');
     assert.equal(mod.resolvePaymentBackend({ IRU_STORE_BACKEND: 'memory', IRU_ALLOW_EPHEMERAL_STORE: 'true' }).kind, 'memory');
     assert.equal(mod.resolvePaymentBackend({ IRU_STORE_BACKEND: 'memory', IRU_ALLOW_EPHEMERAL_STORE: 'true' }).durable, false);
     assert.equal(mod.resolvePaymentBackend({ IRU_STORE_BACKEND: 'memory' }).available, false);
+    // Phase 1: the Postgres snapshot backend is implemented; it is
+    // available exactly when a database URL is configured.
     const pg = mod.resolvePaymentBackend({ IRU_STORE_BACKEND: 'postgres', IRU_DATABASE_URL: 'postgres://x' });
-    assert.equal(pg.available, false); // driver + migration not provisioned in this tree
-    assert.match(pg.reason, /provision/i);
+    assert.equal(pg.available, true);
+    assert.equal(pg.durable, true);
+    const pgNoUrl = mod.resolvePaymentBackend({ IRU_STORE_BACKEND: 'postgres' });
+    assert.equal(pgNoUrl.available, false);
+    assert.match(pgNoUrl.reason, /IRU_DATABASE_URL/);
     assert.equal(mod.resolvePaymentBackend({}).available, false);
   });
 
@@ -466,6 +471,6 @@ describe('provider interface (paymentStore)', () => {
     const stale = await backend.save({ version: 0, records: { a: 2 } }, 0);
     assert.equal(stale.ok, false);
     assert.equal(stale.reason, 'version-conflict');
-    assert.equal((await backend.load()).records.a, 1);
+    assert.equal((await backend.load()).snapshot.records.a, 1);
   });
 });
