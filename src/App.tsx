@@ -230,10 +230,11 @@ export default function App() {
         if (evalToken) {
           const r = await fetch('/api/entitlement-status', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ entitlementToken: evalToken }),
+            body: JSON.stringify({ token: evalToken }),
           });
           const d = await r.json().catch(() => null);
-          if (d && d.paid && d.scope && d.scope.kind === 'evaluation') {
+          const ent = d && d.entitlement ? d.entitlement : null;
+          if (ent && ent.paid && ent.scope && ent.scope.kind === 'evaluation') {
             setStage('EVAL_INTAKE' as any);
             return;
           }
@@ -242,10 +243,11 @@ export default function App() {
         for (const f of Object.keys(formTokens)) {
           const r = await fetch('/api/entitlement-status', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ entitlementToken: formTokens[f] }),
+            body: JSON.stringify({ token: formTokens[f] }),
           });
           const d = await r.json().catch(() => null);
-          if (d && d.paid) {
+          const ent = d && d.entitlement ? d.entitlement : null;
+          if (ent && ent.paid) {
             setStage('LANG' as any);
             return;
           }
