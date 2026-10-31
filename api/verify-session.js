@@ -68,6 +68,16 @@ async function handler(req, res, store = entitlementStore) {
   const ent = result && result.entitlement ? result.entitlement : null;
   const view = ent ? store.publicView(ent) : null;
 
+  // Register the recovery identity so "recover access" can find this
+  // purchase by email. Stripe provides the customer email on the session.
+  // Stored as SHA-256 hash only — the raw email never touches the store.
+  if (ent && session.customer_details && session.customer_details.email) {
+    store.registerRecoveryIdentity({
+      entitlementId: ent.id,
+      email: session.customer_details.email,
+    });
+  }
+
   return res.status(200).json({
     ok: true,
     paid: true,

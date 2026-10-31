@@ -113,6 +113,14 @@ async function handler(req, res, store = entitlementStore) {
       return res.status(200).json({ received: true, applied: false, exception: true, exceptionId: adjudicated.exception ? adjudicated.exception.id : null, reason: mismatch.reason });
     }
     const result = store.markPaidBySession(sessionId, event.id);
+    // Register recovery identity (backup path — verify-session is primary).
+    // The webhook event carries the full session object with customer email.
+    if (result.applied && result.entitlement && session.customer_details && session.customer_details.email) {
+      store.registerRecoveryIdentity({
+        entitlementId: result.entitlement.id,
+        email: session.customer_details.email,
+      });
+    }
     // Audit log: ids and outcome only — never amounts-account linkage beyond the session.
     console.log(`[iru] webhook ${event.type}: applied=${result.applied} duplicate=${!!result.duplicate}${result.reason ? ` reason=${result.reason}` : ''}${result.lateFulfilled ? ' late-fulfilled' : ''}${result.exception ? ` exception=${result.exception.id}` : ''}`);
     return res.status(200).json({
