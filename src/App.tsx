@@ -256,6 +256,17 @@ export default function App() {
             return;
           }
         }
+        // Fallback: generic stored token (legacy/other SKUs).
+        const storedToken = getStoredToken();
+        const storedEnt = await checkToken(storedToken);
+        if (storedEnt) {
+          if (storedEnt.scope && storedEnt.scope.kind === 'evaluation') {
+            setStage('EVAL_INTAKE' as any);
+          } else {
+            setStage('LANG' as any);
+          }
+          return;
+        }
         // No valid entitlement found — back to entry.
         setStage('ENTRY' as any);
       } catch {
