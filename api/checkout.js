@@ -182,15 +182,8 @@ async function handler(req, res, store = entitlementStore) {
   }
 
   const secretKey = process.env.IRU_STRIPE_KEY || '';
-  // Diagnostic logging per Vercel support (boolean only, no values).
-  console.log('[iru] env check: IRU_STRIPE_KEY=' + Boolean(process.env.IRU_STRIPE_KEY) +
-    ' IRU_DB_URL=' + Boolean(process.env.IRU_DB_URL) +
-    ' IRU_STORE_BACKEND=' + Boolean(process.env.IRU_STORE_BACKEND));
   if (!secretKey) {
-    return res.status(503).json({ error: 'Checkout is not configured.',
-      _diag: { stripeKey: Boolean(process.env.IRU_STRIPE_KEY),
-               dbUrl: Boolean(process.env.IRU_DB_URL),
-               storeBackend: process.env.IRU_STORE_BACKEND || 'missing' } });
+    return res.status(503).json({ error: 'Checkout is not configured.' });
   }
   if (secretKey.startsWith('sk_live') || secretKey.startsWith('rk_live')) {
     // Owner gate: live payments require separate explicit authorization.
@@ -210,7 +203,6 @@ async function handler(req, res, store = entitlementStore) {
   // Fail closed when no durable backend is configured: never create a
   // paid purchase state the app cannot persist (see lib/paymentStore.js).
   const storeGate = assertPaidStoreAvailable();
-  console.log('[iru] storeGate: ok=' + storeGate.ok + ' reason=' + (storeGate.backend && storeGate.backend.reason));
   if (!storeGate.ok) {
     return res.status(503).json({ error: 'Checkout is not configured.' });
   }
@@ -373,7 +365,6 @@ async function handler(req, res, store = entitlementStore) {
       // Real Stripe path only: the origin is validated here, fail
       // closed — there is no localhost fallback anywhere in this file.
       const origin = resolveAppOrigin();
-      console.log('[iru] origin check: ok=' + origin.ok + ' origin=' + (origin.origin || 'none'));
       if (!origin.ok) {
         store.void(entitlement.id, 'checkout-origin-invalid');
         return res.status(503).json({ error: 'Checkout is not configured.' });
