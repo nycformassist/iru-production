@@ -225,28 +225,32 @@ export default function App() {
     window.history.replaceState({}, '', window.location.pathname);
     (async () => {
       try {
+        // The Stripe webhook marks the entitlement paid asynchronously;
+        // the user often returns before it runs. Retry a few times.
+        const checkToken = async (token: string | null) => {
+          if (!token) return null;
+          for (let attempt = 0; attempt < 4; attempt++) {
+            if (attempt > 0) await new Promise(r => setTimeout(r, 2000));
+            const r = await fetch('/api/entitlement-status', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ token }),
+            });
+            const d = await r.json().catch(() => null);
+            const ent = d && d.entitlement ? d.entitlement : null;
+            if (ent && ent.paid) return ent;
+          }
+          return null;
+        };
         // Try evaluation token first, then form tokens.
         const evalToken = getEvalToken();
-        if (evalToken) {
-          const r = await fetch('/api/entitlement-status', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token: evalToken }),
-          });
-          const d = await r.json().catch(() => null);
-          const ent = d && d.entitlement ? d.entitlement : null;
-          if (ent && ent.paid && ent.scope && ent.scope.kind === 'evaluation') {
-            setStage('EVAL_INTAKE' as any);
-            return;
-          }
+        const evalEnt = await checkToken(evalToken);
+        if (evalEnt && evalEnt.scope && evalEnt.scope.kind === 'evaluation') {
+          setStage('EVAL_INTAKE' as any);
+          return;
         }
         const formTokens = getFormTokens();
         for (const f of Object.keys(formTokens)) {
-          const r = await fetch('/api/entitlement-status', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token: formTokens[f] }),
-          });
-          const d = await r.json().catch(() => null);
-          const ent = d && d.entitlement ? d.entitlement : null;
+          const ent = await checkToken(formTokens[f]);
           if (ent && ent.paid) {
             setStage('LANG' as any);
             return;
