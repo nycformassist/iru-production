@@ -20,7 +20,7 @@ import { PRICING, SKUS, formatCents } from './_lib/pricing.js';
 //  - case 6 (handler level): wrong-secret signature → 400; signed event
 //    for an unknown session → 200, not applied, event id NOT burned
 //  - case 7 (source guards): the client never grants entitlement from
-//    ?checkout=success; the success URL carries the entitlement ID,
+//    ?checkout=success; the success URL carries the Stripe session ID,
 //    never the bearer token; unknown token → 404
 //  - D3 (app scope): rk_live keys are refused exactly like sk_live
 //  - offer UI: every PRICING field the offer buttons reference exists
@@ -218,23 +218,23 @@ describe('source guards (case 7 + offer UI amounts)', () => {
     // (Phase 2: the Stripe return handler reads ?checkout=success only to
     // trigger a server verification; the stage is set from the server
     // response, never from the URL.)
-    assert.ok(appSrc.includes('/api/entitlement-status'), 'entitlement state comes from the server status endpoint');
+    assert.ok(appSrc.includes('/api/entitlement-status') || appSrc.includes('/api/verify-session'), 'entitlement state comes from a server verification endpoint');
     // No direct URL-to-entitlement assignment: the success param must not
     // appear in a setStage/setPurchaseState call without a fetch first.
     const urlReadIdx = appSrc.indexOf('checkout');
     if (urlReadIdx !== -1) {
       const snippet = appSrc.slice(Math.max(0, urlReadIdx - 2000), urlReadIdx + 2000);
-      assert.ok(snippet.includes('/api/entitlement-status'),
+      assert.ok(snippet.includes('/api/entitlement-status') || snippet.includes('/api/verify-session'),
         'any ?checkout=success handling must verify via the server before routing');
       assert.ok(!/setStage\(['"]LANG['"]\)[^}]*checkout/.test(snippet.replace(/\s+/g, ' ')),
         'LANG stage is never set directly from the URL param');
     }
   });
 
-  it('the Stripe success URL carries the entitlement ID, never the bearer token', () => {
+  it('the Stripe success URL carries the session ID template, never the bearer token', () => {
     const m = checkoutSrc.match(/success_url[^\n]*/);
     assert.ok(m, 'checkout.js builds a success_url');
-    assert.ok(m[0].includes('entitlement=${entitlementId}'), 'success URL identifies the entitlement by ID');
+    assert.ok(m[0].includes('session_id={CHECKOUT_SESSION_ID}'), 'success URL uses Stripe session ID template');
     assert.ok(!/token/i.test(m[0]), 'the bearer token never appears in the success URL');
   });
 

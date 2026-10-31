@@ -48,7 +48,7 @@ async function stripeCreateSession({ secretKey, amountCents, entitlementId, prod
   params.set('line_items[0][price_data][currency]', 'usd');
   params.set('line_items[0][price_data][unit_amount]', String(amountCents));
   params.set('line_items[0][price_data][product_data][name]', productName || 'IRU Readiness Assessment & Form Draft');
-  params.set('success_url', `${origin}/?checkout=success&entitlement=${entitlementId}`);
+  params.set('success_url', `${origin}/?checkout=success&session_id={CHECKOUT_SESSION_ID}`);
   params.set('cancel_url', `${origin}/?checkout=cancelled`);
   params.set('client_reference_id', entitlementId);
   params.set('metadata[entitlementId]', entitlementId);

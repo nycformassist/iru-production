@@ -214,61 +214,45 @@ export default function App() {
   useEffect(() => { persistLang(lang); }, [lang]);
   const [stage, setStage] = useState<'LANG' | 'PHASE1' | 'TRIAGE' | 'PHASE2' | 'PHASE3' | 'PHASE4' | 'PHOTO' | 'ANALYZING' | 'PACKET' | 'ENTRY' | 'GUIDE' | 'PACKAGES' | 'EVAL_INTAKE' | 'EVAL_REPORT' | 'RECOVER'>(() => PAYWALL_UI_ON() ? 'ENTRY' : 'LANG');
   // Stripe return: after checkout, Stripe redirects to
-  // /?checkout=success&entitlement=<id>. Verify the entitlement
-  // server-side (authoritative) and route to the right stage.
+  // /?checkout=success&session_id=cs_xxx. Verify the session server-side
+  // (authoritative — Stripe is the source of truth) and route to the
+  // right stage. The client already holds the bearer token from the
+  // checkout response; the server confirms payment and returns the
+  // entitlement details for routing.
   useEffect(() => {
     if (!PAYWALL_UI_ON()) return;
     const params = new URLSearchParams(window.location.search);
     if (params.get('checkout') !== 'success') return;
-    const entitlementId = params.get('entitlement');
-    // Clean the URL (remove the params, keep the token in storage).
+    const sessionId = params.get('session_id');
+    if (!sessionId) {
+      // No session ID — can't verify. Back to entry.
+      window.history.replaceState({}, '', window.location.pathname);
+      setStage('ENTRY' as any);
+      return;
+    }
+    // Clean the URL immediately.
     window.history.replaceState({}, '', window.location.pathname);
     (async () => {
       try {
-        // The Stripe webhook marks the entitlement paid asynchronously;
-        // the user often returns before it runs. Retry a few times.
-        const checkToken = async (token: string | null) => {
-          if (!token) return null;
-          for (let attempt = 0; attempt < 4; attempt++) {
-            if (attempt > 0) await new Promise(r => setTimeout(r, 2000));
-            const r = await fetch('/api/entitlement-status', {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ token }),
-            });
-            const d = await r.json().catch(() => null);
-            const ent = d && d.entitlement ? d.entitlement : null;
-            if (ent && ent.paid) return ent;
-          }
-          return null;
-        };
-        // Try evaluation token first, then form tokens.
-        const evalToken = getEvalToken();
-        const evalEnt = await checkToken(evalToken);
-        if (evalEnt && evalEnt.scope && evalEnt.scope.kind === 'evaluation') {
+        const r = await fetch('/api/verify-session', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId }),
+        });
+        const d = await r.json().catch(() => null);
+        if (!r.ok || !d || !d.ok || !d.paid) {
+          // Verification failed — back to entry. The user can use
+          // "recover access" if they have their token.
+          setStage('ENTRY' as any);
+          return;
+        }
+        const ent = d.entitlement;
+        if (ent && ent.scope && ent.scope.kind === 'evaluation') {
           setStage('EVAL_INTAKE' as any);
-          return;
+        } else if (ent && ent.paid) {
+          setStage('LANG' as any);
+        } else {
+          setStage('ENTRY' as any);
         }
-        const formTokens = getFormTokens();
-        for (const f of Object.keys(formTokens)) {
-          const ent = await checkToken(formTokens[f]);
-          if (ent && ent.paid) {
-            setStage('LANG' as any);
-            return;
-          }
-        }
-        // Fallback: generic stored token (legacy/other SKUs).
-        const storedToken = getStoredToken();
-        const storedEnt = await checkToken(storedToken);
-        if (storedEnt) {
-          if (storedEnt.scope && storedEnt.scope.kind === 'evaluation') {
-            setStage('EVAL_INTAKE' as any);
-          } else {
-            setStage('LANG' as any);
-          }
-          return;
-        }
-        // No valid entitlement found — back to entry.
-        setStage('ENTRY' as any);
       } catch {
         setStage('ENTRY' as any);
       }
