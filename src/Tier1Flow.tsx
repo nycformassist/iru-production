@@ -1,0 +1,566 @@
+// Tier 1 workflow component — guided questionnaire → readiness → staff report
+// Supports EN/ES/ZH/HT/AR via the labels map on each question.
+import { useState, useEffect } from 'react';
+import type { CSSProperties } from 'react';
+import { scoreAssessment, applyIntelligence, buildFactRecord, type ScoredAssessment, type FactRecord } from './tier1-assess';
+
+export type Tier1Lang = 'EN' | 'ES' | 'ZH' | 'HT' | 'AR';
+
+export interface Tier1Option {
+  value: string;
+  labels: Record<string, string>;
+}
+export interface Tier1Question {
+  id: string;
+  step: string;
+  type: 'text' | 'date' | 'radio' | 'select' | 'repeating_group';
+  factId?: string;
+  groupId?: string;
+  labels: Record<string, string>;
+  helpText?: Record<string, string>;
+  shortLabel?: string;
+  shortLabels?: Record<string, string>;
+  options?: Tier1Option[];
+  required?: boolean;
+  conditionalOn?: { factId: string; operator: 'equals' | 'not_equals'; value: string };
+  optionsSource?: string;
+}
+export interface Tier1Step {
+  id: string;
+  title: Record<string, string>;
+}
+export interface Tier1FormInfo {
+  formNumber: string;
+  title: string;
+  titles?: Record<string, string>;
+  edition?: string;
+  pdfUrl: string;
+  instructionsUrl: string;
+}
+
+// Repeating group field schemas (labels translated via RG_FIELD_LABELS)
+const RG_SCHEMAS: Record<string, { id: string; type: string }[]> = {
+  residences: [
+    { id: 'street', type: 'text' }, { id: 'city', type: 'text' }, { id: 'state', type: 'text' },
+    { id: 'from', type: 'text' }, { id: 'to', type: 'text' },
+  ],
+  children: [
+    { id: 'name', type: 'text' }, { id: 'dob', type: 'date' }, { id: 'country', type: 'text' },
+  ],
+  employment: [
+    { id: 'employer', type: 'text' }, { id: 'title', type: 'text' },
+    { id: 'from', type: 'text' }, { id: 'to', type: 'text' },
+  ],
+  education: [
+    { id: 'school', type: 'text' }, { id: 'from', type: 'text' }, { id: 'to', type: 'text' },
+  ],
+  trips: [
+    { id: 'destination', type: 'text' }, { id: 'departure', type: 'date' }, { id: 'return', type: 'date' },
+  ],
+};
+
+const RG_FIELD_LABELS: Record<string, Record<Tier1Lang, string>> = {
+  street: { EN: 'Street address', ES: 'Dirección', ZH: '街道地址', HT: 'Adrès lari', AR: 'عنوان الشارع' },
+  city: { EN: 'City', ES: 'Ciudad', ZH: '城市', HT: 'Vil', AR: 'المدينة' },
+  state: { EN: 'State', ES: 'Estado', ZH: '州', HT: 'Eta', AR: 'الولاية' },
+  from: { EN: 'From (MM/YYYY)', ES: 'Desde (MM/AAAA)', ZH: '开始 (月/年)', HT: 'Depi (MM/AAAA)', AR: 'من (شهر/سنة)' },
+  to: { EN: 'To (MM/YYYY or "present")', ES: 'Hasta (MM/AAAA o "actual")', ZH: '至 (月/年或"至今")', HT: 'Jouk (MM/AAAA oswa "kounye a")', AR: 'إلى (شهر/سنة أو "الحاضر")' },
+  name: { EN: 'Full name', ES: 'Nombre completo', ZH: '全名', HT: 'Non konplè', AR: 'الاسم الكامل' },
+  dob: { EN: 'Date of birth', ES: 'Fecha de nacimiento', ZH: '出生日期', HT: 'Dat nesans', AR: 'تاريخ الميلاد' },
+  country: { EN: 'Country of birth', ES: 'País de nacimiento', ZH: '出生国家', HT: 'Peyi nesans', AR: 'بلد الميلاد' },
+  employer: { EN: 'Employer name', ES: 'Nombre del empleador', ZH: '雇主名称', HT: 'Non anplwayè', AR: 'اسم صاحب العمل' },
+  title: { EN: 'Job title', ES: 'Puesto', ZH: '职位', HT: 'Tit travay', AR: 'المسمى الوظيفي' },
+  school: { EN: 'School name', ES: 'Nombre de la escuela', ZH: '学校名称', HT: 'Non lekòl', AR: 'اسم المدرسة' },
+  destination: { EN: 'Destination country', ES: 'País de destino', ZH: '目的地国家', HT: 'Peyi destinasyon', AR: 'بلد الوجهة' },
+  departure: { EN: 'Departure date', ES: 'Fecha de salida', ZH: '出发日期', HT: 'Dat depa', AR: 'تاريخ المغادرة' },
+  return: { EN: 'Return date', ES: 'Fecha de regreso', ZH: '返回日期', HT: 'Dat retou', AR: 'تاريخ العودة' },
+};
+
+const UI: Record<string, Record<Tier1Lang, string>> = {
+  back: { EN: '← Back', ES: '← Atrás', ZH: '← 返回', HT: '← Tounen', AR: '← رجوع' },
+  next: { EN: 'Next →', ES: 'Siguiente →', ZH: '下一步 →', HT: 'Pwochen →', AR: 'التالي →' },
+  seeReport: { EN: 'See Report →', ES: 'Ver informe →', ZH: '查看报告 →', HT: 'Wè rapò →', AR: 'عرض التقرير →' },
+  required: { EN: 'This question is required.', ES: 'Esta pregunta es obligatoria.', ZH: '此问题为必填项。', HT: 'Kesyon sa a obligatwa.', AR: 'هذا السؤال مطلوب.' },
+  addEntry: { EN: 'Add entry', ES: 'Agregar', ZH: '添加', HT: 'Ajoute', AR: 'إضافة' },
+  edit: { EN: 'Edit', ES: 'Editar', ZH: '编辑', HT: 'Modifye', AR: 'تعديل' },
+  delete: { EN: 'Delete', ES: 'Eliminar', ZH: '删除', HT: 'Efase', AR: 'حذف' },
+  save: { EN: 'Save', ES: 'Guardar', ZH: '保存', HT: 'Sove', AR: 'حفظ' },
+  cancel: { EN: 'Cancel', ES: 'Cancelar', ZH: '取消', HT: 'Anile', AR: 'إلغاء' },
+  atLeastOne: { EN: 'Please add at least one entry.', ES: 'Agregue al menos una entrada.', ZH: '请至少添加一条。', HT: 'Tanpri ajoute omwen yon antre.', AR: 'يرجى إضافة إدخال واحد على الأقل.' },
+  fillOneField: { EN: 'Please fill in at least one field.', ES: 'Complete al menos un campo.', ZH: '请至少填写一个字段。', HT: 'Tanpri ranpli omwen yon chan.', AR: 'يرجى ملء حقل واحد على الأقل.' },
+  optional: { EN: '(optional)', ES: '(opcional)', ZH: '(可选)', HT: '(opsyonèl)', AR: '(اختياري)' },
+  startOver: { EN: '← Start Over', ES: '← Empezar de nuevo', ZH: '← 重新开始', HT: '← Rekòmanse', AR: '← البدء من جديد' },
+  downloadPdf: { EN: 'Download PDF', ES: 'Descargar PDF', ZH: '下载 PDF', HT: 'Telechaje PDF', AR: 'تحميل PDF' },
+  officialInstructions: { EN: 'Official instructions', ES: 'Instrucciones oficiales', ZH: '官方说明', HT: 'Enstriksyon ofisyèl', AR: 'التعليمات الرسمية' },
+  notLegalAdvice: { EN: 'This report is a preparation aid, not legal advice. It does not determine eligibility.', ES: 'Este informe es una ayuda de preparación, no asesoramiento legal. No determina elegibilidad.', ZH: '本报告为准备辅助工具，并非法律建议，不决定资格。', HT: 'Rapò sa a se yon èd preparasyon, pa konsèy legal. Li pa detèmine elijiblite.', AR: 'هذا التقرير أداة مساعدة للتحضير وليس استشارة قانونية. لا يحدد الأهلية.' },
+  applicantSummary: { EN: 'Applicant Summary', ES: 'Resumen del solicitante', ZH: '申请人摘要', HT: 'Rezime aplikan', AR: 'ملخص مقدم الطلب' },
+  needsAttention: { EN: 'What needs attention', ES: 'Qué necesita atención', ZH: '需要注意的事项', HT: 'Sa ki bezwen atansyon', AR: 'ما يحتاج إلى اهتمام' },
+  worthReviewing: { EN: 'Worth reviewing', ES: 'Vale la pena revisar', ZH: '值得复查', HT: 'Vo lapenn revize', AR: 'يستحق المراجعة' },
+  looksGood: { EN: 'What looks good', ES: 'Lo que está bien', ZH: '良好的方面', HT: 'Sa ki bon', AR: 'ما يبدو جيدًا' },
+  infoProvided: { EN: 'Information provided', ES: 'Información proporcionada', ZH: '已提供的信息', HT: 'Enfòmasyon yo bay', AR: 'المعلومات المقدمة' },
+  infoProvidedSub: { EN: 'Everything below was collected during the questionnaire, organized by form section. Staff can use this directly to complete the official form — no need to re-ask.', ES: 'Todo lo siguiente se recopiló durante el cuestionario, organizado por sección del formulario. El personal puede usarlo directamente para completar el formulario oficial, sin necesidad de preguntar de nuevo.', ZH: '以下所有信息均在问卷期间收集，按表格部分整理。工作人员可直接使用这些信息填写正式表格，无需重新询问。', HT: 'Tout sa ki anba a te rasanble pandan kesyonè a, òganize pa seksyon fòm. Anplwaye yo ka itilize li dirèkteman pou ranpli fòm ofisyèl la — pa bezwen mande ankò.', AR: 'تم جمع كل ما يلي أثناء الاستبيان، منظمًا حسب قسم النموذج. يمكن للموظفين استخدام هذا مباشرة لإكمال النموذج الرسمي — لا حاجة لإعادة السؤال.' },
+  staffNextSteps: { EN: 'Staff next steps', ES: 'Próximos pasos del personal', ZH: '工作人员后续步骤', HT: 'Pwochen etap anplwaye yo', AR: 'الخطوات التالية للموظفين' },
+};
+
+function t(map: Record<string, string> | undefined, lang: Tier1Lang): string {
+  if (!map) return '';
+  return map[lang] || map['EN'] || '';
+}
+
+interface Props {
+  formKey: string;
+  questions: Tier1Question[];
+  steps: Tier1Step[];
+  info: Tier1FormInfo;
+  lang: Tier1Lang;
+  assess: (answers: Record<string, any>, lang: Tier1Lang) => { blockers: { t: string; d: string }[]; warnings: { t: string; d: string }[]; complete: { t: string; d: string }[]; ready: boolean };
+  onExit: () => void;
+}
+
+export default function Tier1Flow({ formKey, questions, steps, info, lang, assess, onExit }: Props) {
+  const [qi, setQi] = useState(0);
+  const [answers, setAnswers] = useState<Record<string, any>>(() => {
+    // Restore from localStorage on mount (returning session)
+    try {
+      const saved = localStorage.getItem(`iru_tier1_${formKey}`);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        // Only restore if saved within 30 days
+        if (Date.now() - parsed.savedAt < 30 * 24 * 60 * 60 * 1000) {
+          return parsed.answers || {};
+        }
+      }
+    } catch (e) { /* ignore */ }
+    return {};
+  });
+
+  // Persist answers on change
+  const persistAnswers = (newAnswers: Record<string, any>) => {
+    try {
+      localStorage.setItem(`iru_tier1_${formKey}`, JSON.stringify({
+        answers: newAnswers,
+        savedAt: Date.now(),
+        formKey,
+      }));
+    } catch (e) { /* storage full or unavailable */ }
+  };
+
+  // Auto-persist whenever answers change (survives refresh + returning session)
+  useEffect(() => {
+    persistAnswers(answers);
+  }, [answers]);
+  const [rgData, setRgData] = useState<Record<string, any[]>>({});
+  const [rgEditing, setRgEditing] = useState<number | null>(null);
+  const [textVal, setTextVal] = useState('');
+  const [radioVal, setRadioVal] = useState('');
+  const [saveToken, setSaveToken] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Save to persistence API
+  const handleSave = async () => {
+    setIsSaving(true);
+    setSaveError(null);
+    try {
+      let clientKey = localStorage.getItem('iru_client_key');
+      if (!clientKey) {
+        clientKey = crypto.randomUUID();
+        localStorage.setItem('iru_client_key', clientKey);
+      }
+      const encoder = new TextEncoder();
+      const data = encoder.encode(clientKey);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      const clientKeyHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+      const factRecord = buildFactRecord(answers);
+      const res = await fetch('/api/assessment-save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientKeyHash,
+          form_id: formKey,
+          facts: factRecord.facts,
+          progress: { qi, answers: Object.keys(answers).length },
+        }),
+      });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || 'Save failed');
+      setSaveToken(result.token);
+    } catch (e: any) {
+      setSaveError(e.message || 'Could not save. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const visible = questions.filter(q => {
+    if (!q.conditionalOn) return true;
+    const aq = questions.find(x => (x.factId || x.id) === q.conditionalOn!.factId);
+    const av = aq ? answers[aq.id] : null;
+    return q.conditionalOn.operator === 'equals' ? av === q.conditionalOn.value : av !== q.conditionalOn.value;
+  });
+
+  if (qi >= visible.length) {
+    const factRecord: FactRecord = buildFactRecord(answers);
+    const basic = assess(answers, lang);
+    const withIntel = applyIntelligence(formKey, answers, basic);
+    const r: ScoredAssessment = scoreAssessment(withIntel, info.formNumber, [], factRecord);
+    return <Tier1Report info={info} lang={lang} result={r} questions={questions} steps={steps} answers={answers} factRecord={factRecord} onExit={onExit} />;
+  }
+
+  const q = visible[qi];
+  const step = steps.find(s => s.id === q.step);
+  const pct = Math.round((qi / visible.length) * 100);
+
+  const saveAnswer = (): boolean => {
+    if (q.type === 'repeating_group') {
+      const entries = rgData[q.groupId!] || [];
+      if (q.required && entries.length === 0) { alert(UI.atLeastOne[lang]); return false; }
+      if (entries.length) setAnswers(a => ({ ...a, [q.id]: entries }));
+      return true;
+    }
+    const val = q.type === 'radio' || q.type === 'select' ? radioVal : textVal.trim();
+    if (q.required && !val) { alert(UI.required[lang]); return false; }
+    setAnswers(a => {
+      const n = { ...a };
+      if (val) n[q.id] = val; else delete n[q.id];
+      return n;
+    });
+    return true;
+  };
+
+  const loadQ = (idx: number) => {
+    const nq = visible[idx];
+    if (!nq) return;
+    setTextVal(answers[nq.id] || '');
+    setRadioVal(answers[nq.id] || '');
+    setRgEditing(null);
+  };
+
+  const goNext = () => { if (saveAnswer()) { loadQ(qi + 1); setQi(qi + 1); } };
+  const goBack = () => { if (saveAnswer()) { loadQ(qi - 1); setQi(qi - 1); } };
+
+  // Init current question values on first render / question change
+  const curText = q.type === 'text' || q.type === 'date' ? (answers[q.id] || '') : textVal;
+  const curRadio = q.type === 'radio' || q.type === 'select' ? (answers[q.id] || '') : radioVal;
+
+  return (
+    <div style={{ maxWidth: 720, margin: '0 auto', padding: '1.5rem 1rem 4rem' }}>
+      <div style={{ color: '#64748b', fontSize: '0.9rem', marginBottom: '0.75rem' }}>
+        {info.formNumber} · {t(step?.title, lang)}
+      </div>
+      <div style={{ height: 6, background: '#e2e8f0', borderRadius: 3, marginBottom: '1.25rem', overflow: 'hidden' }}>
+        <div style={{ height: '100%', background: '#1a56db', borderRadius: 3, width: pct + '%', transition: 'width 0.3s' }} />
+      </div>
+      <div style={{ background: '#fff', padding: '1.5rem', borderRadius: 12, border: '1px solid #e2e8f0' }}>
+        <h3 style={{ margin: '0 0 0.5rem', fontSize: '1.15rem' }}>
+          {t(q.labels, lang)} {q.required ? '' : <span style={{ color: '#64748b', fontWeight: 'normal' }}>{UI.optional[lang]}</span>}
+        </h3>
+        {q.helpText && <p style={{ color: '#64748b', fontSize: '0.9rem', margin: '0.5rem 0 1rem' }}>{t(q.helpText, lang)}</p>}
+        {(q.type === 'text' || q.type === 'date') && (
+          <input data-testid={`question-input-${q.id}`} type={q.type} value={textVal || answers[q.id] || ''} onChange={e => setTextVal(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') goNext(); }}
+            style={{ width: '100%', padding: '0.7rem', fontSize: '1rem', border: '1px solid #e2e8f0', borderRadius: 8, boxSizing: 'border-box' }} />
+        )}
+        {(q.type === 'radio' || q.type === 'select') && (
+          <div>{(q.options || []).map(o => (
+            <label key={o.value} style={{ display: 'block', padding: '0.7rem 0.9rem', margin: '0.35rem 0', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, cursor: 'pointer' }}>
+              <input type="radio" name={'q_' + q.id} value={o.value} checked={(radioVal || answers[q.id] || '') === o.value}
+                onChange={e => setRadioVal(e.target.value)} style={{ marginRight: '0.6rem' }} />
+              {t(o.labels, lang)}
+            </label>
+          ))}</div>
+        )}
+        {q.type === 'repeating_group' && (
+          <RepeatingGroupEditor q={q} lang={lang} rgData={rgData} setRgData={setRgData} rgEditing={rgEditing} setRgEditing={setRgEditing} />
+        )}
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', margin: '1.25rem 0', gap: '1rem' }}>
+        <button data-testid="btn-back" onClick={goBack} disabled={qi === 0} style={btnStyle}>{UI.back[lang]}</button>
+        <button data-testid="btn-save" onClick={handleSave} disabled={isSaving} style={{ ...btnStyle, background: '#0e9f6e', color: '#fff', borderColor: '#0e9f6e' }}>
+          {isSaving ? 'Saving...' : 'Save Progress'}
+        </button>
+        <button data-testid="btn-next" onClick={goNext} style={{ ...btnStyle, background: '#1a56db', color: '#fff', borderColor: '#1a56db' }}>
+          {qi === visible.length - 1 ? UI.seeReport[lang] : UI.next[lang]}
+        </button>
+      </div>
+      {saveToken && (
+        <div data-testid="save-token-display" style={{ background: '#ecfdf5', border: '1px solid #0e9f6e', borderRadius: 8, padding: '1rem', margin: '1rem 0' }}>
+          <div style={{ fontWeight: 'bold', marginBottom: '0.5rem' }}>Progress Saved!</div>
+          <div style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>Save this token to resume your application on another device:</div>
+          <code style={{ display: 'block', background: '#fff', padding: '0.5rem', borderRadius: 4, wordBreak: 'break-all', userSelect: 'all' }}>{saveToken}</code>
+        </div>
+      )}
+      {saveError && (
+        <div data-testid="save-error" style={{ background: '#fef2f2', border: '1px solid #ef4444', borderRadius: 8, padding: '1rem', margin: '1rem 0', color: '#dc2626' }}>
+          {saveError}
+        </div>
+      )}
+      <button onClick={onExit} style={linkStyle}>{UI.startOver[lang]}</button>
+    </div>
+  );
+}
+
+const btnStyle: CSSProperties = { padding: '0.8rem 1.6rem', fontSize: '1rem', cursor: 'pointer', borderRadius: 8, border: '1px solid #e2e8f0', background: '#fff' };
+const linkStyle: CSSProperties = { background: 'none', border: 'none', color: '#1a56db', cursor: 'pointer', fontSize: '0.95rem', padding: '0.5rem 0' };
+
+function RepeatingGroupEditor({ q, lang, rgData, setRgData, rgEditing, setRgEditing }: any) {
+  const gid = q.groupId;
+  const schema = RG_SCHEMAS[gid] || [{ id: 'detail', type: 'text' }];
+  const entries: any[] = rgData[gid] || [];
+  const [draft, setDraft] = useState<Record<string, string>>({});
+
+
+
+  const startAdd = () => { setDraft({}); setRgEditing(entries.length); };
+  const startEdit = (i: number) => { setDraft({ ...entries[i] }); setRgEditing(i); };
+  const saveDraft = () => {
+    const has = Object.values(draft).some((v: unknown) => v && (v as string).trim());
+    if (!has) { alert(UI.fillOneField[lang]); return; }
+    const clean: Record<string, string> = {};
+    Object.entries(draft).forEach(([k, v]) => { if (v && (v as string).trim()) clean[k] = (v as string).trim(); });
+    setRgData((d: any) => {
+      const arr = [...(d[gid] || [])];
+      if (rgEditing! < arr.length) arr[rgEditing!] = clean; else arr.push(clean);
+      return { ...d, [gid]: arr };
+    });
+    setRgEditing(null);
+  };
+
+  return (
+    <div>
+      {entries.map((e: any, i: number) => (
+        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, padding: '0.6rem 0.9rem', margin: '0.4rem 0' }}>
+          <span>{schema.map(s => e[s.id]).filter(Boolean).join(' · ') || 'Entry ' + (i + 1)}</span>
+          <span>
+            <button onClick={() => startEdit(i)} style={{ ...btnStyle, padding: '0.3rem 0.7rem', fontSize: '0.85rem', marginRight: '0.4rem' }}>{UI.edit[lang]}</button>
+            <button onClick={() => setRgData((d: any) => ({ ...d, [gid]: (d[gid] || []).filter((_: any, j: number) => j !== i) }))} style={{ ...btnStyle, padding: '0.3rem 0.7rem', fontSize: '0.85rem' }}>{UI.delete[lang]}</button>
+          </span>
+        </div>
+      ))}
+      {rgEditing !== null ? (
+        <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '1rem', margin: '0.75rem 0' }}>
+          {schema.map(s => (
+            <label key={s.id} style={{ fontSize: '0.85rem', color: '#64748b', display: 'block', margin: '0.4rem 0' }}>
+              {RG_FIELD_LABELS[s.id]?.[lang] || s.id}
+              <input type={s.type} value={draft[s.id] || ''} onChange={e => setDraft({ ...draft, [s.id]: e.target.value })}
+                style={{ width: '100%', padding: '0.6rem', fontSize: '1rem', border: '1px solid #e2e8f0', borderRadius: 8, boxSizing: 'border-box', marginTop: '0.25rem' }} />
+            </label>
+          ))}
+          <div style={{ marginTop: '0.75rem' }}>
+            <button data-testid="btn-save-entry" onClick={saveDraft} style={{ ...btnStyle, background: '#1a56db', color: '#fff', borderColor: '#1a56db', marginRight: '0.5rem' }}>{UI.save[lang]}</button>
+            <button onClick={() => setRgEditing(null)} style={btnStyle}>{UI.cancel[lang]}</button>
+          </div>
+        </div>
+      ) : (
+        <button data-testid="btn-add-entry" onClick={startAdd} style={btnStyle}>+ {UI.addEntry[lang]}</button>
+      )}
+      {q.required && entries.length === 0 && rgEditing === null && (
+        <p style={{ color: '#64748b', fontSize: '0.9rem' }}>{UI.atLeastOne[lang]}</p>
+      )}
+    </div>
+  );
+}
+
+function Tier1Report({ info, lang, result, questions, steps, answers, factRecord, onExit }: any) {
+  const r = result as ScoredAssessment;
+  // FIX (2026-11-03): banner reflects weakest section, not just blocker count.
+  // A report with no blockers but an Incomplete section should not say "ready."
+  const weakest = r.sections?.length ? r.sections.reduce((a, b) => a.score < b.score ? a : b) : null;
+  const bannerState = !r.ready ? 'blocked'
+    : weakest && (weakest.band === 'Incomplete' || weakest.band === 'Developing') ? 'caution'
+    : 'ready';
+  const banner = bannerState === 'ready'
+    ? { bg: '#dcfce7', bd: '#86efac', icon: '✅' }
+    : bannerState === 'caution'
+    ? { bg: '#fef3c7', bd: '#fcd34d', icon: '⚠️' }
+    : { bg: '#fee2e2', bd: '#fca5a5', icon: '⚠️' };
+  const bannerText = bannerState === 'ready'
+    ? t({ EN: 'Ready to prepare.' }, lang)
+    : bannerState === 'caution'
+    ? t({ EN: `${weakest!.section} needs attention (${weakest!.band}) — review below before filing.` }, lang)
+    : t({ EN: `${r.blockers.length} item(s) need attention before filing.` }, lang);
+  const shortLabel = (q: Tier1Question) => q.shortLabels?.[lang] || q.shortLabel || t(q.labels, lang);
+
+  const bandColor: Record<string, string> = {
+    Strong: '#15803d', Moderate: '#b45309', Developing: '#c2410c', Incomplete: '#dc2626',
+  };
+  const bandBg: Record<string, string> = {
+    Strong: '#dcfce7', Moderate: '#fef3c7', Developing: '#ffedd5', Incomplete: '#fee2e2',
+  };
+
+  return (
+    <div style={{ maxWidth: 720, margin: '0 auto', padding: '1.5rem 1rem 4rem' }}>
+      <h1>{info.formNumber} — {UI.applicantSummary[lang]}</h1>
+
+      {/* Executive summary + overall score */}
+      <div style={{ padding: '1.25rem 1.5rem', borderRadius: 12, margin: '1rem 0', background: bandBg[r.overallBand] || '#f8fafc', border: '1px solid #e2e8f0' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem' }}>
+          <span style={{ fontSize: '1.75rem', fontWeight: 700 }}>{Math.round((r.overallScore || 0) * 100)}%</span>
+          <span style={{ padding: '0.25rem 0.75rem', borderRadius: 999, fontWeight: 600, fontSize: '0.9rem', background: bandColor[r.overallBand] || '#64748b', color: '#fff' }}>
+            {r.overallBand || 'Incomplete'}
+          </span>
+        </div>
+        <p style={{ ...narrStyle, margin: 0 }}>{r.executiveSummary}</p>
+      </div>
+
+      {/* Section scores */}
+      {r.sections && r.sections.length > 0 && (
+        <div style={secStyle}>
+          <h2>Readiness by Section</h2>
+          {r.sections.map((s, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.5rem 0', borderBottom: i < r.sections.length - 1 ? '1px solid #f1f5f9' : 'none' }}>
+              <span style={{ flex: 1, fontWeight: 500 }}>{s.section}</span>
+              <span style={{ fontSize: '0.9rem', color: '#64748b' }}>{Math.round(s.score * 100)}%</span>
+              <span style={{ padding: '0.15rem 0.6rem', borderRadius: 999, fontSize: '0.8rem', fontWeight: 600, background: bandBg[s.band], color: bandColor[s.band] }}>
+                {s.band}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ padding: '1.25rem 1.5rem', borderRadius: 12, margin: '1rem 0', fontSize: '1.1rem', background: banner.bg, border: '1px solid ' + banner.bd }}>
+        {banner.icon} <strong>{bannerText}</strong>
+      </div>
+      {r.blockers.length > 0 && (
+        <div style={secStyle}><h2>{UI.needsAttention[lang]}</h2>
+          {r.blockers.map((b: any, i: number) => <div key={i}><p><strong style={{ color: '#dc2626' }}>❌ {b.t}</strong></p><p style={narrStyle}>{b.d}</p></div>)}
+        </div>
+      )}
+      {r.warnings.length > 0 && (
+        <div style={secStyle}><h2>{UI.worthReviewing[lang]}</h2>
+          {r.warnings.map((w: any, i: number) => <div key={i}><p><strong style={{ color: '#b45309' }}>⚠️ {w.t}</strong></p><p style={narrStyle}>{w.d}</p></div>)}
+        </div>
+      )}
+      {r.complete.length > 0 && (
+        <div style={secStyle}><h2>{UI.looksGood[lang]}</h2>
+          {r.complete.map((c: any, i: number) => <p key={i}><strong style={{ color: '#15803d' }}>✅ {c.t}</strong> <span style={{ color: '#64748b' }}>{c.d}</span></p>)}
+        </div>
+      )}
+      <div style={secStyle}>
+        <h2>{UI.infoProvided[lang]}</h2>
+        <p style={{ ...narrStyle, color: '#64748b' }}>{UI.infoProvidedSub[lang]}</p>
+        {steps.map((step: Tier1Step) => {
+          const sqs = questions.filter((q: Tier1Question) => q.step === step.id && answers[q.id] !== undefined);
+          if (!sqs.length) return null;
+          return (
+            <div key={step.id}>
+              <h3 style={{ margin: '1.25rem 0 0.5rem', fontSize: '1.05rem' }}>{t(step.title, lang)}</h3>
+              {sqs.map((q: Tier1Question) => {
+                const ans = answers[q.id];
+                const fact = factRecord?.facts[q.id];
+                let display: any = ans;
+                if (q.type === 'repeating_group' && Array.isArray(ans)) {
+                  const schema = RG_SCHEMAS[q.groupId!] || [{ id: 'detail' }];
+                  display = <ol style={{ margin: '0.25rem 0', paddingLeft: '1.25rem' }}>{ans.map((e: any, i: number) =>
+                    <li key={i}>{schema.map(s => e[s.id]).filter(Boolean).join(' · ')}</li>)}</ol>;
+                } else if (q.type === 'radio' || q.type === 'select') {
+                  const opt = (q.options || []).find(o => o.value === ans);
+                  display = t(opt?.labels, lang) || ans;
+                }
+                // Provenance badge: corrected or conflicted facts get flagged
+                const badge = fact?.status === 'corrected'
+                  ? <span style={{ fontSize: '0.75rem', background: '#fef3c7', color: '#b45309', padding: '0.1rem 0.4rem', borderRadius: 999, marginLeft: '0.5rem' }}>Corrected ({fact.corrections.length}x)</span>
+                  : fact?.status === 'conflicted'
+                  ? <span style={{ fontSize: '0.75rem', background: '#fee2e2', color: '#dc2626', padding: '0.1rem 0.4rem', borderRadius: 999, marginLeft: '0.5rem' }}>Conflicted</span>
+                  : null;
+                return <div key={q.id} style={{ margin: '0.4rem 0' }}><div style={{ fontWeight: 600 }}>{shortLabel(q)}{badge}</div><div>{display}</div></div>;
+              })}
+            </div>
+          );
+        })}
+      </div>
+      <div style={secStyle}>
+        <h2>{UI.staffNextSteps[lang]}</h2>
+        <ol style={narrStyle}>
+          <li>{t({ EN: 'Print this summary or keep it open as a reference.' }, lang)}</li>
+          <li>{t({ EN: `Download the official ${info.formNumber} PDF using the button below.` }, lang)}</li>
+          <li>{t({ EN: 'Complete the form using the information provided above — organized by form section.' }, lang)}</li>
+        </ol>
+      </div>
+      <div style={{ display: 'flex', gap: '1rem', margin: '1.25rem 0' }}>
+        <button onClick={onExit} style={btnStyle}>{UI.startOver[lang]}</button>
+        <a href={info.pdfUrl} target="_blank" rel="noopener"><button style={{ ...btnStyle, background: '#1a56db', color: '#fff', borderColor: '#1a56db' }}>{UI.downloadPdf[lang]} {info.formNumber}</button></a>
+        {info.formNumber === 'I-130' && (
+          <button
+            data-testid="btn-generate"
+            onClick={() => generateCompletedForm('i130', factRecord?.facts || {})}
+            style={{ ...btnStyle, background: '#059669', color: '#fff', borderColor: '#059669' }}
+          >
+            {lang === 'EN' ? 'Generate completed I-130' : lang === 'ES' ? 'Generar I-130 completado' : lang === 'ZH' ? '生成已完成的 I-130' : lang === 'HT' ? 'Jenere I-130 ki konplè' : 'إنشاء نموذج I-130 مكتمل'}
+          </button>
+        )}
+        {info.formNumber === 'I-90' && (
+          <button
+            data-testid="btn-generate"
+            onClick={() => generateCompletedForm('i90', factRecord?.facts || {})}
+            style={{ ...btnStyle, background: '#059669', color: '#fff', borderColor: '#059669' }}
+          >
+            {lang === 'EN' ? 'Generate completed I-90' : lang === 'ES' ? 'Generar I-90 completado' : lang === 'ZH' ? '生成已完成的 I-90' : lang === 'HT' ? 'Jenere I-90 ki konplè' : 'إنشاء نموذج I-90 مكتمل'}
+          </button>
+        )}
+        {info.formNumber === 'N-400' && (
+          <button
+            data-testid="btn-generate"
+            onClick={() => generateCompletedForm('n400', factRecord?.facts || {})}
+            style={{ ...btnStyle, background: '#059669', color: '#fff', borderColor: '#059669' }}
+          >
+            {lang === 'EN' ? 'Generate completed N-400' : lang === 'ES' ? 'Generar N-400 completado' : lang === 'ZH' ? '生成已完成的 N-400' : lang === 'HT' ? 'Jenere N-400 ki konplè' : 'إنشاء نموذج N-400 مكتمل'}
+          </button>
+        )}
+        {info.formNumber === 'I-765' && (
+          <button
+            data-testid="btn-generate"
+            onClick={() => generateCompletedForm('i765', factRecord?.facts || {})}
+            style={{ ...btnStyle, background: '#059669', color: '#fff', borderColor: '#059669' }}
+          >
+            {lang === 'EN' ? 'Generate completed I-765' : lang === 'ES' ? 'Generar I-765 completado' : lang === 'ZH' ? '生成已完成的 I-765' : lang === 'HT' ? 'Jenere I-765 ki konplè' : 'إنشاء نموذج I-765 مكتمل'}
+          </button>
+        )}
+        {info.formNumber === 'I-485' && (
+          <button
+            data-testid="btn-generate"
+            onClick={() => generateCompletedForm('i485', factRecord?.facts || {})}
+            style={{ ...btnStyle, background: '#059669', color: '#fff', borderColor: '#059669' }}
+          >
+            {lang === 'EN' ? 'Generate completed I-485' : lang === 'ES' ? 'Generar I-485 completado' : lang === 'ZH' ? '生成已完成的 I-485' : lang === 'HT' ? 'Jenere I-485 ki konplè' : 'إنشاء نموذج I-485 مكتمل'}
+          </button>
+        )}
+      </div>
+      <p style={{ color: '#64748b', fontSize: '0.9rem' }}>
+        <a href={info.instructionsUrl} target="_blank" rel="noopener" style={{ color: '#1a56db' }}>{UI.officialInstructions[lang]}</a> · {UI.notLegalAdvice[lang]}
+      </p>
+    </div>
+  );
+}
+
+
+// Generate completed form via Python endpoint
+async function generateCompletedForm(formKey: string, facts: Record<string, any>): Promise<void> {
+  const endpoint = formKey === 'i130' ? '/api/fill-i130' : formKey === 'i90' ? '/api/fill-i90' : formKey === 'n400' ? '/api/fill-n400' : formKey === 'i765' ? '/api/fill-i765' : formKey === 'i485' ? '/api/fill-i485' : null;
+  if (!endpoint) {
+    alert('Form generation not yet available for ' + formKey);
+    return;
+  }
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ facts, addresses: [], biographic: {} }),
+    });
+    if (!res.ok) throw new Error('Generation failed');
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${formKey}-draft.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    alert('Could not generate the form. Please try again.');
+  }
+}
+
+const secStyle: CSSProperties = { background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12, padding: '1.25rem 1.5rem', margin: '1rem 0' };
+const narrStyle: CSSProperties = { lineHeight: 1.6, fontSize: '1.02rem' };
