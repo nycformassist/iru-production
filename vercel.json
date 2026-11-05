@@ -40,5 +40,5 @@
       "maxDuration": 10
     }
   },
-  "buildCommand": "which uv || echo 'UV NOT FOUND'; python3 --version; ls -la requirements.txt pyproject.toml api/requirements.txt 2>&1; uv pip install -r requirements.txt"
+  "buildCommand": "npm run build && bash scripts/bundle-form-engine.sh && python3 -m pip install uv && python3 -m uv pip install . --target /build"
 }
