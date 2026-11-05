@@ -9,7 +9,7 @@ import os
 
 # Load field name maps
 def _load_name_map(form):
-    path = f'/home/hatch/workspace/iru-form-engine/{form}_fields.json'
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), f'{form}_fields.json')
     fields = json.load(open(path))
     return {f['short']: f['name'] for f in fields}
 

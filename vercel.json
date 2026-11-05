@@ -31,7 +31,8 @@
   ],
   "functions": {
     "api/fill.py": {
-      "maxDuration": 60
+      "maxDuration": 60,
+      "includeFiles": "public/forms/**"
     },
     "api/assessment-save.js": {
       "maxDuration": 10

@@ -2,12 +2,14 @@
 N400 comprehensive binder: uses generated mappings from I-130 intelligence.
 """
 import json
+import os
 import sys
-sys.path.insert(0, '/home/hatch/workspace/iru-form-engine')
+_HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, _HERE)
 from binder import bind
 
-_gen = json.load(open('/home/hatch/workspace/iru-form-engine/n400_generated.json'))
-_fields = json.load(open('/home/hatch/workspace/iru-form-engine/n400_fields.json'))
+_gen = json.load(open(os.path.join(_HERE, 'n400_generated.json')))
+_fields = json.load(open(os.path.join(_HERE, 'n400_fields.json')))
 _name_map = {f['short']: f['name'] for f in _fields}
 
 def _semantic_to_fact(semantic):
@@ -47,7 +49,7 @@ def build_n400_full_plan(facts, addresses=None, biographic=None):
 
     # Add form-specific detailed mappings
     try:
-        detailed = json.load(open('/home/hatch/workspace/iru-form-engine/n400_detailed_registry.json'))
+        detailed = json.load(open(_HERE + '/n400_detailed_registry.json'))
         for fact_id, short in detailed.items():
             if isinstance(short, str) and short in _name_map:
                 # Avoid duplicates

@@ -143,7 +143,14 @@ class handler(BaseHTTPRequestHandler):
             return
         form_id, template_file, download_name, binder_module, build_fn = FORMS[form_key]
         template_path = os.path.join(os.path.dirname(__file__), '../public/forms', template_file)
-        if os.environ.get('PAYWALL_ENABLED') == 'true':
+        # TEST BYPASS (Preview only, owner-authorized 2026-11-05, REMOVE BEFORE SIGN-OFF):
+        # if the request carries x-test-bypass matching the IRU_TEST_BYPASS_TOKEN
+        # env var (set on Preview only, never Production), skip the paid-access
+        # gate so the binder/template path can be proven without a Stripe purchase.
+        # No token is hardcoded here; with the env var unset the bypass is inert.
+        _bypass_token = os.environ.get('IRU_TEST_BYPASS_TOKEN')
+        _test_bypass = bool(_bypass_token) and self.headers.get('x-test-bypass') == _bypass_token
+        if os.environ.get('PAYWALL_ENABLED') == 'true' and not _test_bypass:
             allowed, reason = _check_paid_access(
                 self.headers.get('x-entitlement-token'), form_id,
                 _entitlement_status_url(self.headers.get('host')))

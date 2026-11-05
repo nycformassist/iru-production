@@ -2,12 +2,14 @@
 I485 comprehensive binder: uses generated mappings from I-130 intelligence.
 """
 import json
+import os
 import sys
-sys.path.insert(0, '/home/hatch/workspace/iru-form-engine')
+_HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, _HERE)
 from binder import bind
 
-_gen = json.load(open('/home/hatch/workspace/iru-form-engine/i485_generated.json'))
-_fields = json.load(open('/home/hatch/workspace/iru-form-engine/i485_fields.json'))
+_gen = json.load(open(os.path.join(_HERE, 'i485_generated.json')))
+_fields = json.load(open(os.path.join(_HERE, 'i485_fields.json')))
 _name_map = {f['short']: f['name'] for f in _fields}
 
 def _semantic_to_fact(semantic):
@@ -47,7 +49,7 @@ def build_i485_full_plan(facts, addresses=None, biographic=None):
 
     # Add form-specific detailed mappings (detailed wins over generated)
     try:
-        detailed = json.load(open('/home/hatch/workspace/iru-form-engine/i485_detailed_registry.json'))
+        detailed = json.load(open(os.path.join(_HERE, 'i485_detailed_registry.json')))
         # Collect detailed fields first so we can skip overlapping gen entries
         detailed_fields = set()
         for fact_id, short in detailed.items():
@@ -158,7 +160,7 @@ def build_i485_full_plan(facts, addresses=None, biographic=None):
     try:
         from repeating_binder import get_repeating_groups, bind_repeating_group
         import json as _json
-        _fields485 = _json.load(open('/home/hatch/workspace/iru-form-engine/i485_fields.json'))
+        _fields485 = _json.load(open(os.path.join(_HERE, 'i485_fields.json')))
         _name_map485 = {f['short']: f['name'] for f in _fields485}
         for group_def in get_repeating_groups('i485'):
             entries = facts.get(group_def['id'], {}).get('value', [])

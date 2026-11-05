@@ -3,13 +3,15 @@ I-90 comprehensive binder: uses generated mappings from I-130 intelligence.
 Implements the full 64 generated mappings (address + identity) plus form-specific.
 """
 import json
+import os
 import sys
-sys.path.insert(0, '/home/hatch/workspace/iru-form-engine')
+_HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, _HERE)
 from binder import bind
 
 # Load generated mappings
-_gen = json.load(open('/home/hatch/workspace/iru-form-engine/i90_generated.json'))
-_fields = json.load(open('/home/hatch/workspace/iru-form-engine/i90_fields.json'))
+_gen = json.load(open(os.path.join(_HERE, 'i90_generated.json')))
+_fields = json.load(open(os.path.join(_HERE, 'i90_fields.json')))
 _name_map = {f['short']: f['name'] for f in _fields}
 _type_map = {f['short']: f['type'] for f in _fields}
 
@@ -64,7 +66,7 @@ def build_i90_full_plan(facts, addresses=None, biographic=None):
         }
 
     # 3. Form-specific: filing reason checkboxes (from detailed registry)
-    detailed = json.load(open('/home/hatch/workspace/iru-form-engine/i90_detailed_registry.json'))
+    detailed = json.load(open(os.path.join(_HERE, 'i90_detailed_registry.json')))
     for val, short in detailed["i90_filing_reason"].items():
         registry[f"i90_reason_{val}"] = {
             "fact": "i90_filing_reason",
