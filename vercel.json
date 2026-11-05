@@ -40,5 +40,5 @@
       "maxDuration": 10
     }
   },
-  "buildCommand": "npm run build && bash scripts/bundle-form-engine.sh && python3 -m pip install uv && python3 -m uv pip install --system -r requirements.txt"
+  "buildCommand": "npm run build && bash scripts/bundle-form-engine.sh"
 }
