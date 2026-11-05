@@ -14,6 +14,7 @@ import {
 } from '../src/assessmentRecovery.ts';
 
 const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+const paywall = readFileSync(new URL('../src/paywall.tsx', import.meta.url), 'utf8');
 
 function fakeStorage(initial = {}) {
   const map = new Map(Object.entries(initial));
@@ -101,14 +102,19 @@ test('throwing storage layer: save, load and clear never throw and never invent 
   assert.equal(loadRecovery(undefined), null);
 });
 
-test('App never touches the recovery key directly; direct sessionStorage use is payment/entitlement only', () => {
+test('App never touches the recovery key directly; direct sessionStorage use holds no payment tokens', () => {
   const calls = [...app.matchAll(/sessionStorage\.(?:getItem|setItem|removeItem)\(\s*([^,)]+)/g)].map((m) => m[1].trim());
   for (const arg of calls) {
     assert.ok(!/recovery/i.test(arg), `direct sessionStorage access must not use the recovery key (${arg})`);
   }
-  // Entitlement/payment tokens share sessionStorage with the recovery key, which is
-  // exactly why Start Over must remove only RECOVERY_KEY (next test).
-  assert.ok(calls.some((a) => /entitlement|evaluation|form_tokens/.test(a)), 'payment tokens do live in sessionStorage');
+  // Gap 7 fix (2026-11-05): entitlement/payment tokens moved OUT of
+  // sessionStorage into localStorage (paywall.tsx helpers) — the split
+  // made paid tokens invisible to every gate reader. sessionStorage now
+  // holds only the purchase-intent key (and the recovery module, which
+  // reaches it through its own sessionStore() helper, not direct calls).
+  assert.ok(!calls.some((a) => /entitlement|evaluation|form_tokens|readiness/i.test(a)), 'no payment token may live in sessionStorage');
+  assert.ok(paywall.includes("const TOKEN_KEY = 'iru_entitlement_token'"), 'generic entitlement token persists in localStorage');
+  assert.ok(paywall.includes("const READINESS_TOKENS_KEY = 'iru_readiness_tokens'"), 'readiness tokens persist in localStorage');
 });
 
 test('Start Over clears ONLY the recovery key (payment and other keys survive)', () => {

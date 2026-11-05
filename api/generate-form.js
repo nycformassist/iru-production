@@ -21,6 +21,7 @@ import { entitlementStore } from './_lib/entitlement.js';
 import { sanitizeFactRecord } from './_lib/facts.js';
 import { getFormEntry, SIGNATURE_FIELD_PATTERN } from './_lib/forms/registry.js';
 import { buildFillPlan, buildCompletionSummary } from './_lib/formmap.js';
+import { buildRepeatingFillPlan } from './_lib/repeating-fill.js';
 import { isNarrativeApproved } from './_lib/narrative.js';
 import { computeDraftSnapshotHash, snapshotShort } from './_lib/draftIntegrity.js';
 import { checkPaywallAgreement } from './_lib/paymentConfig.js';
@@ -87,10 +88,34 @@ export async function generateFormDraft({ formId, factRecord, lang = 'EN', expec
   }
 
   const plan = buildFillPlan(record, entry, lang);
+  
+  // Phase 3 (4c): Repeating groups fill
+  // Merges repeating-group entries into the fill plan
+  const repeatingPlan = buildRepeatingFillPlan(record, entry);
+  plan.fill.push(...repeatingPlan.fill);
+  plan.fill.push(...repeatingPlan.overflow);
+  plan.repeatingSummary = repeatingPlan.summary;
   const templatePath = path.join(templateDir(), entry.templateFile);
   const templateBytes = await readFile(templatePath);
   const doc = await PDFDocument.load(templateBytes, { updateMetadata: false });
   const form = doc.getForm();
+
+  // 7+ children: Handle via separate Supplement A PDF generation
+  // Strategy: Generate main PDF with up to 6 children. For 7+, create
+  // additional Supplement A PDFs and merge them.
+  // This avoids the complexity of in-document field name conflicts.
+  //
+  // MATERIAL COMPLEXITY NOTE (per instruction):
+  // PDF form fields are document-global by name. Duplicating a page with
+  // form fields in the SAME document requires creating new fields with
+  // unique names via low-level PDF manipulation. The separate-PDF-and-merge
+  // approach avoids this by keeping each Supplement A copy in its own
+  // field namespace during generation, then merging the rendered pages.
+  //
+  // Current implementation: Supports up to 6 children (4 inline + 2 Supplement A).
+  // For 7+ children, the additional children data is captured in the fill plan
+  // with itemIndex >= 2, and the report documents the extension point.
+  // Full 7+ automation via PDF merge is a follow-on implementation.
 
   // Type-aware, fault-tolerant filling: official forms mix text fields,
   // dropdowns (e.g. state picklists) and checkboxes. A field that cannot

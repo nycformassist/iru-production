@@ -6,10 +6,19 @@ import { handler as statusHandler } from './entitlement-status.js';
 import { signStripePayload } from './_lib/stripewebhook.js';
 import { entitlementStore, createEntitlementStore } from './_lib/entitlement.js';
 import { PRICING, SKUS, buildOffer, formatCents } from './_lib/pricing.js';
+import { FORMPREP_SKU } from './_lib/checkout-pricing.js';
 
-// B2C pricing directive (2026-10-21) — tests 3, 4, 5, 6 and the scoped
-// entitlement semantics beneath them. All local, injected gateway, no
-// network, no real keys, no money.
+// B2C pricing directive (2026-10-21) as RETIRED by the owner decision
+// 2026-11-05 (FINAL): the $1 evaluation and its upgrade/add-on SKUs
+// are no longer purchasable. This file now proves:
+//  - the retired PRICING record is preserved (amounts as history) and
+//    the offer surface reports retired: true everywhere
+//  - evaluation / one-form / bundle / second-form checkout → 410
+//    'evaluation-retired' with NO entitlement or Stripe session created
+//  - formprep works with NO evaluation prerequisite (the live model)
+//  - store-level scoped-entitlement semantics (unchanged — these do
+//    not go through checkout and stay valid as written)
+// All local, injected gateway, no network, no real keys, no money.
 
 function mockRes() {
   return {
@@ -27,7 +36,7 @@ const mockReq = (over = {}) => ({
 });
 
 let eventCounter = 0;
-async function paySession(entitlementId) {
+async function paySession(entitlementId, store) {
   const payload = JSON.stringify({
     id: `evt_b2c_${++eventCounter}`,
     type: 'checkout.session.completed',
@@ -38,48 +47,55 @@ async function paySession(entitlementId) {
   await webhookHandler(mockReq({
     rawBody: payload,
     headers: { 'x-forwarded-for': `10.7.9.${++ipCounter}`, 'stripe-signature': signStripePayload(payload, process.env.STRIPE_WEBHOOK_SECRET, ts) },
-  }), res);
+  }), res, store);
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.applied, true);
   return res;
 }
 
-async function checkout(body) {
+async function checkout(body, store) {
   const res = mockRes();
-  await checkoutHandler(mockReq({ body }), res);
+  await checkoutHandler(mockReq({ body }), res, store);
   return res;
 }
 
 /** Buy a SKU and pay for it via a signed webhook. Returns the grant. */
-async function buyAndPay(body) {
-  const res = await checkout(body);
+async function buyAndPay(body, store) {
+  const res = await checkout(body, store);
   assert.equal(res.statusCode, 200, JSON.stringify(res.body));
-  await paySession(res.body.entitlementId);
+  await paySession(res.body.entitlementId, store);
   return { token: res.body.entitlementToken, id: res.body.entitlementId, checkout: res.body };
 }
 
-describe('B2C pricing structure (owner-set, server-enforced)', () => {
+describe('B2C pricing structure — RETIRED 2026-11-05 (owner decision, FINAL)', () => {
+  let capturedSessions;
   before(() => {
     process.env.IRU_STRIPE_KEY = 'sk_test_local_only';
     // Payment-hardening gate: paid handlers require an explicit store backend.
     process.env.IRU_STORE_BACKEND = 'memory';
     process.env.IRU_ALLOW_EPHEMERAL_STORE = 'true';
     process.env.STRIPE_WEBHOOK_SECRET = 'whsec_test_local';
+    capturedSessions = [];
     globalThis.__IRU_STRIPE_GATEWAY__ = {
-      async createCheckoutSession({ entitlementId }) {
-        return { id: `sess_${entitlementId}`, url: 'https://checkout.stripe.test/pay' };
+      async createCheckoutSession(args) {
+        capturedSessions.push(args);
+        return { id: `sess_${args.entitlementId}`, url: 'https://checkout.stripe.test/pay' };
       },
     };
   });
   after(() => { delete globalThis.__IRU_STRIPE_GATEWAY__; });
 
-  it('the offer shows both options, exact totals, and the bundle saving — never two forms for $99.95', () => {
+  it('the retired offer record preserves the historical amounts and reports retired: true everywhere', () => {
     const offer = buildOffer();
+    assert.equal(offer.retired, true, 'the offer itself is retired');
+    assert.equal(offer.evaluation.retired, true);
     assert.equal(offer.evaluation.chargeCents, 100);
     const [one, bundle] = offer.options;
+    assert.equal(one.retired, true);
     assert.equal(one.totalCents, 9995);
     assert.equal(one.afterEvaluationChargeCents, 9895);
     assert.match(one.formsIncluded, /exactly one form/i);
+    assert.equal(bundle.retired, true);
     assert.equal(bundle.totalCents, 14995);
     assert.equal(bundle.afterEvaluationChargeCents, 14895);
     assert.match(bundle.savingsNote, /\$49\.95/);
@@ -87,112 +103,91 @@ describe('B2C pricing structure (owner-set, server-enforced)', () => {
     // The bundle must never be represented as two forms for $99.95:
     assert.notEqual(bundle.totalCents, one.totalCents);
     assert.match(bundle.formsIncluded, /both forms/i);
+    assert.equal(offer.secondFormAddon.retired, true);
+    assert.equal(offer.secondFormAddon.chargeCents, 5000);
+    // The PRICING table rows themselves carry the retired flag and
+    // keep their historical amounts untouched.
+    for (const row of Object.values(PRICING)) {
+      assert.equal(row.retired, true, `${row.sku} is retired`);
+    }
+    assert.equal(PRICING.evaluation.chargeCents, 100);
+    assert.equal(PRICING.oneForm.totalCents, 9995);
+    assert.equal(PRICING.bundle.totalCents, 14995);
+    assert.equal(PRICING.secondForm.chargeCents, 5000);
   });
 
-  it('test 3: one-form checkout totals $99.95 with the $1 evaluation credited', async () => {
-    const evaluation = await buyAndPay({ sku: SKUS.EVALUATION });
-    assert.equal(evaluation.checkout.amountCents, 100);
-    assert.equal(evaluation.checkout.totalCents, 100);
+  it('retired SKUs are refused 410 evaluation-retired — no entitlement, no Stripe session', async () => {
+    const cases = [
+      { sku: SKUS.EVALUATION },
+      { sku: SKUS.ONE_FORM, formId: 'I-589', entitlementToken: 'any-token' },
+      { sku: SKUS.BUNDLE, entitlementToken: 'any-token' },
+      { sku: SKUS.SECOND_FORM, entitlementToken: 'any-token' },
+    ];
+    for (const body of cases) {
+      const store = createEntitlementStore();
+      const before = capturedSessions.length;
+      const res = await checkout(body, store);
+      assert.equal(res.statusCode, 410, `${body.sku} must be refused`);
+      assert.equal(res.body.reason, 'evaluation-retired');
+      assert.match(res.body.error, /retired/i);
+      // No entitlement record and no Stripe session were created: the
+      // 410 returns before store.create / gateway invocation, so the
+      // response carries no entitlement id or token and the gateway
+      // saw no new session.
+      assert.equal(res.body.entitlementId, undefined);
+      assert.equal(res.body.entitlementToken, undefined);
+      assert.equal(capturedSessions.length, before, 'no Stripe session created for a retired SKU');
+    }
+  });
 
-    const res = await checkout({ sku: SKUS.ONE_FORM, formId: 'I-589', entitlementToken: evaluation.token });
+  it('a paid historical evaluation token does NOT resurrect the retired upgrade path', async () => {
+    const store = createEntitlementStore();
+    const { token } = store.create({
+      sku: SKUS.EVALUATION, amountCents: 100, sessionId: 's_hist_b2c',
+      scope: { kind: 'evaluation' },
+    });
+    assert.equal(store.markPaidBySession('s_hist_b2c', 'evt_hist_b2c').applied, true);
+    const before = capturedSessions.length;
+    const res = await checkout({ sku: SKUS.ONE_FORM, formId: 'I-589', entitlementToken: token }, store);
+    assert.equal(res.statusCode, 410);
+    assert.equal(res.body.reason, 'evaluation-retired');
+    assert.equal(capturedSessions.length, before);
+  });
+
+  it('formprep works with NO evaluation prerequisite — I-765 then I-589 totals $349', async () => {
+    const oneForm = await buyAndPay({ sku: FORMPREP_SKU, forms: ['I-765'] });
+    assert.equal(oneForm.checkout.amountCents, 14900, 'I-765 prep is $149 with no prior purchase');
+    assert.equal(oneForm.checkout.creditedCents, 0, 'no $1 credit in the live model');
+    assert.deepEqual(oneForm.checkout.scope, { kind: 'forms', forms: ['I-765'] });
+
+    const res = await checkout({ sku: FORMPREP_SKU, forms: ['I-589'], entitlementToken: oneForm.token });
     assert.equal(res.statusCode, 200);
-    assert.equal(res.body.amountCents, 9895, 'upgrade charge is $98.95');
-    assert.equal(res.body.creditedCents, 100, '$1 evaluation credited');
-    assert.equal(res.body.totalCents, 9995, 'buyer total is exactly $99.95');
+    assert.equal(res.body.amountCents, 20000, 'bundle remainder after owning I-765 is $200');
+    assert.equal(res.body.bundleApplied, true);
     assert.deepEqual(res.body.scope, { kind: 'forms', forms: ['I-589'] });
+    assert.equal(oneForm.checkout.amountCents + res.body.amountCents, 34900, 'sequential chain totals $349');
   });
 
-  it('test 4: bundle checkout totals $149.95 with the $1 evaluation credited', async () => {
-    const evaluation = await buyAndPay({ sku: SKUS.EVALUATION });
-    const res = await checkout({ sku: SKUS.BUNDLE, entitlementToken: evaluation.token });
-    assert.equal(res.statusCode, 200);
-    assert.equal(res.body.amountCents, 14895, 'upgrade charge is $148.95');
-    assert.equal(res.body.creditedCents, 100);
-    assert.equal(res.body.totalCents, 14995, 'buyer total is exactly $149.95');
-    assert.deepEqual(res.body.scope, { kind: 'forms', forms: ['I-589', 'I-765'] });
-  });
-
-  it('test 5: second-form add-on after a one-form purchase charges exactly $50 and covers the other form', async () => {
-    const evaluation = await buyAndPay({ sku: SKUS.EVALUATION });
-    const oneForm = await buyAndPay({ sku: SKUS.ONE_FORM, formId: 'I-765', entitlementToken: evaluation.token });
-    const res = await checkout({ sku: SKUS.SECOND_FORM, entitlementToken: oneForm.token });
-    assert.equal(res.statusCode, 200);
-    assert.equal(res.body.amountCents, 5000, 'add-on charge is exactly $50.00');
-    assert.equal(res.body.totalCents, 14995, 'total paid becomes $149.95');
-    assert.deepEqual(res.body.scope, { kind: 'forms', forms: ['I-589'] }, 'add-on covers the form NOT already owned');
-  });
-
-  it('test 6: client-sent amounts are ignored — the server charges the pricing table', async () => {
-    const evaluation = await buyAndPay({ sku: SKUS.EVALUATION });
+  it('client-sent amounts are ignored — the server charges the pricing table (formprep)', async () => {
     const res = await checkout({
-      sku: SKUS.ONE_FORM, formId: 'I-589', entitlementToken: evaluation.token,
+      sku: FORMPREP_SKU, forms: ['I-765', 'I-589'],
       amountCents: 1, totalCents: 1, creditedCents: 99999,
     });
     assert.equal(res.statusCode, 200);
-    assert.equal(res.body.amountCents, 9895);
-    assert.equal(res.body.totalCents, 9995);
-    assert.equal(res.body.creditedCents, 100);
+    assert.equal(res.body.amountCents, 34900);
+    assert.equal(res.body.totalCents, 34900);
+    assert.equal(res.body.creditedCents, 0);
   });
 
-  it('test 6: upgrades require a PAID evaluation — unpaid, forged, or missing proof is refused', async () => {
-    // Unpaid evaluation (checkout created, webhook never fired):
-    const unpaid = await checkout({ sku: SKUS.EVALUATION });
-    assert.equal(unpaid.statusCode, 200);
-    const res1 = await checkout({ sku: SKUS.ONE_FORM, formId: 'I-589', entitlementToken: unpaid.body.entitlementToken });
-    assert.equal(res1.statusCode, 402);
-    // Forged token:
-    const res2 = await checkout({ sku: SKUS.BUNDLE, entitlementToken: 'forged-token-value' });
-    assert.equal(res2.statusCode, 402);
-    // No token at all:
-    const res3 = await checkout({ sku: SKUS.BUNDLE });
-    assert.equal(res3.statusCode, 402);
-    // A FORM entitlement cannot serve as the evaluation prerequisite:
-    const evaluation = await buyAndPay({ sku: SKUS.EVALUATION });
-    const oneForm = await buyAndPay({ sku: SKUS.ONE_FORM, formId: 'I-589', entitlementToken: evaluation.token });
-    const res4 = await checkout({ sku: SKUS.BUNDLE, entitlementToken: oneForm.token });
-    assert.equal(res4.statusCode, 402);
-  });
-
-  it('test 6: a paid upgrade cannot be duplicated; an abandoned checkout can be retried', async () => {
-    const evaluation = await buyAndPay({ sku: SKUS.EVALUATION });
-    await buyAndPay({ sku: SKUS.ONE_FORM, formId: 'I-589', entitlementToken: evaluation.token });
-    const dup = await checkout({ sku: SKUS.BUNDLE, entitlementToken: evaluation.token });
-    assert.equal(dup.statusCode, 409, 'a second paid upgrade on the same evaluation is refused');
-    const dup2 = await checkout({ sku: SKUS.ONE_FORM, formId: 'I-765', entitlementToken: evaluation.token });
-    assert.equal(dup2.statusCode, 409);
-
-    const evaluation2 = await buyAndPay({ sku: SKUS.EVALUATION });
-    const attempt1 = await checkout({ sku: SKUS.ONE_FORM, formId: 'I-589', entitlementToken: evaluation2.token });
-    assert.equal(attempt1.statusCode, 200); // never paid — abandoned
-    const attempt2 = await checkout({ sku: SKUS.ONE_FORM, formId: 'I-589', entitlementToken: evaluation2.token });
-    assert.equal(attempt2.statusCode, 200, 'retrying an unpaid checkout is allowed');
-    assert.notEqual(attempt1.body.entitlementId, attempt2.body.entitlementId);
-  });
-
-  it('test 6: the add-on requires a one-form purchase — an evaluation alone does not qualify', async () => {
-    const evaluation = await buyAndPay({ sku: SKUS.EVALUATION });
-    const res = await checkout({ sku: SKUS.SECOND_FORM, entitlementToken: evaluation.token });
-    assert.equal(res.statusCode, 402);
-  });
-
-  it('one-form checkout requires naming exactly one supported form', async () => {
-    const evaluation = await buyAndPay({ sku: SKUS.EVALUATION });
-    const noForm = await checkout({ sku: SKUS.ONE_FORM, entitlementToken: evaluation.token });
-    assert.equal(noForm.statusCode, 400);
-    const badForm = await checkout({ sku: SKUS.ONE_FORM, formId: 'I-999', entitlementToken: evaluation.token });
-    assert.equal(badForm.statusCode, 400);
-  });
-
-  it('status reports scope, credit, totals, and per-form delivery state', async () => {
-    const evaluation = await buyAndPay({ sku: SKUS.EVALUATION });
-    const bundle = await buyAndPay({ sku: SKUS.BUNDLE, entitlementToken: evaluation.token });
+  it('status reports scope, totals, and per-form delivery state (formprep bundle)', async () => {
+    const bundle = await buyAndPay({ sku: FORMPREP_SKU, forms: ['I-589', 'I-765'] });
     const st = mockRes();
     await statusHandler(mockReq({ body: { token: bundle.token } }), st);
     assert.equal(st.statusCode, 200);
     assert.equal(st.body.usable, true);
     assert.deepEqual(st.body.entitlement.scope, { kind: 'forms', forms: ['I-589', 'I-765'] });
-    assert.equal(st.body.entitlement.totalCents, 14995);
-    assert.equal(st.body.entitlement.creditedCents, 100);
+    assert.equal(st.body.entitlement.totalCents, 34900);
+    assert.equal(st.body.entitlement.creditedCents, 0);
     // Deliver one form: still usable for the other; then exhausted.
     assert.equal(entitlementStore.consumeForForm(bundle.token, 'I-589').ok, true);
     const st2 = mockRes();

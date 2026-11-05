@@ -257,12 +257,29 @@ describe('language persistence (WS2)', () => {
     // for retained access; the server remains authoritative. These are
     // commerce credentials, never applicant immigration data. The guard
     // still bans any other localStorage usage.
-    const allowedKeys = ['LANG_STORAGE_KEY', 'iru_entitlement_token', 'iru_evaluation_token', 'iru_form_tokens', 'iru_entitlement_id'];
+    // Allowed commerce keys (2026-11-05): PENDING_PATHWAY_KEY (the
+    // in-flight Pathway checkout reference), iru_client_key (the opaque
+    // case reference), iru_readiness_tokens (the readiness token map),
+    // iru_tier1_ (the documented 30-day Tier1 answer autosave — the one
+    // namespaced applicant-data exception; any other applicant-data key
+    // still fails this guard).
+    const allowedKeys = ['LANG_STORAGE_KEY', 'iru_entitlement_token', 'iru_evaluation_token', 'iru_form_tokens', 'iru_readiness_tokens', 'iru_entitlement_id', 'PENDING_PATHWAY_KEY', 'iru_client_key', 'iru_tier1_'];
     // Key constants defined in the file (indirect usage via helpers is OK
     // if the file defines only allowed key constants).
     const srcDir = join(HERE, '..', 'src');
-    for (const f of readdirSync(srcDir)) {
-      const text = readFileSync(join(srcDir, f), 'utf8');
+    // Walk src/ recursively (it holds a components/ subdirectory — the
+    // flat readdir loop threw EISDIR on it once App.tsx passed).
+    const srcFiles = [];
+    (function walk(dir) {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const p = join(dir, e.name);
+        if (e.isDirectory()) walk(p);
+        else if (/\.(ts|tsx)$/.test(e.name)) srcFiles.push(p);
+      }
+    })(srcDir);
+    for (const fp of srcFiles) {
+      const f = fp.slice(srcDir.length + 1);
+      const text = readFileSync(fp, 'utf8');
       for (const m of text.matchAll(/localStorage\.(getItem|setItem|removeItem)\(([^)]*)\)/g)) {
         const arg = m[2].trim();
         // Direct literal key, key constant, or a helper parameter (the
@@ -335,7 +352,7 @@ describe('checkout return (combined WS2 case)', () => {
     // The URL never sets purchase state directly.
     assert.ok(appSrc.includes("fetch('/api/entitlement-status'"), 'return handling verifies via the server status endpoint');
     assert.ok(!/setPurchaseState\(\{\s*hasEvaluation:\s*true/.test(appSrc), 'no client-side paid marking');
-    assert.ok(appSrc.includes("useState<{ hasEvaluation: boolean; ownedForms: string[] }>({ hasEvaluation: false, ownedForms: [] })"),
+    assert.ok(appSrc.includes("useState<{ hasEvaluation: boolean; ownedForms: string[]; ownedReadinessForms: string[] }>({ hasEvaluation: false, ownedForms: [], ownedReadinessForms: [] })"),
       'purchase state initializes unpaid/empty');
 
     // (b2) The URL carries an entitlement ID, not the bearer token:
@@ -356,7 +373,7 @@ describe('checkout return (combined WS2 case)', () => {
     };
     assert.deepEqual(derive(session.getItem('iru_evaluation_token')), { hasEvaluation: false, ownedForms: [] });
     assert.ok(appSrc.includes("fetch('/api/entitlement-status'"), 'purchase state is refreshed from the server status endpoint');
-    assert.ok(appSrc.includes('ev && ev.paid && ev.scope'), 'client predicate requires the server-reported paid flag');
+    assert.ok(appSrc.includes('ent && ent.paid'), 'client predicate requires the server-reported paid flag');
 
     // (b4) ONLY the webhook-authoritative marking flips paid state —
     // after it, the same derivation reports the purchase, unchanged.

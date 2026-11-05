@@ -80,6 +80,24 @@ export const PAYWALL_LABELS: Record<string, Record<Lang, string>> = {
     HT: 'Ou pèdi token aksè ou? Jwenn yon nouvo pa imèl.',
     AR: 'فقدت رمز الوصول؟ احصل على رمز جديد عبر البريد الإلكتروني.',
   },
+  // Public browse path (2026-11-05): the Pathway guidance panel is a
+  // pre-purchase surface, so the entry screen offers the form list
+  // directly — the visitor sees supported forms and related-form
+  // guidance before paying; the questionnaire itself stays gated.
+  entryBrowseForms: {
+    EN: 'Browse forms',
+    ES: 'Ver formularios',
+    ZH: '浏览表格',
+    HT: 'Gade fòm yo',
+    AR: 'تصفح النماذج',
+  },
+  entryBrowseFormsDesc: {
+    EN: 'See the immigration forms IRU supports and how they relate to each other.',
+    ES: 'Vea los formularios de inmigración que IRU admite y cómo se relacionan entre sí.',
+    ZH: '查看 IRU 支持的移民表格及其相互关系。',
+    HT: 'Wè fòm imigrasyon IRU sipòte yo ak kijan yo gen rapò youn ak lòt.',
+    AR: 'اطّلع على نماذج الهجرة التي يدعمها IRU وكيفية ارتباطها ببعضها.',
+  },
 
   // Guidance
   guideTitle: {
@@ -235,8 +253,22 @@ export function setFormToken(formId: string, token: string): void {
   safeSet(FORM_TOKENS_KEY, JSON.stringify(map));
   safeSet(TOKEN_KEY, token);
 }
+// Readiness tokens (owner-approved 2026-11-05): one paid readiness
+// entitlement per form (I-589 or I-765, $99.95). Kept in a separate
+// map from preparation tokens — readiness never counts as owning a
+// form, and preparation never counts as readiness.
+const READINESS_TOKENS_KEY = 'iru_readiness_tokens';
+export function getReadinessTokens(): Record<string, string> {
+  try { return JSON.parse(safeGet(READINESS_TOKENS_KEY) || '{}'); } catch { return {}; }
+}
+export function setReadinessToken(formId: string, token: string): void {
+  const map = getReadinessTokens();
+  map[formId] = token;
+  safeSet(READINESS_TOKENS_KEY, JSON.stringify(map));
+  safeSet(TOKEN_KEY, token);
+}
 export function clearTokens(): void {
-  safeRemove(TOKEN_KEY); safeRemove(EVAL_TOKEN_KEY); safeRemove(FORM_TOKENS_KEY);
+  safeRemove(TOKEN_KEY); safeRemove(EVAL_TOKEN_KEY); safeRemove(FORM_TOKENS_KEY); safeRemove(READINESS_TOKENS_KEY);
 }
 
 // ---------------------------------------------------------------------------
@@ -284,6 +316,10 @@ export function EntryScreen({ lang, onNavigate }: Props) {
         <button className={card} onClick={() => onNavigate('RECOVER')}>
           <div className="font-semibold text-indigo-700 text-base">{pt('entryRecover', lang)}</div>
           <div className="text-sm text-slate-600 mt-1">{pt('entryRecoverDesc', lang)}</div>
+        </button>
+        <button className={card} onClick={() => onNavigate('DASHBOARD')}>
+          <div className="font-semibold text-indigo-700 text-base">{pt('entryBrowseForms', lang)}</div>
+          <div className="text-sm text-slate-600 mt-1">{pt('entryBrowseFormsDesc', lang)}</div>
         </button>
       </div>
       <Disclaimer lang={lang} />
@@ -381,11 +417,27 @@ Object.assign(PAYWALL_LABELS, {
     AR: 'اختر باقة التحضير',
   },
   pkgSubtitle: {
-    EN: 'One-time charges in USD. No subscription. Your $1.00 evaluation is credited in full toward complete preparation.',
-    ES: 'Cargos únicos en USD. Sin suscripción. Su $1.00 de evaluación se acredita en su totalidad para la preparación completa.',
-    ZH: '一次性 USD 收费。无订阅。您的 $1.00 评估费将全额抵扣完整准备费用。',
-    HT: 'Peman yon sèl fwa an USD. Pa gen abònman. $1.00 evalyasyon ou an kredite nèt pou preparasyon konplè.',
-    AR: 'رسوم لمرة واحدة بالدولار الأمريكي. بدون اشتراك. يتم خصم مبلغ التقييم البالغ 1.00 دولار بالكامل من التحضير الكامل.',
+    EN: 'One-time charges in USD. No subscription. Choose a product below — Readiness or Form Preparation — and pay only for what you choose.',
+    ES: 'Cargos únicos en USD. Sin suscripción. Elija un producto a continuación — Evaluación de preparación o Preparación de formulario — y pague solo por lo que elija.',
+    ZH: '一次性 USD 收费。无订阅。请在下方选择产品——准备情况评估或表格准备——仅为您所选的产品付费。',
+    HT: 'Peman yon sèl fwa an USD. Pa gen abònman. Chwazi yon pwodwi anba a — Evalyasyon Preparasyon oswa Preparasyon Fòm — epi peye sèlman pou sa ou chwazi.',
+    AR: 'رسوم لمرة واحدة بالدولار الأمريكي. بدون اشتراك. اختر منتجًا أدناه — تقييم الاستعداد أو إعداد النموذج — وادفع فقط مقابل ما تختاره.',
+  },
+  pkgReadinessName: { EN: 'Immigration Readiness', ES: 'Evaluación de preparación', ZH: '准备情况评估', HT: 'Evalyasyon Preparasyon', AR: 'تقييم الاستعداد' },
+  pkgReadinessDesc: {
+    EN: 'Readiness assessment and report for one form — missing information, inconsistencies, and your next steps. Does not include form preparation.',
+    ES: 'Evaluación e informe de preparación para un formulario — información faltante, inconsistencias y sus próximos pasos. No incluye la preparación del formulario.',
+    ZH: '针对一份表格的准备情况评估与报告——缺失信息、不一致之处及后续步骤。不包括表格准备。',
+    HT: 'Evalyasyon ak rapò preparasyon pou yon fòm — enfòmasyon ki manke, enkonsistans, ak pwochen etap ou yo. Li pa gen ladan preparasyon fòm.',
+    AR: 'تقييم وتقرير الاستعداد لنموذج واحد — المعلومات المفقودة والتناقضات وخطواتك التالية. لا يشمل إعداد النموذج.',
+  },
+  pkgPrepName: { EN: 'Form Preparation', ES: 'Preparación de formulario', ZH: '表格准备', HT: 'Preparasyon Fòm', AR: 'إعداد النموذج' },
+  pkgPrepDesc: {
+    EN: 'Complete preparation of this form as a reviewable draft PDF, with corrections and regeneration.',
+    ES: 'Preparación completa de este formulario como PDF borrador revisable, con correcciones y regeneración.',
+    ZH: '将此表格完整准备为可审核的草稿 PDF，附更正与重新生成。',
+    HT: 'Preparasyon konplè fòm sa a kòm yon PDF bouyon ou ka revize, ak koreksyon ak rejenerasyon.',
+    AR: 'إعداد كامل لهذا النموذج كملف PDF مسودة قابل للمراجعة، مع التصحيحات وإعادة الإنشاء.',
   },
   pkgEvalName: { EN: 'Limited Evaluation', ES: 'Evaluación limitada', ZH: '有限评估', HT: 'Evalyasyon limite', AR: 'تقييم محدود' },
   pkgEvalDesc: {
@@ -686,45 +738,37 @@ export function areaStatus(v: 'yes' | 'partial' | 'no'): 'ready' | 'work' | 'sta
 }
 
 // ---------------------------------------------------------------------------
-// PackageSelect — 4 cards, server prices (passed in as props from App)
+// PackageSelect — product cards, server prices (passed in as props from App)
 // ---------------------------------------------------------------------------
 
 export type PkgOffer = {
   sku: string; name: string; desc: string; totalCents: number;
-  chargeCents: number; savingsNote?: string; forms?: string[];
+  chargeCents: number; savingsNote?: string; forms?: string[]; formId?: string;
 };
 
-export function PackageSelect({ lang, onNavigate, offers, hasEvalCredit, onCheckout, checkoutBusy }: Props & {
-  offers: PkgOffer[]; hasEvalCredit: boolean; onCheckout: (sku: string) => void; checkoutBusy: boolean;
+export function PackageSelect({ lang, onNavigate, offers, onCheckout, checkoutBusy }: Props & {
+  offers: PkgOffer[]; onCheckout: (sku: string, opts?: { forms?: string[]; formId?: string }) => void; checkoutBusy: boolean;
 }) {
   const fmt = (c: number) => '$' + (c / 100).toFixed(2);
   return (
     <div className="max-w-xl mx-auto px-4 py-8">
       <h2 className="text-xl font-serif font-bold text-slate-900 text-center mb-2">{pt('pkgTitle', lang)}</h2>
       <p className="text-xs text-slate-600 text-center mb-6 max-w-lg mx-auto">{pt('pkgSubtitle', lang)}</p>
-      {hasEvalCredit && (
-        <p className="text-xs text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-xl p-3 mb-4 text-center">
-          {pt('pkgCreditNote', lang)}
-        </p>
-      )}
       <div className="space-y-4">
         {offers.map((o) => (
-          <div key={o.sku} className="border-2 border-slate-200 rounded-2xl p-5">
+          <div key={`${o.sku}:${o.formId || (o.forms || []).join('+')}`} className="border-2 border-slate-200 rounded-2xl p-5">
             <div className="flex justify-between items-start mb-1">
               <div className="font-bold text-slate-900">{o.name}</div>
               <div className="font-bold text-indigo-700">{fmt(o.totalCents)} <span className="text-xs font-normal text-slate-500">{pt('pkgTotal', lang)}</span></div>
             </div>
             <p className="text-sm text-slate-600 mb-2">{o.desc}</p>
             {o.savingsNote && <p className="text-xs text-green-700 font-semibold mb-2">{o.savingsNote}</p>}
-            {hasEvalCredit && o.chargeCents < o.totalCents && (
-              <p className="text-xs text-slate-500 mb-2">You pay {fmt(o.chargeCents)} — $1.00 credited.</p>
-            )}
             <button
-              onClick={() => onCheckout(o.sku)}
+              onClick={() => onCheckout(o.sku, { forms: o.forms, formId: o.formId })}
               disabled={checkoutBusy}
               className="mt-1 px-5 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-50"
             >
-              {pt('pkgChoose', lang)} — {fmt(hasEvalCredit ? o.chargeCents : o.totalCents)}
+              {pt('pkgChoose', lang)} — {fmt(o.totalCents)}
             </button>
           </div>
         ))}

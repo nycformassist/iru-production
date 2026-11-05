@@ -125,10 +125,12 @@ describe('draftIntegrity: per-form snapshot', () => {
     assert.deepEqual(affectedFormsForMutation(before, dob, FORM_REGISTRY).sort(), ['I-589', 'I-765'], 'DOB feeds both forms');
     const phone = baseRecord();
     upsertFact(phone, { id: 'phone', value: '2125550147', source: 'correction' }, T);
-    assert.deepEqual(affectedFormsForMutation(before, phone, FORM_REGISTRY), ['I-589'], 'phone is an I-589-only field');
+    assert.deepEqual(affectedFormsForMutation(before, phone, FORM_REGISTRY).sort(), ['I-589', 'I-765'], 'phone feeds both forms (Phase 2: I-765 contact fields added)');
+    // SSN intentionally NOT mapped — owner decision D-2 (2026-11-01): do not collect.
+    // The ssn fact affects no form; the PDF field is left blank.
     const ssn = baseRecord();
     upsertFact(ssn, { id: 'ssn', value: '123456789', source: 'correction' }, T);
-    assert.deepEqual(affectedFormsForMutation(before, ssn, FORM_REGISTRY), ['I-765'], 'ssn is an I-765-only field');
+    assert.deepEqual(affectedFormsForMutation(before, ssn, FORM_REGISTRY), [], 'ssn is unmapped per D-2 (not collected)');
     const flag = baseRecord();
     upsertFact(flag, { id: 'has_passport', value: 'yes', source: 'correction' }, T);
     assert.deepEqual(affectedFormsForMutation(before, flag, FORM_REGISTRY), [], 'an evidence flag affects no draft');
@@ -591,16 +593,20 @@ describe('P6: webhook resolves failed and expired checkouts (mocks)', () => {
     statusHandler = (await import('./entitlement-status.js')).handler;
   });
 
-  async function createEvaluationCheckout() {
+  // Vehicle for the webhook semantics below: any checkout that mints a
+  // RESERVED entitlement + Stripe session. Was the $1 evaluation until
+  // its retirement (owner decision 2026-11-05); now a Readiness purchase
+  // ($99.95, I-589). The webhook behavior under test is SKU-agnostic.
+  async function createReadinessCheckout() {
     const res = mockRes();
     await checkoutHandler({
       method: 'POST',
       headers: { 'x-forwarded-for': `10.10.0.${++ipSeq}` },
-      body: { sku: 'iru-evaluation' },
+      body: { sku: 'iru-readiness', form: 'I-589' },
       socket: { remoteAddress: '127.0.0.1' },
     }, res);
     assert.equal(res.statusCode, 200);
-    assert.equal(res.body.amountCents, 100, 'the $1 evaluation amount comes from the server pricing table');
+    assert.equal(res.body.amountCents, 9995, 'the Readiness amount comes from the server pricing table');
     return { ...res.body, sessionId: sessions[sessions.length - 1].id };
   }
 
@@ -624,7 +630,7 @@ describe('P6: webhook resolves failed and expired checkouts (mocks)', () => {
     // record whose session and family check out is now fulfilled late
     // (fresh claim window from payment); a mismatched one becomes a
     // durable exception instead (see the next test).
-    const co = await createEvaluationCheckout();
+    const co = await createReadinessCheckout();
     const expiredEvt = evt('evt_dc_exp_1', 'checkout.session.expired', co.sessionId);
     const r1 = await sendWebhook(expiredEvt);
     assert.equal(r1.statusCode, 200);
@@ -642,7 +648,7 @@ describe('P6: webhook resolves failed and expired checkouts (mocks)', () => {
   });
 
   it('a late paid event with a mismatched amount becomes a durable exception, never a grant', async () => {
-    const co = await createEvaluationCheckout();
+    const co = await createReadinessCheckout();
     const expiredEvt = evt('evt_dc_exp_3', 'checkout.session.expired', co.sessionId);
     const r1 = await sendWebhook(expiredEvt);
     assert.equal(r1.body.applied, true);
@@ -669,7 +675,7 @@ describe('P6: webhook resolves failed and expired checkouts (mocks)', () => {
   });
 
   it('a failed delayed payment is recorded without ending the entitlement; a later success still marks it paid', async () => {
-    const co = await createEvaluationCheckout();
+    const co = await createReadinessCheckout();
     const fail = await sendWebhook(evt('evt_dc_fail_1', 'checkout.session.async_payment_failed', co.sessionId));
     assert.equal(fail.body.applied, true);
     const afterFail = entitlementStore.getById(co.entitlementId);
@@ -683,7 +689,7 @@ describe('P6: webhook resolves failed and expired checkouts (mocks)', () => {
   });
 
   it('the entitlement ID in the success URL is not a credential: status lookup requires the token', async () => {
-    const co = await createEvaluationCheckout();
+    const co = await createReadinessCheckout();
     const byId = mockRes();
     await statusHandler({
       method: 'POST', headers: { 'x-forwarded-for': `10.10.1.${++ipSeq}` },

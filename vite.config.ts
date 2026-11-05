@@ -24,6 +24,35 @@ export default defineConfig(({mode}) => {
     },
     server: {
       hmr: process.env.DISABLE_HMR !== 'true',
+      proxy: {
+        // Local dev: proxy /api/* to Python API server (port 8000)
+        // In production, Vercel handles these as Python serverless functions
+        '/api/fill-': {
+          target: 'http://localhost:8000',
+          changeOrigin: true,
+        },
+        '/api/assessment-': {
+          target: 'http://localhost:8000',
+          changeOrigin: true,
+        },
+        // Local dev only: the real Node API handlers (checkout / webhook
+        // verification / entitlement status) run in dev-api-server.mjs
+        // (port 3001). The webhook itself is NOT proxied here — the
+        // tunnel forwards straight to port 3002 so Stripe's raw body
+        // and signature headers arrive untouched.
+        '/api/checkout': {
+          target: 'http://localhost:3001',
+          changeOrigin: true,
+        },
+        '/api/verify-session': {
+          target: 'http://localhost:3001',
+          changeOrigin: true,
+        },
+        '/api/entitlement-status': {
+          target: 'http://localhost:3001',
+          changeOrigin: true,
+        },
+      },
     },
   };
 });

@@ -20,6 +20,7 @@ import { GoogleGenAI } from "@google/genai";
 import { createLimiter, clientIp } from "./_lib/ratelimit.js";
 import { EVIDENCE_KEYS } from "./_lib/evidence.js";
 import { sanitizeVisionReview, resolveReviewAssociation } from "./_lib/vision.js";
+import { entitlementStore } from "./_lib/entitlement.js";
 
 // Re-exported for tests and for /api/analyze (shared validation contract).
 export { sanitizeVisionReview };
@@ -99,7 +100,7 @@ function withTimeout(promise, ms) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-export default async function handler(req, res) {
+export default async function handler(req, res, store = entitlementStore) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -123,6 +124,36 @@ export default async function handler(req, res) {
 
   const body = typeof rawBody === 'string' ? safeParse(rawBody) : (rawBody || {});
   if (!body) return res.status(400).json({ error: 'Invalid submission.' });
+
+  // Document-review gate (owner directive 2026-11-05): when the
+  // paywall is on, a paid entitlement is required. If the body carries
+  // a formId it is scope-checked via peekForAssessment (a prep grant
+  // for that form, or a readiness grant for it); otherwise any paid
+  // 'forms'/'readiness' entitlement is accepted scope-agnostically.
+  // Paywall off → unchanged behavior. No consumption.
+  if (process.env.PAYWALL_ENABLED === 'true') {
+    const reviewToken = (req.headers && req.headers['x-entitlement-token']) || '';
+    let reviewPeek;
+    if (typeof body.formId === 'string' && body.formId) {
+      reviewPeek = store.peekForAssessment(reviewToken, body.formId);
+    } else {
+      const base = store.peekByToken(reviewToken);
+      if (!base.ok) {
+        reviewPeek = base;
+      } else if (base.entitlement.scope
+        && (base.entitlement.scope.kind === 'forms' || base.entitlement.scope.kind === 'readiness')) {
+        reviewPeek = { ok: true, entitlement: base.entitlement };
+      } else {
+        reviewPeek = { ok: false, reason: 'scope-mismatch' };
+      }
+    }
+    if (!reviewPeek.ok) {
+      return res.status(402).json({
+        error: 'A paid entitlement is required to review a document image.',
+        reason: reviewPeek.reason,
+      });
+    }
+  }
 
   const { imageBase64, mimeType, relatedEvidenceKey, lang } = body;
   // Applicant language for the review's human-readable text. Unknown

@@ -201,14 +201,20 @@ describe('store snapshot / restore (persistence mechanism)', () => {
   });
 });
 
+// Vehicle note (2026-11-05): the checkout legs below drove the retired
+// $1 evaluation SKU; they now drive a Readiness purchase ($99.95, I-589).
+// The idempotency / webhook / fail-closed mechanics under test are
+// SKU-agnostic. Store-level fixtures above keep the legacy SKUs (the
+// store still records historical entitlements; only new checkout is
+// retired).
 describe('GAP 3 — checkout idempotency (handler level, injected gateway)', () => {
   it('the same purchase-intent key twice returns the original session; the gateway is called once', async () => {
     const before = gatewayCalls.length;
     const r1 = mockRes();
-    await checkoutHandler(mockReq({ body: { sku: SKUS.EVALUATION, purchaseIntentKey: 'intent-dedupe-1' } }), r1);
+    await checkoutHandler(mockReq({ body: { sku: 'iru-readiness', form: 'I-589', purchaseIntentKey: 'intent-dedupe-1' } }), r1);
     assert.equal(r1.statusCode, 200);
     const r2 = mockRes();
-    await checkoutHandler(mockReq({ body: { sku: SKUS.EVALUATION, purchaseIntentKey: 'intent-dedupe-1' } }), r2);
+    await checkoutHandler(mockReq({ body: { sku: 'iru-readiness', form: 'I-589', purchaseIntentKey: 'intent-dedupe-1' } }), r2);
     assert.equal(r2.statusCode, 200);
     assert.equal(r2.body.entitlementId, r1.body.entitlementId);
     assert.equal(r2.body.checkoutUrl, r1.body.checkoutUrl);
@@ -219,20 +225,20 @@ describe('GAP 3 — checkout idempotency (handler level, injected gateway)', () 
 
   it('the same intent key with a different SKU is a conflict, not a second purchase', async () => {
     const r1 = mockRes();
-    await checkoutHandler(mockReq({ body: { sku: SKUS.EVALUATION, purchaseIntentKey: 'intent-conflict-1' } }), r1);
+    await checkoutHandler(mockReq({ body: { sku: 'iru-readiness', form: 'I-589', purchaseIntentKey: 'intent-conflict-1' } }), r1);
     assert.equal(r1.statusCode, 200);
     const r2 = mockRes();
-    await checkoutHandler(mockReq({ body: { sku: SKUS.LEGACY, purchaseIntentKey: 'intent-conflict-1' } }), r2);
+    await checkoutHandler(mockReq({ body: { sku: 'iru-formprep', forms: ['I-765'], purchaseIntentKey: 'intent-conflict-1' } }), r2);
     assert.equal(r2.statusCode, 409);
   });
 
   it('a voided/expired intent goes stale: retrying the key mints a fresh checkout', async () => {
     const r1 = mockRes();
-    await checkoutHandler(mockReq({ body: { sku: SKUS.EVALUATION, purchaseIntentKey: 'intent-stale-1' } }), r1);
+    await checkoutHandler(mockReq({ body: { sku: 'iru-readiness', form: 'I-589', purchaseIntentKey: 'intent-stale-1' } }), r1);
     assert.equal(r1.statusCode, 200);
     entitlementStore.void(r1.body.entitlementId, 'test-stale');
     const r2 = mockRes();
-    await checkoutHandler(mockReq({ body: { sku: SKUS.EVALUATION, purchaseIntentKey: 'intent-stale-1' } }), r2);
+    await checkoutHandler(mockReq({ body: { sku: 'iru-readiness', form: 'I-589', purchaseIntentKey: 'intent-stale-1' } }), r2);
     assert.equal(r2.statusCode, 200);
     assert.notEqual(r2.body.entitlementId, r1.body.entitlementId);
     assert.ok(r2.body.entitlementToken);
@@ -240,7 +246,7 @@ describe('GAP 3 — checkout idempotency (handler level, injected gateway)', () 
 
   it('Stripe idempotency keys are stable per logical purchase, and sessions carry an expiry', async () => {
     const r1 = mockRes();
-    await checkoutHandler(mockReq({ body: { sku: SKUS.EVALUATION, purchaseIntentKey: 'intent-stripekey-1' } }), r1);
+    await checkoutHandler(mockReq({ body: { sku: 'iru-readiness', form: 'I-589', purchaseIntentKey: 'intent-stripekey-1' } }), r1);
     assert.equal(r1.statusCode, 200);
     const first = gatewayCalls[gatewayCalls.length - 1];
     assert.ok(first.idempotencyKey, 'gateway must receive a Stripe idempotency key');
@@ -249,7 +255,7 @@ describe('GAP 3 — checkout idempotency (handler level, injected gateway)', () 
     const nowSec = Math.floor(Date.now() / 1000);
     assert.ok(Math.abs(first.expiresAt - (nowSec + 1800)) < 120);
     const r2 = mockRes();
-    await checkoutHandler(mockReq({ body: { sku: SKUS.EVALUATION, purchaseIntentKey: 'intent-stripekey-1' } }), r2);
+    await checkoutHandler(mockReq({ body: { sku: 'iru-readiness', form: 'I-589', purchaseIntentKey: 'intent-stripekey-1' } }), r2);
     assert.equal(r2.statusCode, 200);
     // No second gateway call, so the same Stripe key would be reused on any real retry.
     assert.equal(gatewayCalls[gatewayCalls.length - 1], first);
@@ -258,7 +264,7 @@ describe('GAP 3 — checkout idempotency (handler level, injected gateway)', () 
   it('a checkout without an intent key still gets a stable per-entitlement Stripe key', async () => {
     const before = gatewayCalls.length;
     const r1 = mockRes();
-    await checkoutHandler(mockReq({ body: { sku: SKUS.EVALUATION } }), r1);
+    await checkoutHandler(mockReq({ body: { sku: 'iru-readiness', form: 'I-589' } }), r1);
     assert.equal(r1.statusCode, 200);
     const call = gatewayCalls[before];
     assert.equal(call.idempotencyKey, `iru-checkout-${r1.body.entitlementId}`);
@@ -268,7 +274,7 @@ describe('GAP 3 — checkout idempotency (handler level, injected gateway)', () 
 describe('webhook defense-in-depth (handler level)', () => {
   it('an amount mismatch becomes a durable exception — never a grant, never silent', async () => {
     const co = mockRes();
-    await checkoutHandler(mockReq({ body: { sku: SKUS.EVALUATION } }), co);
+    await checkoutHandler(mockReq({ body: { sku: 'iru-readiness', form: 'I-589' } }), co);
     assert.equal(co.statusCode, 200);
     const sessId = `sess_hd_${co.body.entitlementId}`;
     const res = await sendWebhook({ id: 'evt_amt_bad', type: 'checkout.session.completed', sessionId: sessId }, { payment_status: 'paid', amount_total: 999999, currency: 'usd' });
@@ -284,12 +290,12 @@ describe('webhook defense-in-depth (handler level)', () => {
 
   it('a currency mismatch and a metadata identity mismatch are likewise exceptions', async () => {
     const co = mockRes();
-    await checkoutHandler(mockReq({ body: { sku: SKUS.EVALUATION } }), co);
+    await checkoutHandler(mockReq({ body: { sku: 'iru-readiness', form: 'I-589' } }), co);
     const sessId = `sess_hd_${co.body.entitlementId}`;
-    const cur = await sendWebhook({ id: 'evt_cur_bad', type: 'checkout.session.completed', sessionId: sessId }, { payment_status: 'paid', amount_total: 100, currency: 'eur' });
+    const cur = await sendWebhook({ id: 'evt_cur_bad', type: 'checkout.session.completed', sessionId: sessId }, { payment_status: 'paid', amount_total: 9995, currency: 'eur' });
     assert.equal(cur.body.applied, false);
     assert.ok(cur.body.exception);
-    const meta = await sendWebhook({ id: 'evt_meta_bad', type: 'checkout.session.completed', sessionId: sessId }, { payment_status: 'paid', amount_total: 100, currency: 'usd', metadata: { entitlementId: 'ent_somebody_else' } });
+    const meta = await sendWebhook({ id: 'evt_meta_bad', type: 'checkout.session.completed', sessionId: sessId }, { payment_status: 'paid', amount_total: 9995, currency: 'usd', metadata: { entitlementId: 'ent_somebody_else' } });
     assert.equal(meta.body.applied, false);
     assert.ok(meta.body.exception);
     assert.equal(entitlementStore.peekByToken(co.body.entitlementToken).ok, false);
@@ -297,13 +303,13 @@ describe('webhook defense-in-depth (handler level)', () => {
 
   it('async_payment_succeeded with a non-paid status does not grant and does not burn the event', async () => {
     const co = mockRes();
-    await checkoutHandler(mockReq({ body: { sku: SKUS.EVALUATION } }), co);
+    await checkoutHandler(mockReq({ body: { sku: 'iru-readiness', form: 'I-589' } }), co);
     const sessId = `sess_hd_${co.body.entitlementId}`;
-    const unpaid = await sendWebhook({ id: 'evt_async_unpaid', type: 'checkout.session.async_payment_succeeded', sessionId: sessId }, { payment_status: 'unpaid', amount_total: 100, currency: 'usd' });
+    const unpaid = await sendWebhook({ id: 'evt_async_unpaid', type: 'checkout.session.async_payment_succeeded', sessionId: sessId }, { payment_status: 'unpaid', amount_total: 9995, currency: 'usd' });
     assert.equal(unpaid.statusCode, 200);
     assert.equal(unpaid.body.applied, false);
     assert.equal(entitlementStore.peekByToken(co.body.entitlementToken).ok, false);
-    const paid = await sendWebhook({ id: 'evt_async_unpaid', type: 'checkout.session.async_payment_succeeded', sessionId: sessId }, { payment_status: 'paid', amount_total: 100, currency: 'usd' });
+    const paid = await sendWebhook({ id: 'evt_async_unpaid', type: 'checkout.session.async_payment_succeeded', sessionId: sessId }, { payment_status: 'paid', amount_total: 9995, currency: 'usd' });
     assert.equal(paid.body.applied, true);
   });
 
@@ -353,7 +359,7 @@ describe('fail-closed configuration', () => {
       delete process.env.IRU_STORE_BACKEND;
       delete process.env.IRU_ALLOW_EPHEMERAL_STORE;
       const res = mockRes();
-      await checkoutHandler(mockReq({ body: { sku: SKUS.EVALUATION } }), res);
+      await checkoutHandler(mockReq({ body: { sku: 'iru-readiness', form: 'I-589' } }), res);
       assert.equal(res.statusCode, 503);
     } finally {
       process.env.IRU_STORE_BACKEND = saved.backend;
@@ -363,19 +369,19 @@ describe('fail-closed configuration', () => {
 
   it('a webhook that cannot reach storage returns 503 and does NOT burn the event; a later retry applies', async () => {
     const co = mockRes();
-    await checkoutHandler(mockReq({ body: { sku: SKUS.EVALUATION } }), co);
+    await checkoutHandler(mockReq({ body: { sku: 'iru-readiness', form: 'I-589' } }), co);
     const sessId = `sess_hd_${co.body.entitlementId}`;
     const saved = { backend: process.env.IRU_STORE_BACKEND, allow: process.env.IRU_ALLOW_EPHEMERAL_STORE };
     try {
       process.env.IRU_STORE_BACKEND = 'postgres'; // provisioned-backend name, not configured here
       delete process.env.IRU_ALLOW_EPHEMERAL_STORE;
-      const blocked = await sendWebhook({ id: 'evt_gate_retry', type: 'checkout.session.completed', sessionId: sessId }, { payment_status: 'paid', amount_total: 100, currency: 'usd' });
+      const blocked = await sendWebhook({ id: 'evt_gate_retry', type: 'checkout.session.completed', sessionId: sessId }, { payment_status: 'paid', amount_total: 9995, currency: 'usd' });
       assert.equal(blocked.statusCode, 503);
     } finally {
       process.env.IRU_STORE_BACKEND = saved.backend;
       process.env.IRU_ALLOW_EPHEMERAL_STORE = saved.allow;
     }
-    const retried = await sendWebhook({ id: 'evt_gate_retry', type: 'checkout.session.completed', sessionId: sessId }, { payment_status: 'paid', amount_total: 100, currency: 'usd' });
+    const retried = await sendWebhook({ id: 'evt_gate_retry', type: 'checkout.session.completed', sessionId: sessId }, { payment_status: 'paid', amount_total: 9995, currency: 'usd' });
     assert.equal(retried.body.applied, true);
   });
 
@@ -396,11 +402,11 @@ describe('fail-closed configuration', () => {
   it('paywall flag disagreement is refused, not silent', async () => {
     // Server flag is OFF in this file (PAYWALL_ENABLED unset); a client built with it ON disagrees.
     const res = mockRes();
-    await checkoutHandler(mockReq({ body: { sku: SKUS.EVALUATION, paywallClientEnabled: true } }), res);
+    await checkoutHandler(mockReq({ body: { sku: 'iru-readiness', form: 'I-589', paywallClientEnabled: true } }), res);
     assert.equal(res.statusCode, 503);
     assert.match(res.body.error, /paywall/i);
     const ok = mockRes();
-    await checkoutHandler(mockReq({ body: { sku: SKUS.EVALUATION, paywallClientEnabled: false } }), ok);
+    await checkoutHandler(mockReq({ body: { sku: 'iru-readiness', form: 'I-589', paywallClientEnabled: false } }), ok);
     assert.equal(ok.statusCode, 200);
   });
 
@@ -430,7 +436,7 @@ describe('fail-closed configuration', () => {
       globalThis.fetch = async () => { fetchCalled = true; return { ok: true, json: async () => ({ id: 'sess_never', url: 'https://x' }) }; };
       try {
         const res = mockRes();
-        await checkoutHandler(mockReq({ body: { sku: SKUS.EVALUATION } }), res);
+        await checkoutHandler(mockReq({ body: { sku: 'iru-readiness', form: 'I-589' } }), res);
         assert.equal(res.statusCode, 503);
         assert.equal(fetchCalled, false);
       } finally {

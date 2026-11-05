@@ -20,6 +20,10 @@
  *   never coexists with a paid one-form/add-on, and no upgrade SKU is
  *   ever paid twice in a family. Enforced at payment time, not only at
  *   checkout creation, so concurrent checkouts cannot both grant.
+ *   Formprep families (2026-11-05) use the per-form form of the rule:
+ *   several paid formprep entitlements may coexist in one case, one
+ *   per form; two paid entitlements covering the same form is a
+ *   double grant and is refused at payment time.
  * - Late payment: a confirmed payment for an expired/voided unpaid
  *   record is NEVER silently dropped. If the record, session identity
  *   and family all check out it is fulfilled late (fresh claim window
@@ -33,6 +37,7 @@
 
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { SKUS } from './pricing.js';
+import { FORMPREP_SKU } from './checkout-pricing.js';
 
 export const ENTITLEMENT_STATES = ['RESERVED', 'CONSUMED', 'EXPIRED', 'VOID', 'REVOKED'];
 export const DEFAULT_TTL_MS = 30 * 60 * 1000; // 30 minutes to complete checkout
@@ -40,7 +45,7 @@ export const DEFAULT_CLAIM_WINDOW_MS = 30 * 24 * 60 * 60 * 1000; // 30 days to u
 
 const hashToken = (token) => createHash('sha256').update(String(token)).digest('hex');
 
-const UPGRADE_SKUS = new Set([SKUS.ONE_FORM, SKUS.BUNDLE, SKUS.SECOND_FORM]);
+const UPGRADE_SKUS = new Set([SKUS.ONE_FORM, SKUS.BUNDLE, SKUS.SECOND_FORM, FORMPREP_SKU]);
 
 export function createEntitlementStore(now = () => Date.now()) {
   const byId = new Map();
@@ -132,6 +137,19 @@ export function createEntitlementStore(now = () => Date.now()) {
       const parent = candidate.parentId ? byId.get(candidate.parentId) : null;
       if (!parent || parent.paidAt == null) {
         return { reason: 'parent-not-paid', conflicting: [] };
+      }
+    } else if (candidate.sku === FORMPREP_SKU) {
+      // Formprep families may hold several paid entitlements, one per
+      // form — the conflict is per FORM, not per family: two paid
+      // entitlements covering the same form in one case is a double
+      // grant (e.g. both superseded sessions paying). Different forms
+      // never conflict.
+      const candidateForms = (candidate.scope && Array.isArray(candidate.scope.forms)) ? candidate.scope.forms : [];
+      const overlap = paid.filter((e) => e.sku === FORMPREP_SKU
+        && Array.isArray(e.scope && e.scope.forms)
+        && e.scope.forms.some((f) => candidateForms.includes(f)));
+      if (overlap.length > 0) {
+        return { reason: 'family-already-paid', conflicting: overlap.map((e) => e.id) };
       }
     }
     return null;
@@ -609,6 +627,52 @@ export function createEntitlementStore(now = () => Date.now()) {
       if (ent.state !== 'RESERVED') return { ok: false, reason: `state-${ent.state}` };
       if (!ent.scope || ent.scope.kind !== 'evaluation') return { ok: false, reason: 'scope-mismatch' };
       return { ok: true, entitlement: ent };
+    },
+
+    /**
+     * Scope-aware check for READINESS (owner directive 2026-11-05):
+     * the token must be paid, its scope must be a readiness grant
+     * covering this specific form. A preparation (forms) token never
+     * satisfies readiness, and a readiness token never covers another
+     * form. No consumption: a readiness report may be regenerated
+     * while the entitlement is held, so this is peek-only by design.
+     */
+    peekForReadiness(token, formId) {
+      const ent = this.getByToken(token);
+      if (!ent) return { ok: false, reason: 'unknown-token' };
+      if (ent.paidAt == null) return { ok: false, reason: 'not-paid' };
+      if (ent.state !== 'RESERVED') return { ok: false, reason: `state-${ent.state}` };
+      if (!ent.scope || ent.scope.kind !== 'readiness') return { ok: false, reason: 'scope-mismatch' };
+      if (!Array.isArray(ent.scope.forms) || !ent.scope.forms.includes(formId)) {
+        return { ok: false, reason: 'form-not-covered' };
+      }
+      return { ok: true, entitlement: ent };
+    },
+
+    /**
+     * Scope-aware check for the ASSESSMENT surface (full analysis and
+     * document review): ok when EITHER a preparation grant covers the
+     * form OR a readiness grant covers it. Returns `via` so callers
+     * can tell which grant authorized the call.
+     *
+     * Failure-reason choice (documented): when the token exists and is
+     * paid, the caller most needs the scope answer, so the peekForForm
+     * reason is returned (e.g. 'scope-mismatch' for a readiness-only
+     * token on a form it does not cover, 'form-not-covered' for a prep
+     * token on another form). When the token itself is bad — unknown,
+     * unpaid, or in a non-RESERVED state — that underlying token reason
+     * is returned instead, because no scope question can be answered.
+     */
+    peekForAssessment(token, formId) {
+      const viaForms = this.peekForForm(token, formId);
+      if (viaForms.ok) return { ok: true, entitlement: viaForms.entitlement, via: 'forms' };
+      const viaReadiness = this.peekForReadiness(token, formId);
+      if (viaReadiness.ok) return { ok: true, entitlement: viaReadiness.entitlement, via: 'readiness' };
+      const ent = this.getByToken(token);
+      if (!ent) return { ok: false, reason: 'unknown-token' };
+      if (ent.paidAt == null) return { ok: false, reason: 'not-paid' };
+      if (ent.state !== 'RESERVED') return { ok: false, reason: `state-${ent.state}` };
+      return { ok: false, reason: viaForms.reason };
     },
 
     void(id, reason) {

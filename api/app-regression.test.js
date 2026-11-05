@@ -85,12 +85,16 @@ describe('App.tsx narrative stage guards (successive directive §4)', () => {
   });
 });
 
-describe('App.tsx B2C guards (2026-10-21 directive)', () => {
-  it('the offer shows both options from the shared pricing module, before payment', () => {
-    assert.ok(app.includes('buildOffer(lang)'), 'offer must be built from api/_lib/pricing.js');
-    assert.ok(app.includes('SKUS.EVALUATION'), 'evaluation purchase must use the server SKU');
-    assert.ok(app.includes('SKUS.ONE_FORM') && app.includes('SKUS.BUNDLE') && app.includes('SKUS.SECOND_FORM_ADDON'), 'all B2C SKUs must be purchasable from the offer');
-    assert.ok(app.includes("import { PRICING, SKUS, buildOffer, formatCents } from '../api/_lib/pricing.js'"), 'client and server share one pricing source');
+describe('App.tsx B2C guards (2026-10-21 directive; offers retired 2026-11-05)', () => {
+  it('the offer shows the current products from the shared pricing modules, before payment', () => {
+    assert.ok(app.includes('buildPackageOffers()'), 'offers must be built from the server pricing modules');
+    assert.ok(app.includes('priceReadiness('), 'readiness offers must use the server readiness price');
+    assert.ok(app.includes('regularPriceCents('), 'preparation offers must use server level prices');
+    assert.ok(app.includes('READINESS_SKU'), 'readiness purchase must use the server SKU');
+    assert.ok(app.includes('FORMPREP_SKU'), 'preparation purchase must use the server SKU');
+    assert.ok(!app.includes('SKUS.EVALUATION'), 'the retired $1 evaluation must not be offered');
+    assert.ok(!app.includes("reason === 'evaluation-required'"), 'the retired evaluation prerequisite must be gone');
+    assert.ok(app.includes("reason === 'evaluation-retired'"), 'the retired product must map to its message');
   });
 
   it('every packet carries the mandated next-steps section', () => {
@@ -111,7 +115,9 @@ describe('App.tsx B2C guards (2026-10-21 directive)', () => {
 
   it('generation sends the token that covers the selected form', () => {
     assert.ok(app.includes('formTokens[selectedFormId]'), 'scoped form tokens must be selected per form');
-    assert.ok(app.includes("sessionStorage.getItem('iru_evaluation_token')"), 'evaluation token must be kept for upgrades');
+    assert.ok(app.includes('getStoredToken()'), 'the generic token remains the fallback for generation');
+    assert.ok(!app.includes("sessionStorage.getItem('iru_evaluation_token')"), 'no sessionStorage token reads: checkout writes localStorage (Gap 7, 2026-11-05)');
+    assert.ok(!app.includes("sessionStorage.getItem('iru_form_tokens')"), 'form tokens must come from the localStorage map, not sessionStorage');
   });
 });
 

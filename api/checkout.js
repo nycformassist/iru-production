@@ -9,18 +9,22 @@
 // any amount sent by the client is ignored):
 // - No `sku` in the request → the pre-B2C legacy product, priced from
 //   the server environment (IRU_ASSESSMENT_PRICE_CENTS), unchanged.
-// - sku = evaluation ($1.00): scope { kind: 'evaluation' }.
-// - sku = one-form ($98.95 after the $1 credit; $99.95 total): requires
-//   the buyer's PAID evaluation entitlement token as proof of the
-//   credit; scope = exactly the selected form (I-589 XOR I-765).
-// - sku = bundle ($148.95 after credit; $149.95 total): same credit
-//   requirement; scope = both forms.
-// - sku = second-form add-on ($50.00): requires a PAID one-form
-//   entitlement token; scope = the OTHER form; buyer's total becomes
-//   $149.95.
-// Duplicate protection: a second PAID upgrade on the same parent
-// entitlement is refused (409); abandoned unpaid upgrade checkouts are
-// voided and replaced, never double-charged.
+// - sku = iru-readiness ($99.95, owner-approved 2026-11-05): scope
+//   { kind: 'readiness', forms: [form] } for I-589 or I-765 only. No
+//   prerequisite, no prior purchase. A separate service: it never
+//   discounts preparation and never counts as owning a form.
+// - sku = iru-formprep: Pathway preparation purchase (owner-approved
+//   pricing 2026-11-05). No $1 evaluation prerequisite: Readiness is
+//   a separate service and never discounts preparation.
+// - RETIRED (owner decision 2026-11-05): sku = iru-evaluation,
+//   iru-complete-one-form, iru-complete-bundle, iru-second-form-addon
+//   are refused with HTTP 410 'evaluation-retired' before any
+//   entitlement creation. Already-paid holders keep what they bought;
+//   the limited evaluation stays available to them via analyze.js.
+// Duplicate protection: a second PAID purchase of the same formprep
+// or readiness grant on the same parent entitlement is refused (409);
+// abandoned unpaid checkouts are voided and replaced, never
+// double-charged.
 //
 // HARD GUARDS (owner authorization gates, enforced in code):
 // - Live Stripe keys are REFUSED. This build is test-mode only.
@@ -29,10 +33,10 @@
 import { entitlementStore } from './_lib/entitlement.js';
 import { withDurableStore } from './_lib/withStore.js';
 import { createLimiter, clientIp } from './_lib/ratelimit.js';
-import { PRICING, SKUS, FORM_IDS } from './_lib/pricing.js';
-import { getFormEntry } from './_lib/forms/registry.js';
+import { SKUS } from './_lib/pricing.js';
 import { resolveAppOrigin, checkPaywallAgreement } from './_lib/paymentConfig.js';
 import { assertPaidStoreAvailable } from './_lib/paymentStore.js';
+import { pricePurchase, priceReadiness, FORMPREP_SKU, READINESS_SKU } from './_lib/checkout-pricing.js';
 
 const limiter = createLimiter({ capacity: 5, windowMs: 10 * 60 * 1000 });
 const MAX_BODY_BYTES = 256 * 1024;
@@ -41,7 +45,7 @@ const MAX_INTENT_KEY_CHARS = 128;
 export const SKU = SKUS.LEGACY;
 
 /** Real Stripe call (test keys only — enforced by the handler guard). */
-async function stripeCreateSession({ secretKey, amountCents, entitlementId, productName, idempotencyKey, expiresAt, origin }) {
+async function stripeCreateSession({ secretKey, amountCents, entitlementId, productName, idempotencyKey, expiresAt, origin, metadata }) {
   const params = new URLSearchParams();
   params.set('mode', 'payment');
   params.set('line_items[0][quantity]', '1');
@@ -52,6 +56,17 @@ async function stripeCreateSession({ secretKey, amountCents, entitlementId, prod
   params.set('cancel_url', `${origin}/?checkout=cancelled`);
   params.set('client_reference_id', entitlementId);
   params.set('metadata[entitlementId]', entitlementId);
+  // Case identity (Pathway formprep purchases): the assessment clientKey
+  // lets the return path resume the EXACT case, and `forms` records
+  // which forms this session covers. Both are opaque references only.
+  if (metadata && typeof metadata === 'object') {
+    if (typeof metadata.clientKey === 'string' && metadata.clientKey) {
+      params.set('metadata[clientKey]', metadata.clientKey);
+    }
+    if (typeof metadata.forms === 'string' && metadata.forms) {
+      params.set('metadata[forms]', metadata.forms);
+    }
+  }
   if (expiresAt) params.set('expires_at', String(expiresAt));
   const headers = {
     Authorization: `Bearer ${secretKey}`,
@@ -111,57 +126,6 @@ async function expireSupersededSessions(sessionIds, secretKey) {
   }
 }
 
-/**
- * Verify a prerequisite entitlement from the buyer's token. A purchased
- * entitlement proves itself by having been marked paid by the webhook —
- * whether it is still RESERVED (unused) or already CONSUMED (e.g. the
- * evaluation was delivered) — and by matching the required scope kind.
- * Client-supplied claims about prior payments are never trusted.
- */
-function verifyPrerequisite(store, token, { kind, formsCount = null }) {
-  if (!token || typeof token !== 'string') return null;
-  const ent = store.getByToken(token);
-  if (!ent || ent.paidAt == null) return null;
-  if (ent.state === 'VOID' || ent.state === 'EXPIRED') return null;
-  if (!ent.scope || ent.scope.kind !== kind) return null;
-  if (formsCount !== null) {
-    const forms = Array.isArray(ent.scope.forms) ? ent.scope.forms : [];
-    if (forms.length !== formsCount) return null;
-  }
-  return ent;
-}
-
-/**
- * Duplicate-upgrade protection: refuse when a PAID child of the same
- * upgrade family already exists; void abandoned unpaid attempts of the
- * same SKU so a retry never stacks charges. Returns the Stripe session
- * ids of the children voided by this call, so the handler can
- * best-effort expire them at Stripe (see expireSupersededSessions).
- *
- * excludeEntitlementId (defect-closure 2026-10-24): the purchase-intent
- * retry fix. The guard runs during plan resolution, BEFORE the intent
- * block below; without the exclusion it voids the intent's own
- * original, the intent then reads as stale, and the retry mints a
- * second payable session. Exempting that one entitlement from the
- * void sweep — and nothing else — lets a valid matching intent resolve
- * to its original session. The paid-conflict check and the void sweep
- * for other abandoned attempts are unchanged.
- */
-function guardDuplicateUpgrade(store, parent, sku, excludeEntitlementId) {
-  const children = store.childrenOf(parent.id);
-  const paidUpgrade = children.find((c) => c.paidAt != null
-    && (c.sku === SKUS.ONE_FORM || c.sku === SKUS.BUNDLE || c.sku === SKUS.SECOND_FORM));
-  if (paidUpgrade) return { conflict: true, supersededSessionIds: [] };
-  const supersededSessionIds = [];
-  for (const c of children) {
-    if (c.paidAt == null && c.sku === sku && c.state === 'RESERVED' && c.id !== excludeEntitlementId) {
-      if (c.sessionId) supersededSessionIds.push(c.sessionId);
-      store.void(c.id, 'superseded-by-new-checkout');
-    }
-  }
-  return { conflict: false, supersededSessionIds };
-}
-
 async function handler(req, res, store = entitlementStore) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -208,17 +172,26 @@ async function handler(req, res, store = entitlementStore) {
   }
   const requestedSku = typeof body.sku === 'string' ? body.sku : '';
 
-  // Checkout idempotency key, parsed BEFORE plan resolution so the
-  // duplicate-upgrade guard can exempt the intent's own entitlement
-  // from its void sweep (see guardDuplicateUpgrade). The intent block
-  // after plan resolution reuses this value.
+  // RETIRED (owner decision 2026-11-05): the $1 evaluation and its
+  // upgrade/add-on SKUs are no longer purchasable. Refuse BEFORE any
+  // entitlement creation, Stripe session creation, or prerequisite
+  // check — no new entitlement record may be created for these SKUs.
+  // Already-paid holders keep what they bought (verification of those
+  // entitlements is unaffected).
+  if (requestedSku === SKUS.EVALUATION || requestedSku === SKUS.ONE_FORM
+    || requestedSku === SKUS.BUNDLE || requestedSku === SKUS.SECOND_FORM) {
+    return res.status(410).json({
+      error: 'This product has been retired and is no longer available for purchase.',
+      reason: 'evaluation-retired',
+    });
+  }
+
+  // Checkout idempotency key, parsed BEFORE plan resolution. The intent
+  // block after plan resolution reuses this value.
   const intentKey = typeof body.purchaseIntentKey === 'string'
     && body.purchaseIntentKey.length > 0
     && body.purchaseIntentKey.length <= MAX_INTENT_KEY_CHARS
     ? body.purchaseIntentKey
-    : null;
-  const intentEntitlementId = intentKey
-    ? (store.getIntent(intentKey)?.entitlementId || null)
     : null;
   // Stripe session ids voided by this request's guard sweep, for
   // best-effort expiration after plan resolution.
@@ -234,44 +207,149 @@ async function handler(req, res, store = entitlementStore) {
       return res.status(503).json({ error: 'Checkout is not configured.' });
     }
     plan = { sku: SKUS.LEGACY, amountCents, scope: null, parentId: null, creditedCents: 0, totalCents: amountCents, productName: 'IRU Readiness Assessment & Form Draft' };
-  } else if (requestedSku === SKUS.EVALUATION) {
-    const row = PRICING.evaluation;
-    plan = { sku: row.sku, amountCents: row.chargeCents, scope: { kind: 'evaluation' }, parentId: null, creditedCents: 0, totalCents: row.totalCents, productName: row.name };
-  } else if (requestedSku === SKUS.ONE_FORM || requestedSku === SKUS.BUNDLE) {
-    const parent = verifyPrerequisite(store, body.entitlementToken, { kind: 'evaluation' });
-    if (!parent) {
-      return res.status(402).json({ error: 'The $1 evaluation purchase is required first — its payment is credited toward this total.', reason: 'evaluation-required' });
+  } else if (requestedSku === FORMPREP_SKU) {
+    // ── Pathway form-preparation purchase (owner-approved pricing
+    // 2026-11-05; Trello "IRU DIRECT TO CONSUMER PLAN" is the source
+    // of truth). The customer buys preparation for 1–2 released forms
+    // in one case: the selected form, optionally plus the related form
+    // added from the Pathway panel. Amounts come ONLY from
+    // pricePurchase() (server-side catalog levels) — client-sent
+    // amounts are never read. No $1 evaluation prerequisite: Readiness
+    // is a separate service and never discounts preparation.
+    const forms = Array.isArray(body.forms)
+      ? body.forms.filter((f) => typeof f === 'string')
+      : [];
+    if (forms.length < 1 || forms.length > 2) {
+      return res.status(400).json({ error: 'Select one or two forms to prepare.', reason: 'forms-required' });
     }
-    const guard = guardDuplicateUpgrade(store, parent, requestedSku, intentEntitlementId);
-    supersededSessionIds = guard.supersededSessionIds;
-    if (guard.conflict) {
-      return res.status(409).json({ error: 'This purchase has already been completed. A second charge would duplicate it.', reason: 'already-purchased' });
+    if (new Set(forms).size !== forms.length) {
+      return res.status(400).json({ error: 'Select each form only once.', reason: 'duplicate-form' });
     }
-    if (requestedSku === SKUS.ONE_FORM) {
-      const formId = typeof body.formId === 'string' ? body.formId : '';
-      if (!FORM_IDS.includes(formId) || !getFormEntry(formId)) {
-        return res.status(400).json({ error: 'Select exactly one form: Form I-589 or Form I-765.', reason: 'form-required' });
+    // Case identity: the assessment clientKey (opaque reference) is
+    // carried into Stripe metadata so the return path can resume the
+    // exact case. It is never trusted as proof of ownership.
+    const clientKey = typeof body.clientKey === 'string'
+      && body.clientKey.length > 0 && body.clientKey.length <= 128
+      ? body.clientKey
+      : null;
+    // Derive already-owned prep forms from a verified PAID entitlement
+    // token, when the buyer presents one. An absent or invalid token
+    // simply means a fresh case owns nothing — it is not an error,
+    // because formprep (unlike the legacy upgrade SKUs) has no
+    // prerequisite purchase.
+    let ownedForms = [];
+    let parent = null;
+    if (typeof body.entitlementToken === 'string' && body.entitlementToken) {
+      const ent = store.getByToken(body.entitlementToken);
+      if (ent && ent.paidAt != null && ent.state !== 'VOID' && ent.state !== 'EXPIRED'
+        && ent.scope && ent.scope.kind === 'forms' && Array.isArray(ent.scope.forms)) {
+        parent = ent;
+        ownedForms = ent.scope.forms.filter((f) => typeof f === 'string');
       }
-      const row = PRICING.oneForm;
-      plan = { sku: row.sku, amountCents: row.chargeCents, scope: { kind: 'forms', forms: [formId] }, parentId: parent.id, creditedCents: row.creditedCents, totalCents: row.totalCents, productName: `${row.name} (${formId})` };
-    } else {
-      const row = PRICING.bundle;
-      plan = { sku: row.sku, amountCents: row.chargeCents, scope: { kind: 'forms', forms: [...FORM_IDS] }, parentId: parent.id, creditedCents: row.creditedCents, totalCents: row.totalCents, productName: row.name };
     }
-  } else if (requestedSku === SKUS.SECOND_FORM) {
-    const parent = verifyPrerequisite(store, body.entitlementToken, { kind: 'forms', formsCount: 1 });
-    if (!parent) {
-      return res.status(402).json({ error: 'The second-form add-on requires your completed one-form purchase.', reason: 'one-form-required' });
+    const priced = pricePurchase({
+      ownedForms,
+      selectedForm: forms[0],
+      addedForm: forms[1] || null,
+    });
+    if (!priced.ok) {
+      const status = priced.reason === 'already-owned' ? 409 : 400;
+      return res.status(status).json({
+        error: priced.error || 'This purchase cannot be completed.',
+        reason: priced.reason || 'pricing-error',
+      });
     }
-    const guard = guardDuplicateUpgrade(store, parent, requestedSku, intentEntitlementId);
-    supersededSessionIds = guard.supersededSessionIds;
-    if (guard.conflict) {
-      return res.status(409).json({ error: 'This purchase has already been completed. A second charge would duplicate it.', reason: 'already-purchased' });
+    // Duplicate protection (same shape as the legacy upgrade guard):
+    // a PAID formprep child of the same parent covering the same forms
+    // is a conflict; abandoned unpaid ones are voided so a retry never
+    // stacks charges. A purchase with no parent has no children to
+    // guard — the purchase-intent key below still protects retries.
+    if (parent) {
+      const children = store.childrenOf(parent.id);
+      const paidDup = children.find((c) => c.paidAt != null && c.sku === FORMPREP_SKU
+        && c.scope && c.scope.kind === 'forms' && Array.isArray(c.scope.forms)
+        && priced.forms.length === c.scope.forms.length
+        && priced.forms.every((f) => c.scope.forms.includes(f)));
+      if (paidDup) {
+        return res.status(409).json({ error: 'This purchase has already been completed. A second charge would duplicate it.', reason: 'already-purchased' });
+      }
+      // DEFECT 1 ordering (2026-11-05): this sweep runs BEFORE the
+      // shared purchase-intent lookup below, so it must NOT void the
+      // entitlement this request's own intent key names — a retry would
+      // otherwise find its original voided and mint a second payable
+      // session (double-charge risk). The intent block needs the
+      // original alive to decide retry (same shape) vs 409 (different
+      // shape); any other unpaid RESERVED child is still superseded.
+      let intentOriginalId = null;
+      if (intentKey) {
+        const prior = store.getIntent(intentKey);
+        if (prior && prior.sku === FORMPREP_SKU && (prior.parentId || null) === parent.id) {
+          intentOriginalId = prior.entitlementId;
+        }
+      }
+      for (const c of children) {
+        if (c.paidAt == null && c.sku === FORMPREP_SKU && c.state === 'RESERVED' && c.id !== intentOriginalId) {
+          if (c.sessionId) supersededSessionIds.push(c.sessionId);
+          store.void(c.id, 'superseded-by-new-checkout');
+        }
+      }
     }
-    const owned = parent.scope.forms[0];
-    const other = FORM_IDS.find((f) => f !== owned);
-    const row = PRICING.secondForm;
-    plan = { sku: row.sku, amountCents: row.chargeCents, scope: { kind: 'forms', forms: [other] }, parentId: parent.id, creditedCents: 0, totalCents: row.totalCents, productName: `${row.name} (${other})` };
+    const productName = `IRU Form Preparation — ${priced.forms.join(' + ')}${priced.bundleApplied ? ' (special bundle price)' : ''}`;
+    plan = {
+      sku: FORMPREP_SKU,
+      amountCents: priced.totalCents,
+      scope: { kind: 'forms', forms: [...priced.forms] },
+      parentId: parent ? parent.id : null,
+      creditedCents: 0,
+      totalCents: priced.totalCents,
+      productName,
+      priced,
+      clientKey,
+    };
+  } else if (requestedSku === READINESS_SKU) {
+    // ── Readiness purchase (owner-approved 2026-11-05, FINAL). One
+    // form (I-589 or I-765 only), flat $99.95, server-side only —
+    // client-sent amounts are never read. No prerequisite (no
+    // evaluation, no prior purchase). Grants scope { kind: 'readiness',
+    // forms: [form] } — a separate service that never discounts
+    // preparation and never counts as owning a form.
+    const form = typeof body.form === 'string' ? body.form : '';
+    const priced = priceReadiness(form);
+    if (!priced.ok) {
+      return res.status(400).json({
+        error: priced.error || 'This purchase cannot be completed.',
+        reason: priced.reason || 'pricing-error',
+      });
+    }
+    // Case identity: the assessment clientKey (opaque reference) is
+    // carried into Stripe metadata so the return path can resume the
+    // exact case. It is never trusted as proof of ownership.
+    const clientKey = typeof body.clientKey === 'string'
+      && body.clientKey.length > 0 && body.clientKey.length <= 128
+      ? body.clientKey
+      : null;
+    // Duplicate protection: a PAID readiness entitlement for the same
+    // form, presented under its own token, is a conflict. A readiness
+    // token for the OTHER form is not a duplicate — each form needs
+    // its own readiness purchase.
+    if (typeof body.entitlementToken === 'string' && body.entitlementToken) {
+      const ent = store.getByToken(body.entitlementToken);
+      if (ent && ent.paidAt != null && ent.state !== 'VOID' && ent.state !== 'EXPIRED'
+        && ent.scope && ent.scope.kind === 'readiness' && Array.isArray(ent.scope.forms)
+        && ent.scope.forms.includes(form)) {
+        return res.status(409).json({ error: 'This purchase has already been completed. A second charge would duplicate it.', reason: 'already-purchased' });
+      }
+    }
+    plan = {
+      sku: READINESS_SKU,
+      amountCents: priced.totalCents,
+      scope: { kind: 'readiness', forms: [form] },
+      parentId: null,
+      creditedCents: 0,
+      totalCents: priced.totalCents,
+      productName: `IRU Readiness — ${form}`,
+      clientKey,
+    };
   } else {
     return res.status(400).json({ error: 'Unknown product.', reason: 'unknown-sku' });
   }
@@ -295,18 +373,28 @@ async function handler(req, res, store = entitlementStore) {
   // but never the token, because the server keeps only its hash.
   // Intent keys must be client-generated random values; the key itself
   // is a bearer reference to the checkout, never to the entitlement.
-  // (intentKey was parsed before plan resolution for the guard
-  // exclusion; see above.)
   const planFormId = plan.scope && plan.scope.kind === 'forms' && Array.isArray(plan.scope.forms) && plan.scope.forms.length === 1
     ? plan.scope.forms[0]
+    : null;
+  // Formprep purchases cover 1–2 forms and readiness exactly 1: the
+  // intent record must name the exact form set, or two different
+  // purchases sharing one intent key would falsely match. Legacy SKUs
+  // keep their existing formId-only comparison (their saved intents
+  // have no `forms` field).
+  const planIsFormprep = plan.sku === FORMPREP_SKU;
+  const planIsReadiness = plan.sku === READINESS_SKU;
+  const planFormsKey = (planIsFormprep || planIsReadiness)
+    ? JSON.stringify([...(plan.scope.forms || [])].sort())
     : null;
   if (intentKey) {
     const prior = store.getIntent(intentKey);
     if (prior) {
       const priorEnt = store.getById(prior.entitlementId);
+      const priorFormsKey = prior.forms ? JSON.stringify([...prior.forms].sort()) : null;
+      const formsMatch = planFormsKey === null || priorFormsKey === planFormsKey;
       if (priorEnt && priorEnt.state === 'RESERVED' && priorEnt.paidAt == null
         && prior.sku === plan.sku && (prior.formId || null) === planFormId
-        && (prior.parentId || null) === (plan.parentId || null)) {
+        && (prior.parentId || null) === (plan.parentId || null) && formsMatch) {
         return res.status(200).json({
           ok: true, retried: true,
           checkoutUrl: prior.checkoutUrl,
@@ -316,6 +404,7 @@ async function handler(req, res, store = entitlementStore) {
           creditedCents: plan.creditedCents,
           totalCents: prior.totalCents,
           currency: 'usd', mode: 'test',
+          ...(plan.priced ? { lines: plan.priced.lines, bundleApplied: plan.priced.bundleApplied, forms: plan.priced.forms } : {}),
         });
       }
       if (priorEnt && priorEnt.state === 'RESERVED' && priorEnt.paidAt == null) {
@@ -360,7 +449,12 @@ async function handler(req, res, store = entitlementStore) {
     const gateway = globalThis.__IRU_STRIPE_GATEWAY__;
     let session;
     if (gateway && typeof gateway.createCheckoutSession === 'function') {
-      session = await gateway.createCheckoutSession({ amountCents: plan.amountCents, entitlementId: entitlement.id, sku: plan.sku, idempotencyKey, expiresAt });
+      session = await gateway.createCheckoutSession({
+        amountCents: plan.amountCents, entitlementId: entitlement.id, sku: plan.sku,
+        idempotencyKey, expiresAt,
+        ...(plan.clientKey ? { clientKey: plan.clientKey } : {}),
+        ...((planIsFormprep || planIsReadiness) ? { forms: [...(plan.scope.forms || [])] } : {}),
+      });
     } else {
       // Real Stripe path only: the origin is validated here, fail
       // closed — there is no localhost fallback anywhere in this file.
@@ -369,7 +463,14 @@ async function handler(req, res, store = entitlementStore) {
         store.void(entitlement.id, 'checkout-origin-invalid');
         return res.status(503).json({ error: 'Checkout is not configured.' });
       }
-      session = await stripeCreateSession({ secretKey, amountCents: plan.amountCents, entitlementId: entitlement.id, productName: plan.productName, idempotencyKey, expiresAt, origin: origin.origin });
+      session = await stripeCreateSession({
+        secretKey, amountCents: plan.amountCents, entitlementId: entitlement.id,
+        productName: plan.productName, idempotencyKey, expiresAt, origin: origin.origin,
+        metadata: {
+          ...(plan.clientKey ? { clientKey: plan.clientKey } : {}),
+          ...((planIsFormprep || planIsReadiness) ? { forms: [...(plan.scope.forms || [])].join(',') } : {}),
+        },
+      });
     }
     store.attachSession(entitlement.id, session.id);
     if (intentKey) {
@@ -377,6 +478,7 @@ async function handler(req, res, store = entitlementStore) {
         entitlementId: entitlement.id, sessionId: session.id, sku: plan.sku,
         formId: planFormId, parentId: plan.parentId || null,
         checkoutUrl: session.url, amountCents: plan.amountCents, totalCents: plan.totalCents,
+        ...((planIsFormprep || planIsReadiness) ? { forms: [...(plan.scope.forms || [])] } : {}),
       });
     }
     // The token is the buyer's recovery credential (shown once here; the
@@ -393,6 +495,7 @@ async function handler(req, res, store = entitlementStore) {
       totalCents: plan.totalCents,
       currency: 'usd',
       mode: 'test',
+      ...(plan.priced ? { lines: plan.priced.lines, bundleApplied: plan.priced.bundleApplied, forms: plan.priced.forms } : {}),
     });
   } catch (err) {
     store.void(entitlement.id, 'checkout-session-failed');

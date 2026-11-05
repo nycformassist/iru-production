@@ -2,15 +2,21 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import analyzeHandler from './analyze.js';
 import { handler as checkoutHandler } from './checkout.js';
-import { handler as webhookHandler } from './webhook.js';
 import { handler as statusHandler } from './entitlement-status.js';
 import generateHandler from './generate-form.js';
-import { signStripePayload } from './_lib/stripewebhook.js';
+import { entitlementStore } from './_lib/entitlement.js';
 import { SKUS } from './_lib/pricing.js';
+import { FORMPREP_SKU } from './_lib/checkout-pricing.js';
 import { createFactRecord, upsertFact } from './_lib/facts.js';
 
 // B2C directive §4 — evaluation protection & endpoint authorization.
 // Tests 1, 2, 7, 8, 9, 10, 11. All local with an injected gateway.
+//
+// NOTE (owner decision 2026-11-05): the $1 evaluation checkout is
+// RETIRED, so paid evaluation tokens are minted here as store-created
+// entitlements in the singleton store (the historical vehicle for
+// already-paid holders), not via checkout. Every assertion about the
+// limited-evaluation endpoint itself is unchanged.
 
 function mockRes() {
   return {
@@ -32,27 +38,40 @@ const mockReq = (over = {}) => ({
 
 const ANSWERS = { country_of_origin: 'Testlandia', case_type: 'asylum', has_passport: 'no', has_i94: 'unknown', has_lease: 'yes' };
 
-let eventCounter = 0;
-async function paySession(entitlementId) {
-  const payload = JSON.stringify({
-    id: `evt_sec_${++eventCounter}`,
-    type: 'checkout.session.completed',
-    data: { object: { id: `sess_${entitlementId}`, payment_status: 'paid' } },
+let evCounter = 0;
+/**
+ * Mint a PAID historical evaluation entitlement directly in the
+ * singleton store (the $1 checkout is retired — this is the vehicle
+ * for already-paid holders). Returns the bearer token.
+ */
+function paidEvaluation() {
+  const n = ++evCounter;
+  const { entitlement, token } = entitlementStore.create({
+    sku: SKUS.EVALUATION, amountCents: 100,
+    sessionId: `s_ev_sec_${n}`, scope: { kind: 'evaluation' },
   });
-  const ts = Math.floor(Date.now() / 1000);
-  const res = mockRes();
-  await webhookHandler(mockReq({
-    rawBody: payload,
-    headers: { 'x-forwarded-for': nextIp(), 'stripe-signature': signStripePayload(payload, process.env.STRIPE_WEBHOOK_SECRET, ts) },
-  }), res);
-  assert.equal(res.body.applied, true);
+  assert.equal(entitlementStore.markPaidBySession(`s_ev_sec_${n}`, `evt_ev_sec_${n}`).applied, true);
+  return { token, id: entitlement.id };
 }
-async function buyAndPay(body) {
-  const res = mockRes();
-  await checkoutHandler(mockReq({ body }), res);
-  assert.equal(res.statusCode, 200, JSON.stringify(res.body));
-  await paySession(res.body.entitlementId);
-  return { token: res.body.entitlementToken, id: res.body.entitlementId };
+/** An UNPAID evaluation entitlement, created directly in the store. */
+function unpaidEvaluation() {
+  const n = ++evCounter;
+  const { token } = entitlementStore.create({
+    sku: SKUS.EVALUATION, amountCents: 100,
+    sessionId: `s_ev_sec_unpaid_${n}`, scope: { kind: 'evaluation' },
+  });
+  return { token };
+}
+let fpCounter = 0;
+/** Mint a PAID formprep entitlement for one form, directly in the store. */
+function paidFormprep(formId) {
+  const n = ++fpCounter;
+  const { token } = entitlementStore.create({
+    sku: FORMPREP_SKU, amountCents: 24900,
+    sessionId: `s_fp_sec_${n}`, scope: { kind: 'forms', forms: [formId] },
+  });
+  assert.equal(entitlementStore.markPaidBySession(`s_fp_sec_${n}`, `evt_fp_sec_${n}`).applied, true);
+  return { token };
 }
 async function limitedEval(token, ip) {
   const res = mockRes();
@@ -92,16 +111,15 @@ describe('evaluation protection (PAYWALL_ENABLED)', () => {
     assert.equal(noToken.statusCode, 402);
     const forged = await limitedEval('forged-token');
     assert.equal(forged.statusCode, 402);
-    // An UNPAID evaluation token does not qualify either:
-    const co = mockRes();
-    await checkoutHandler(mockReq({ body: { sku: SKUS.EVALUATION } }), co);
-    assert.equal(co.statusCode, 200);
-    const unpaid = await limitedEval(co.body.entitlementToken);
+    // An UNPAID evaluation entitlement (created directly in the store —
+    // the $1 checkout is retired) does not qualify either:
+    const { token } = unpaidEvaluation();
+    const unpaid = await limitedEval(token);
     assert.equal(unpaid.statusCode, 402);
   });
 
   it('test 2: a valid $1 payment grants ONLY the limited evaluation', async () => {
-    const evaluation = await buyAndPay({ sku: SKUS.EVALUATION });
+    const evaluation = paidEvaluation();
     const res = await limitedEval(evaluation.token);
     assert.equal(res.statusCode, 200);
     assert.equal(res.body.mode, 'limited');
@@ -116,7 +134,7 @@ describe('evaluation protection (PAYWALL_ENABLED)', () => {
   });
 
   it('test 8: the limited evaluation cannot retrieve full paid deliverables', async () => {
-    const evaluation = await buyAndPay({ sku: SKUS.EVALUATION });
+    const evaluation = paidEvaluation();
     const res = await limitedEval(evaluation.token);
     assert.equal(res.statusCode, 200);
     const ev = res.body.evaluation;
@@ -140,8 +158,8 @@ describe('evaluation protection (PAYWALL_ENABLED)', () => {
   });
 
   it('test 7: paid endpoints independently enforce authorization and scope', async () => {
-    const evaluation = await buyAndPay({ sku: SKUS.EVALUATION });
-    const oneForm = await buyAndPay({ sku: SKUS.ONE_FORM, formId: 'I-589', entitlementToken: evaluation.token });
+    const evaluation = paidEvaluation();
+    const oneForm = paidFormprep('I-589');
     // The one-form (I-589) token cannot generate the OTHER form:
     const wrong = mockRes();
     await generateHandler(mockReq({ body: { formId: 'I-765', factRecord: syntheticRecord(), entitlementToken: oneForm.token } }), wrong);
@@ -158,8 +176,8 @@ describe('evaluation protection (PAYWALL_ENABLED)', () => {
   });
 
   it('test 10: cross-user access is rejected — an entitlement id alone unlocks nothing', async () => {
-    const alice = await buyAndPay({ sku: SKUS.EVALUATION });
-    const mallory = await buyAndPay({ sku: SKUS.EVALUATION });
+    const alice = paidEvaluation();
+    const mallory = paidEvaluation();
     // Knowing Alice's entitlement ID (not her token) yields nothing:
     const byIdOnly = mockRes();
     await statusHandler(mockReq({ body: { entitlementId: alice.id } }), byIdOnly);
@@ -180,7 +198,7 @@ describe('evaluation protection (PAYWALL_ENABLED)', () => {
   });
 
   it('test 11: no secrets, prompts, or internal detail appear in client responses', async () => {
-    const evaluation = await buyAndPay({ sku: SKUS.EVALUATION });
+    const evaluation = paidEvaluation();
     const evalRes = await limitedEval(evaluation.token);
     const statusRes = mockRes();
     await statusHandler(mockReq({ body: { token: evaluation.token } }), statusRes);
@@ -221,7 +239,8 @@ describe('evaluation quotas (paywall off — abuse controls still apply)', () =>
       let last = null;
       for (let i = 0; i < 6; i++) {
         last = mockRes();
-        await checkoutHandler(mockReq({ headers: { 'x-forwarded-for': ip }, body: { sku: SKUS.EVALUATION } }), last);
+        // Vehicle is formprep (the $1 evaluation checkout is retired).
+        await checkoutHandler(mockReq({ headers: { 'x-forwarded-for': ip }, body: { sku: FORMPREP_SKU, forms: ['I-765'] } }), last);
       }
       assert.equal(last.statusCode, 429);
     } finally {

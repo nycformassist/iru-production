@@ -13,6 +13,14 @@ import { handler as checkoutHandler } from './checkout.js';
 // All local, synthetic, test-mode semantics only. The Stripe gateway is
 // injected; no network, no real keys, no money. Mocks prove application
 // behavior only — never real Stripe platform acceptance.
+//
+// Vehicle note (2026-11-05): these tests drove the retired $1-evaluation
+// upgrade SKUs (iru-evaluation → iru-complete-one-form / bundle /
+// second-form-addon). The retired SKUs now 410, so the vehicle is the
+// current purchase path: a paid iru-formprep parent (I-589, $249) with
+// formprep add-on purchases under it. The mechanics under test — intent
+// retry ordering, void/replace, superseded-session expiration — live in
+// the formprep branch in the same shape and are SKU-agnostic.
 
 function mockRes() {
   return {
@@ -29,12 +37,8 @@ const mockReq = (over = {}) => ({
   body: {}, socket: { remoteAddress: '127.0.0.1' }, ...over,
 });
 
-const SKUS = {
-  EVALUATION: 'iru-evaluation',
-  ONE_FORM: 'iru-complete-one-form',
-  BUNDLE: 'iru-complete-bundle',
-  SECOND_FORM: 'iru-second-form-addon',
-};
+const FORMPREP_SKU = 'iru-formprep';
+const READINESS_SKU = 'iru-readiness';
 
 let gatewayCalls;
 let expireCalls;
@@ -72,11 +76,11 @@ function lastSessionId() {
   return gatewayCalls[gatewayCalls.length - 1].sessionId;
 }
 
-async function createPaidEvaluation() {
+async function createPaidFormprep() {
   const r = mockRes();
-  await checkoutHandler(mockReq({ body: { sku: SKUS.EVALUATION } }), r);
+  await checkoutHandler(mockReq({ body: { sku: FORMPREP_SKU, forms: ['I-589'] } }), r);
   assert.equal(r.statusCode, 200);
-  const paid = entitlementStore.markPaidBySession(lastSessionId(), `evt_dc_eval_${r.body.entitlementId}`);
+  const paid = entitlementStore.markPaidBySession(lastSessionId(), `evt_dc_parent_${r.body.entitlementId}`);
   assert.equal(paid.applied, true);
   return { entitlementId: r.body.entitlementId, token: r.body.entitlementToken };
 }
@@ -95,11 +99,12 @@ async function upgradeCheckout(body) {
 
 describe('DEFECT 1 — upgrade purchase-intent retry ordering', () => {
   it('one-form upgrade retry returns the original session; gateway called once; token issued once', async () => {
-    const ev = await createPaidEvaluation();
+    const ev = await createPaidFormprep();
     const before = gatewayCalls.length;
-    const body = { sku: SKUS.ONE_FORM, entitlementToken: ev.token, formId: 'I-589', purchaseIntentKey: 'dc-intent-oneform-1' };
+    const body = { sku: FORMPREP_SKU, forms: ['I-765'], entitlementToken: ev.token, purchaseIntentKey: 'dc-intent-oneform-1' };
     const r1 = await upgradeCheckout(body);
     assert.equal(r1.statusCode, 200);
+    assert.equal(r1.body.amountCents, 10000, 'I-765 completes the I-589+I-765 pair at the $349 bundle remainder');
     assert.ok(r1.body.entitlementToken, 'first response issues the token');
     const r2 = await upgradeCheckout(body);
     assert.equal(r2.statusCode, 200);
@@ -112,11 +117,11 @@ describe('DEFECT 1 — upgrade purchase-intent retry ordering', () => {
   });
 
   it('bundle upgrade retry returns the original session', async () => {
-    const ev = await createPaidEvaluation();
     const before = gatewayCalls.length;
-    const body = { sku: SKUS.BUNDLE, entitlementToken: ev.token, purchaseIntentKey: 'dc-intent-bundle-1' };
+    const body = { sku: FORMPREP_SKU, forms: ['I-589', 'I-765'], purchaseIntentKey: 'dc-intent-bundle-1' };
     const r1 = await upgradeCheckout(body);
     assert.equal(r1.statusCode, 200);
+    assert.equal(r1.body.amountCents, 34900, 'the two-form bundle is the fixed $349');
     const r2 = await upgradeCheckout(body);
     assert.equal(r2.statusCode, 200);
     assert.equal(r2.body.entitlementId, r1.body.entitlementId);
@@ -126,15 +131,19 @@ describe('DEFECT 1 — upgrade purchase-intent retry ordering', () => {
   });
 
   it('second-form upgrade retry returns the original session', async () => {
-    const ev = await createPaidEvaluation();
-    const one = await upgradeCheckout({ sku: SKUS.ONE_FORM, entitlementToken: ev.token, formId: 'I-589' });
+    const ev = await createPaidFormprep();
+    const one = await upgradeCheckout({ sku: FORMPREP_SKU, forms: ['I-765'], entitlementToken: ev.token });
     assert.equal(one.statusCode, 200);
     const paidOne = await payEntitlement(one.body.entitlementId, `one_${one.body.entitlementId}`);
     assert.equal(paidOne.applied, true);
     const before = gatewayCalls.length;
-    const body = { sku: SKUS.SECOND_FORM, entitlementToken: one.body.entitlementToken, purchaseIntentKey: 'dc-intent-second-1' };
+    // A second add-on purchase under the paid I-765 child (I-130 at the
+    // $50 additional-form discount) with an intent key; the retry must
+    // return the original session, not mint a second one.
+    const body = { sku: FORMPREP_SKU, forms: ['I-130'], entitlementToken: one.body.entitlementToken, purchaseIntentKey: 'dc-intent-second-1' };
     const r1 = await upgradeCheckout(body);
     assert.equal(r1.statusCode, 200);
+    assert.equal(r1.body.amountCents, 14900, 'I-130 as an additional form is regular $199 less $50');
     const r2 = await upgradeCheckout(body);
     assert.equal(r2.statusCode, 200);
     assert.equal(r2.body.entitlementId, r1.body.entitlementId);
@@ -144,14 +153,14 @@ describe('DEFECT 1 — upgrade purchase-intent retry ordering', () => {
   });
 
   it('cancel-and-reclick with a fresh key after abandonment still replaces, and the stale key then mints fresh', async () => {
-    const ev = await createPaidEvaluation();
+    const ev = await createPaidFormprep();
     const key = 'dc-intent-cancel-1';
-    const body = { sku: SKUS.ONE_FORM, entitlementToken: ev.token, formId: 'I-589', purchaseIntentKey: key };
+    const body = { sku: FORMPREP_SKU, forms: ['I-765'], entitlementToken: ev.token, purchaseIntentKey: key };
     const r1 = await upgradeCheckout(body);
     assert.equal(r1.statusCode, 200);
     // Buyer abandons, then starts again WITHOUT the key: the guard voids
     // the abandoned attempt (replacement behavior, unchanged).
-    const r2 = await upgradeCheckout({ sku: SKUS.ONE_FORM, entitlementToken: ev.token, formId: 'I-589' });
+    const r2 = await upgradeCheckout({ sku: FORMPREP_SKU, forms: ['I-765'], entitlementToken: ev.token });
     assert.equal(r2.statusCode, 200);
     assert.notEqual(r2.body.entitlementId, r1.body.entitlementId);
     assert.equal(entitlementStore.getById(r1.body.entitlementId).state, 'VOID');
@@ -163,33 +172,35 @@ describe('DEFECT 1 — upgrade purchase-intent retry ordering', () => {
   });
 
   it('same intent key with a different purchase shape returns 409 (upgrade variant) and preserves the original', async () => {
-    const ev = await createPaidEvaluation();
+    const ev = await createPaidFormprep();
     const key = 'dc-intent-shape-1';
-    const r1 = await upgradeCheckout({ sku: SKUS.ONE_FORM, entitlementToken: ev.token, formId: 'I-589', purchaseIntentKey: key });
+    const r1 = await upgradeCheckout({ sku: FORMPREP_SKU, forms: ['I-765'], entitlementToken: ev.token, purchaseIntentKey: key });
     assert.equal(r1.statusCode, 200);
-    const r2 = await upgradeCheckout({ sku: SKUS.ONE_FORM, entitlementToken: ev.token, formId: 'I-765', purchaseIntentKey: key });
+    // Same key, different form set (adds I-130): the shape conflict must
+    // 409 before any new session is created.
+    const r2 = await upgradeCheckout({ sku: FORMPREP_SKU, forms: ['I-765', 'I-130'], entitlementToken: ev.token, purchaseIntentKey: key });
     assert.equal(r2.statusCode, 409);
     assert.equal(entitlementStore.getById(r1.body.entitlementId).state, 'RESERVED', '409 path must not void the original');
   });
 
   it('stale upgrade intent (voided original) mints a fresh checkout', async () => {
-    const ev = await createPaidEvaluation();
+    const ev = await createPaidFormprep();
     const key = 'dc-intent-stale-upgrade-1';
-    const r1 = await upgradeCheckout({ sku: SKUS.ONE_FORM, entitlementToken: ev.token, formId: 'I-589', purchaseIntentKey: key });
+    const r1 = await upgradeCheckout({ sku: FORMPREP_SKU, forms: ['I-765'], entitlementToken: ev.token, purchaseIntentKey: key });
     assert.equal(r1.statusCode, 200);
     entitlementStore.void(r1.body.entitlementId, 'test-stale');
-    const r2 = await upgradeCheckout({ sku: SKUS.ONE_FORM, entitlementToken: ev.token, formId: 'I-589', purchaseIntentKey: key });
+    const r2 = await upgradeCheckout({ sku: FORMPREP_SKU, forms: ['I-765'], entitlementToken: ev.token, purchaseIntentKey: key });
     assert.equal(r2.statusCode, 200);
     assert.notEqual(r2.body.entitlementId, r1.body.entitlementId);
     assert.ok(r2.body.entitlementToken);
   });
 
   it('superseded-session scenario: paying the old session grants late; paying the new session becomes a family exception', async () => {
-    const ev = await createPaidEvaluation();
-    const a = await upgradeCheckout({ sku: SKUS.ONE_FORM, entitlementToken: ev.token, formId: 'I-589' });
+    const ev = await createPaidFormprep();
+    const a = await upgradeCheckout({ sku: FORMPREP_SKU, forms: ['I-765'], entitlementToken: ev.token });
     assert.equal(a.statusCode, 200);
     const sessionA = lastSessionId();
-    const b = await upgradeCheckout({ sku: SKUS.ONE_FORM, entitlementToken: ev.token, formId: 'I-589' });
+    const b = await upgradeCheckout({ sku: FORMPREP_SKU, forms: ['I-765'], entitlementToken: ev.token });
     assert.equal(b.statusCode, 200);
     assert.equal(entitlementStore.getById(a.body.entitlementId).state, 'VOID', 'new checkout supersedes the old one');
     const sessionB = lastSessionId();
@@ -206,7 +217,7 @@ describe('DEFECT 1 — upgrade purchase-intent retry ordering', () => {
 describe('DEFECT 2 — expires_at measured against Stripe-call time', () => {
   it('expires_at is at least 30 minutes after the gateway receives the request, with a sane upper bound', async () => {
     const r = mockRes();
-    await checkoutHandler(mockReq({ body: { sku: SKUS.EVALUATION, purchaseIntentKey: 'dc-expires-1' } }), r);
+    await checkoutHandler(mockReq({ body: { sku: READINESS_SKU, form: 'I-589', purchaseIntentKey: 'dc-expires-1' } }), r);
     assert.equal(r.statusCode, 200);
     const call = gatewayCalls[gatewayCalls.length - 1];
     const lifetimeMs = call.expiresAt * 1000 - call.gatewayReceivedAtMs;
@@ -224,7 +235,7 @@ describe('DEFECT 2 — expires_at measured against Stripe-call time', () => {
     let nowMs = Date.now();
     const store = createEntitlementStore(() => nowMs);
     const { entitlement } = store.create({
-      sku: SKUS.ONE_FORM, amountCents: 9895, currency: 'usd',
+      sku: FORMPREP_SKU, amountCents: 24900, currency: 'usd',
       sessionId: 'sess_dc_overhang', ttlMs: 30 * 60 * 1000,
       scope: { kind: 'forms', forms: ['I-589'] },
     });
@@ -240,23 +251,23 @@ describe('DEFECT 2 — expires_at measured against Stripe-call time', () => {
 
 describe('SECTION 3 — superseded-session expiration (mocked gateway)', () => {
   it('a superseded session is expired at Stripe when a newer checkout replaces it', async () => {
-    const ev = await createPaidEvaluation();
+    const ev = await createPaidFormprep();
     const before = expireCalls.length;
-    const a = await upgradeCheckout({ sku: SKUS.ONE_FORM, entitlementToken: ev.token, formId: 'I-589' });
+    const a = await upgradeCheckout({ sku: FORMPREP_SKU, forms: ['I-765'], entitlementToken: ev.token });
     assert.equal(a.statusCode, 200);
     const sessionA = lastSessionId();
-    const b = await upgradeCheckout({ sku: SKUS.ONE_FORM, entitlementToken: ev.token, formId: 'I-589' });
+    const b = await upgradeCheckout({ sku: FORMPREP_SKU, forms: ['I-765'], entitlementToken: ev.token });
     assert.equal(b.statusCode, 200);
     assert.deepEqual(expireCalls.slice(before), [sessionA], 'exactly the superseded session is expired');
   });
 
   it('already-completed session: expiration failure is swallowed; checkout still succeeds and local state stands', async () => {
-    const ev = await createPaidEvaluation();
+    const ev = await createPaidFormprep();
     expireMode = 'throw';
     try {
-      const a = await upgradeCheckout({ sku: SKUS.ONE_FORM, entitlementToken: ev.token, formId: 'I-589' });
+      const a = await upgradeCheckout({ sku: FORMPREP_SKU, forms: ['I-765'], entitlementToken: ev.token });
       assert.equal(a.statusCode, 200);
-      const b = await upgradeCheckout({ sku: SKUS.ONE_FORM, entitlementToken: ev.token, formId: 'I-589' });
+      const b = await upgradeCheckout({ sku: FORMPREP_SKU, forms: ['I-765'], entitlementToken: ev.token });
       assert.equal(b.statusCode, 200, 'expiration failure must not fail the checkout');
       assert.equal(entitlementStore.getById(a.body.entitlementId).state, 'VOID', 'local void stands regardless');
       assert.equal(entitlementStore.getById(b.body.entitlementId).state, 'RESERVED');
@@ -266,13 +277,13 @@ describe('SECTION 3 — superseded-session expiration (mocked gateway)', () => {
   });
 
   it('expiration API failure does not break late payment of the superseded session', async () => {
-    const ev = await createPaidEvaluation();
+    const ev = await createPaidFormprep();
     expireMode = 'throw';
     try {
-      const a = await upgradeCheckout({ sku: SKUS.ONE_FORM, entitlementToken: ev.token, formId: 'I-589' });
+      const a = await upgradeCheckout({ sku: FORMPREP_SKU, forms: ['I-765'], entitlementToken: ev.token });
       assert.equal(a.statusCode, 200);
       const sessionA = lastSessionId();
-      const b = await upgradeCheckout({ sku: SKUS.ONE_FORM, entitlementToken: ev.token, formId: 'I-589' });
+      const b = await upgradeCheckout({ sku: FORMPREP_SKU, forms: ['I-765'], entitlementToken: ev.token });
       assert.equal(b.statusCode, 200);
       const payA = entitlementStore.markPaidBySession(sessionA, `evt_dc_expfail_${a.body.entitlementId}`);
       assert.equal(payA.applied, true, 'failed expiration must not undo late-payment adjudication');
@@ -283,9 +294,9 @@ describe('SECTION 3 — superseded-session expiration (mocked gateway)', () => {
   });
 
   it('the retried original is never expired', async () => {
-    const ev = await createPaidEvaluation();
+    const ev = await createPaidFormprep();
     const before = expireCalls.length;
-    const body = { sku: SKUS.ONE_FORM, entitlementToken: ev.token, formId: 'I-589', purchaseIntentKey: 'dc-intent-noexpire-1' };
+    const body = { sku: FORMPREP_SKU, forms: ['I-765'], entitlementToken: ev.token, purchaseIntentKey: 'dc-intent-noexpire-1' };
     const r1 = await upgradeCheckout(body);
     assert.equal(r1.statusCode, 200);
     const session1 = lastSessionId();

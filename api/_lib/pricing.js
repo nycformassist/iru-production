@@ -1,18 +1,32 @@
 /**
- * lib/pricing.js — B2C pricing & entitlement structure (owner-set;
- * bundle and add-on repriced per the 2026-10-29 owner ruling: bundle
- * $149.95, add-on $50.00). Pure data + pure functions; imported by BOTH
- * the server (checkout enforcement) and the client (offer display) so
- * the amounts a consumer sees are the amounts the server charges.
+ * lib/pricing.js — B2C pricing & entitlement structure.
  *
- * TEST MODE ONLY. These amounts describe the intended commercial
+ * RETIRED (owner decision 2026-11-05, FINAL): the $1 evaluation fee is
+ * retired from the IRU consumer checkout. All four SKUs below
+ * (evaluation, one-form, bundle, second-form) are RETIRED — no longer
+ * purchasable. They are kept ONLY as a historical record (amounts,
+ * names, scopes preserved exactly as sold) and so already-paid
+ * entitlements can still be verified (entitlement-status, limited
+ * evaluation for paid holders). New purchases of these SKUs are
+ * refused by api/checkout.js with HTTP 410 'evaluation-retired'.
+ *
+ * The live consumer model is now: Readiness $99.95 (api/_lib/
+ * checkout-pricing.js priceReadiness) and preparation via
+ * api/_lib/checkout-pricing.js pricePurchase (levels $149/$199/$249,
+ * I-589+I-765 bundle $349, additional form regular − $50). Do NOT
+ * carry forward the $1 credit, the $30 add-on, or the $129.95 bundle.
+ *
+ * Pure data + pure functions; imported by BOTH the server (checkout
+ * enforcement) and the client (offer display) so the amounts a
+ * consumer sees are the amounts the server charges.
+ *
+ * TEST MODE ONLY. These amounts describe the historical commercial
  * structure the owner directed us to implement and test. Nothing here
  * activates a live charge, and no Stripe product/price is created or
- * modified by this module — checkout amounts are enforced server-side
- * at session creation from this table, never taken from the client.
+ * modified by this module.
  *
- * Structure:
- * - Limited evaluation: $1.00 one-time. Grants ONLY the limited
+ * Historical structure (for the record only):
+ * - Limited evaluation: $1.00 one-time. Granted ONLY the limited
  *   evaluation. Credited toward either complete purchase.
  * - One-form Complete Preparation: $99.95 TOTAL (incl. the $1) for ONE
  *   selected form (I-589 XOR I-765). Upgrade charge after evaluation:
@@ -40,6 +54,7 @@ export const SKUS = {
 export const PRICING = {
   evaluation: {
     sku: SKUS.EVALUATION,
+    retired: true,
     chargeCents: 100,
     totalCents: 100,
     creditedCents: 0,
@@ -48,6 +63,7 @@ export const PRICING = {
   },
   oneForm: {
     sku: SKUS.ONE_FORM,
+    retired: true,
     // Charged at upgrade time, after the $1 evaluation credit.
     chargeCents: 9895,
     totalCents: 9995,
@@ -57,6 +73,7 @@ export const PRICING = {
   },
   bundle: {
     sku: SKUS.BUNDLE,
+    retired: true,
     chargeCents: 14895,
     totalCents: 14995,
     creditedCents: 100,
@@ -67,6 +84,7 @@ export const PRICING = {
   },
   secondForm: {
     sku: SKUS.SECOND_FORM,
+    retired: true,
     chargeCents: 5000,
     totalCents: 14995, // $99.95 already paid + $50.00
     creditedCents: 0,
@@ -203,6 +221,10 @@ function offerStrings(lang) {
  * The offer exactly as it must be shown BEFORE the initial payment:
  * both complete-purchase options, their scope, and their TOTAL prices,
  * alongside the $1 evaluation entry. Pure function of PRICING.
+ *
+ * RETIRED (owner decision 2026-11-05): every entry carries
+ * `retired: true` and the offer itself is retired — these prices are
+ * a historical record only and are no longer purchasable.
  */
 export function buildOffer(lang = 'EN') {
   const s = offerStrings(lang);
@@ -210,8 +232,10 @@ export function buildOffer(lang = 'EN') {
   const scopes = s.scopes || {};
   return {
     currency: 'usd',
+    retired: true,
     evaluation: {
       sku: PRICING.evaluation.sku,
+      retired: true,
       price: formatCents(PRICING.evaluation.chargeCents),
       chargeCents: PRICING.evaluation.chargeCents,
       creditedToward: s.creditedToward,
@@ -221,6 +245,7 @@ export function buildOffer(lang = 'EN') {
     options: [
       {
         sku: PRICING.oneForm.sku,
+        retired: true,
         kind: 'one-form',
         totalPrice: formatCents(PRICING.oneForm.totalCents),
         totalCents: PRICING.oneForm.totalCents,
@@ -232,6 +257,7 @@ export function buildOffer(lang = 'EN') {
       },
       {
         sku: PRICING.bundle.sku,
+        retired: true,
         kind: 'bundle',
         totalPrice: formatCents(PRICING.bundle.totalCents),
         totalCents: PRICING.bundle.totalCents,
@@ -245,6 +271,7 @@ export function buildOffer(lang = 'EN') {
     ],
     secondFormAddon: {
       sku: PRICING.secondForm.sku,
+      retired: true,
       price: formatCents(PRICING.secondForm.chargeCents),
       chargeCents: PRICING.secondForm.chargeCents,
       resultingTotal: formatCents(PRICING.secondForm.totalCents),
@@ -255,7 +282,9 @@ export function buildOffer(lang = 'EN') {
   };
 }
 
-/** Resolve a purchasable SKU to its pricing row. Null for unknown SKUs. */
+/** Resolve a SKU to its pricing row (retired rows included, for
+ *  historical verification of already-paid entitlements). Null for
+ *  unknown SKUs. */
 export function pricingForSku(sku) {
   for (const row of Object.values(PRICING)) {
     if (row.sku === sku) return row;

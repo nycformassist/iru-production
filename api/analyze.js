@@ -78,7 +78,7 @@ const MAX_ATTEMPTS = 2;
 const RETRY_DELAY_MS = 400;
 const PERMANENT_STATUSES = new Set(['400', '401', '403', '404']);
 
-export default async function handler(req, res) {
+export default async function handler(req, res, store = entitlementStore) {
   const startTime = Date.now();
   const requestId = Math.random().toString(36).slice(2, 8);
   if (req.method !== "POST") {
@@ -215,6 +215,42 @@ export default async function handler(req, res) {
     }
     console.log(`[iru] limited evaluation delivered (paywall=${paywallOn})`);
     return res.status(200).json({ ok: true, mode: 'limited', evaluation });
+  }
+
+  // ── Full-assessment gate (owner directive 2026-11-05, corrected):
+  // the full (non-limited) assessment IS the readiness deliverable,
+  // so when the paywall is on it requires a READINESS entitlement
+  // only — a preparation ('forms') entitlement must NOT unlock it
+  // (readiness ≠ prep is an explicit owner rule). The client sends
+  // the token in the x-entitlement-token header and the form in
+  // body.formId. If the body carries no formId (the old assessment
+  // flow predates per-form routing), any paid 'readiness' entitlement
+  // is accepted scope-agnostically. No consumption: the assessment
+  // may be re-run while entitled. Paywall off → unchanged behavior.
+  if (process.env.PAYWALL_ENABLED === 'true') {
+    const fullToken = (req.headers && req.headers['x-entitlement-token'])
+      || (rawBody && typeof rawBody === 'object' && typeof rawBody.entitlementToken === 'string' ? rawBody.entitlementToken : '')
+      || '';
+    const fullFormId = rawBody && typeof rawBody === 'object' ? rawBody.formId : undefined;
+    let fullPeek;
+    if (typeof fullFormId === 'string' && fullFormId) {
+      fullPeek = store.peekForReadiness(fullToken, fullFormId);
+    } else {
+      const base = store.peekByToken(fullToken);
+      if (!base.ok) {
+        fullPeek = base;
+      } else if (base.entitlement.scope && base.entitlement.scope.kind === 'readiness') {
+        fullPeek = { ok: true, entitlement: base.entitlement };
+      } else {
+        fullPeek = { ok: false, reason: 'scope-mismatch' };
+      }
+    }
+    if (!fullPeek.ok) {
+      return res.status(402).json({
+        error: 'A paid readiness entitlement is required to run the full assessment.',
+        reason: fullPeek.reason,
+      });
+    }
   }
 
   const prompt = buildPrompt(min, lang, gaps, validatedReviews.reviews, documentFacts);

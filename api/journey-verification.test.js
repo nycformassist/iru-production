@@ -63,6 +63,7 @@ import { getFormEntry } from './_lib/forms/registry.js';
 import { createNarrative, addNarrativeEvent } from './_lib/narrative.js';
 import { signStripePayload } from './_lib/stripewebhook.js';
 import { SKUS } from './_lib/pricing.js';
+import { entitlementStore } from './_lib/entitlement.js';
 
 const { resolveResourcesForLocation } = await import('../src/resources.ts');
 
@@ -497,7 +498,16 @@ describe('P4 journey — ES, conflicting document evidence', () => {
 // ===========================================================================
 // P5 — EN, evaluation → upgrade entitlement journey (paywall ON, one test)
 // ===========================================================================
-describe('P5 journey — EN, $1 evaluation → one-form upgrade → add-on', () => {
+// ===========================================================================
+// P5 — EN, historical $1 evaluation + the current purchase model
+// (Rewritten 2026-11-05: the $1 evaluation is RETIRED — no new evaluation
+// purchases. Two legs: (a) a historical evaluation entitlement, created
+// directly in the store as a record of a real past purchase, still
+// delivers its limited evaluation once; (b) the current model: formprep
+// I-589 ($249) generates, I-765 is refused 402, a $100 bundle-remainder
+// add-on covers I-765, and both forms generate. Chain total $349.)
+// ===========================================================================
+describe('P5 journey — EN, historical evaluation + formprep purchase → add-on', () => {
   let evt = 0;
   async function paySession(entitlementId) {
     const payload = JSON.stringify({
@@ -536,7 +546,7 @@ describe('P5 journey — EN, $1 evaluation → one-form upgrade → add-on', () 
     // Payment-hardening gate: paid handlers require an explicit store backend.
     process.env.IRU_STORE_BACKEND = 'memory';
     process.env.IRU_ALLOW_EPHEMERAL_STORE = 'true';
-    process.env.STRIPE_WEBHOOK_SECRET = 'whsec_test_local';
+process.env.STRIPE_WEBHOOK_SECRET = 'whsec_test_local';
     globalThis.__IRU_STRIPE_GATEWAY__ = {
       async createCheckoutSession({ entitlementId }) {
         return { id: `sess_${entitlementId}`, url: 'https://checkout.stripe.test/pay' };
@@ -548,7 +558,7 @@ describe('P5 journey — EN, $1 evaluation → one-form upgrade → add-on', () 
     delete process.env.PAYWALL_ENABLED;
   });
 
-  it('the full sequence in one journey: $1 evaluation delivered → I-589 upgrade generates, I-765 refused 402 → $50 add-on → I-765 generates; chain totals $149.95', async () => {
+  it('the full sequence in one journey: historical $1 evaluation still delivers once → I-589 prep generates, I-765 refused 402 → $100 bundle-remainder add-on → I-765 generates; chain totals $349', async () => {
     process.env.PAYWALL_ENABLED = 'true';
     try {
       const record = makeRecord({
@@ -562,13 +572,21 @@ describe('P5 journey — EN, $1 evaluation → one-form upgrade → add-on', () 
         application_reason: 'initial',
       });
 
-      // Step 1: $1 evaluation purchase (mocked gateway, signed webhook).
-      const evaluation = await buyAndPay({ sku: SKUS.EVALUATION }, '10.21.5.1');
-      assert.equal(evaluation.checkout.amountCents, 100);
-      assert.deepEqual(evaluation.checkout.scope, { kind: 'evaluation' });
+      // Step 1: a HISTORICAL $1 evaluation entitlement — created directly
+      // in the store as the record of a real past purchase (new evaluation
+      // purchases are retired: checkout returns 410). Existing holders
+      // keep what they bought.
+      const { entitlement: evalEnt, token: evalToken } = entitlementStore.create({
+        sku: SKUS.EVALUATION, amountCents: 100, sessionId: 'sess_journey_eval_hist',
+        scope: { kind: 'evaluation' },
+      });
+      const evalPaid = entitlementStore.markPaidBySession('sess_journey_eval_hist', 'evt_journey_eval_hist');
+      assert.equal(evalPaid.applied, true);
+      assert.equal(evalPaid.entitlement.id, evalEnt.id);
+      const evaluation = { token: evalToken, id: evalEnt.id };
 
-      // Step 2: the paid evaluation is delivered through /api/analyze
-      // (mode 'limited', paywall on) and consumed exactly once.
+      // Step 2: the paid historical evaluation is delivered through
+      // /api/analyze (mode 'limited', paywall on) and consumed exactly once.
       const evalRes = jsonRes();
       await analyzeHandler(mockReq('10.21.5.2', {
         mode: 'limited', answers: baseAnswers(), lang: 'EN', entitlementToken: evaluation.token,
@@ -576,11 +594,11 @@ describe('P5 journey — EN, $1 evaluation → one-form upgrade → add-on', () 
       assert.equal(evalRes.statusCode, 200, JSON.stringify(evalRes.body));
       assert.equal(evalRes.body.evaluation.kind, 'limited-evaluation');
 
-      // Step 3: one-form upgrade for I-589 ($98.95 after the $1 credit).
-      const oneForm = await buyAndPay(
-        { sku: SKUS.ONE_FORM, formId: 'I-589', entitlementToken: evaluation.token }, '10.21.5.3');
-      assert.equal(oneForm.checkout.amountCents, 9895);
-      assert.equal(oneForm.checkout.totalCents, 9995);
+      // Step 3: form preparation for I-589 ($249, L3) — no evaluation
+      // prerequisite in the current model.
+      const oneForm = await buyAndPay({ sku: 'iru-formprep', forms: ['I-589'] }, '10.21.5.3');
+      assert.equal(oneForm.checkout.amountCents, 24900);
+      assert.equal(oneForm.checkout.totalCents, 24900);
       assert.deepEqual(oneForm.checkout.scope, { kind: 'forms', forms: ['I-589'] });
 
       // Step 4: the OTHER form is refused while the paywall is on —
@@ -603,11 +621,12 @@ describe('P5 journey — EN, $1 evaluation → one-form upgrade → add-on', () 
       assert.equal(refusedAfter.statusCode, 402);
       assert.equal(refusedAfter.body.reason, 'state-CONSUMED');
 
-      // Step 6: second-form add-on ($50.00) covers exactly the other form.
-      const addon = await buyAndPay({ sku: SKUS.SECOND_FORM, entitlementToken: oneForm.token }, '10.21.5.6');
-      assert.equal(addon.checkout.amountCents, 5000);
+      // Step 6: add I-765 under the paid I-589 token — the pair completes
+      // the $349 bundle, so the add-on is the $100 remainder.
+      const addon = await buyAndPay({ sku: 'iru-formprep', forms: ['I-765'], entitlementToken: oneForm.token }, '10.21.5.6');
+      assert.equal(addon.checkout.amountCents, 10000);
       assert.deepEqual(addon.checkout.scope, { kind: 'forms', forms: ['I-765'] });
-      assert.equal(addon.checkout.totalCents, 14995);
+      assert.equal(addon.checkout.totalCents, 10000);
 
       // Step 7: both forms have now generated end-to-end.
       const gen765 = await generateViaHandler('I-765', addon.token, record, '10.21.5.7');
@@ -616,10 +635,10 @@ describe('P5 journey — EN, $1 evaluation → one-form upgrade → add-on', () 
       assert.equal(await fieldText(bytes765, F765.family), 'Ellis', 'I-765 draft carries the persona name');
       assert.equal(await fieldText(bytes765, F765.dob), '05/17/1990');
 
-      // The paid chain is exactly $149.95 — never two forms for $99.95.
+      // The paid chain is exactly $349 — the fixed bundle price.
       assert.equal(
-        evaluation.checkout.amountCents + oneForm.checkout.amountCents + addon.checkout.amountCents,
-        14995);
+        oneForm.checkout.amountCents + addon.checkout.amountCents,
+        34900);
     } finally {
       delete process.env.PAYWALL_ENABLED;
     }

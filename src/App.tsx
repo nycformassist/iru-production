@@ -81,7 +81,17 @@ import {
 } from './sharedFileStore';
 
 import { LANGUAGES, UI_LABELS, PHASE_1_QUESTIONS, TRIAGE_QUESTION, PHASE_2_QUESTIONS, PHASE_3_QUESTIONS, NYC_RESOURCES, CONSULATES, PROXIES, NARRATIVE_STARTERS, USCIS_FORMS, FEE_SCHEDULE_AS_OF, buildExecutiveSummary } from './constants';
-import { EntryScreen, GuideFlow, PackageSelect, EvalIntake, EvalReport, RecoverFlow, pt as ppt, suggestForms, getStoredToken, setStoredToken, getEvalToken, setEvalToken, getFormTokens, setFormToken } from './paywall';
+import Tier1Flow from './Tier1Flow';
+import Tier1FlowWrapper from './Tier1FlowWrapper';
+import PathwayGuidance from './components/PathwayGuidance';
+import PathwayCheckoutSummary from './components/PathwayCheckoutSummary';
+import { FORMS, getActiveCatalog } from '../api/_lib/catalog.js';
+import { pricePurchase, priceReadiness, regularPriceCents, FORMPREP_SKU, READINESS_SKU, READINESS_FORMS } from '../api/_lib/checkout-pricing.js';
+import { N400_QUESTIONS, N400_STEPS, N400_FORM_INFO } from './n400-questions';
+import { I130_QUESTIONS, I130_STEPS, I130_FORM_INFO } from './i130-questions';
+import { I485_QUESTIONS, I485_STEPS, I485_FORM_INFO } from './i485-questions';
+import { I90_QUESTIONS, I90_STEPS, I90_FORM_INFO } from './i90-questions';
+import { EntryScreen, GuideFlow, PackageSelect, EvalIntake, EvalReport, RecoverFlow, pt as ppt, suggestForms, getStoredToken, setStoredToken, getEvalToken, setEvalToken, getFormTokens, setFormToken, getReadinessTokens, setReadinessToken } from './paywall';
 
 // Nationwide layered resource model (local → statewide → national → fallback).
 import { resolveResources, resolveResourcesForLocation, ResourceResult, ResourceOrg, localizedResourceText, localizedNationalDescription } from './resources';
@@ -92,6 +102,17 @@ import { COUNTRIES, isUsCountry, localizedCountryName, countryDisplayName } from
 // Canonical fact record (directive §4) — one shared model for answers,
 // document extraction, corrections, the packet, and form preparation.
 import { createFactRecord, upsertFact, confirmFact, resolveConflict, overlayConsumerState, markOutputsFresh } from '../api/_lib/facts.js';
+import { RepeatingGroup, RepeatingField, RepeatingEntry } from './RepeatingGroup';
+import {
+  getGroupEntries as getGroupEntriesAdapter,
+  getChildEntries as getChildEntriesAdapter,
+  handleGroupAdd as handleGroupAddAdapter,
+  handleGroupUpdate as handleGroupUpdateAdapter,
+  handleGroupDelete as handleGroupDeleteAdapter,
+  handleChildAdd as handleChildAddAdapter,
+  handleChildUpdate as handleChildUpdateAdapter,
+  handleChildDelete as handleChildDeleteAdapter,
+} from './repeatingAdapters';
 // Form engine (directive §7): registry + mapper run client-side for the
 // review UI; the PDF itself is generated server-side from the same record.
 import { FORM_REGISTRY, getFormEntry, localizedApplicability } from '../api/_lib/forms/registry.js';
@@ -107,10 +128,10 @@ import { selectForm, summaryForSelection, emptyFormDraftStore, recordDraft, draf
 // to at generation.
 import { computeDraftSnapshotHash, draftFreshness, affectedFormsForMutation } from '../api/_lib/draftIntegrity.js';
 
-// B2C pricing + next steps (2026-10-21 directive): the SAME modules the
-// server enforces with, so what the consumer is shown is what the
-// server charges and what every output must contain.
-import { PRICING, SKUS, buildOffer, formatCents } from '../api/_lib/pricing.js';
+// B2C pricing display (formatCents only — the retired $1-era pricing
+// table in api/_lib/pricing.js is no longer offered; amounts come from
+// api/_lib/checkout-pricing.js, the same module the server enforces).
+import { formatCents } from '../api/_lib/pricing.js';
 import { NEXT_STEPS_TITLE, PROFESSIONAL_HELP_POINTS, RESOURCE_SEARCH_PATHS, buildPacketNextSteps as buildPacketNextStepsForLang } from '../api/_lib/nextsteps.js';
 
 const PAYWALL_UI_ON = () => {
@@ -118,17 +139,40 @@ const PAYWALL_UI_ON = () => {
   catch { return false; }
 };
 
-/** Form-entitlement tokens by form id (test-mode purchases, this browser only). */
-function loadFormTokens(): Record<string, string> {
-  try { return JSON.parse(sessionStorage.getItem('iru_form_tokens') || '{}'); } catch { return {}; }
+// Form-entitlement tokens live in localStorage (paywall.tsx helpers:
+// getFormTokens/setFormToken, getReadinessTokens/setReadinessToken).
+// NOTE (2026-11-05, Gap 7 fix): an earlier copy of these helpers read
+// sessionStorage while checkout wrote localStorage, so paid tokens were
+// invisible to every reader. There is exactly one token store now:
+// localStorage via paywall.tsx. Do not reintroduce a second store.
+
+/**
+ * Pending Pathway checkout record (localStorage, this browser only).
+ * Written just before redirecting to Stripe for a formprep purchase;
+ * read on the ?checkout=success return to resume the EXACT case
+ * position. It names the case (clientKey), the purchased forms, the
+ * entitlement, and the selected form — nothing sensitive, and the
+ * server re-verifies payment before any routing trusts it.
+ */
+export interface PendingPathwayCheckout {
+  clientKey: string;
+  forms: string[];
+  entitlementId: string;
+  selectedFormKey: string;
 }
-function saveFormToken(formId: string, token: string) {
+const PENDING_PATHWAY_KEY = 'iru_pending_pathway_checkout';
+function readPendingPathwayCheckout(): PendingPathwayCheckout | null {
   try {
-    const map = loadFormTokens();
-    map[formId] = token;
-    sessionStorage.setItem('iru_form_tokens', JSON.stringify(map));
-    sessionStorage.setItem('iru_entitlement_token', token);
-  } catch { /* storage unavailable — generation will ask again */ }
+    const raw = localStorage.getItem(PENDING_PATHWAY_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed.clientKey !== 'string' || !Array.isArray(parsed.forms)
+      || typeof parsed.entitlementId !== 'string' || typeof parsed.selectedFormKey !== 'string') return null;
+    return parsed as PendingPathwayCheckout;
+  } catch { return null; }
+}
+function clearPendingPathwayCheckout() {
+  try { localStorage.removeItem(PENDING_PATHWAY_KEY); } catch { /* ignore */ }
 }
 
 // Evidence intelligence (server-side source of truth, pure module — no
@@ -206,13 +250,103 @@ export function persistLang(code: string) {
   try { localStorage.setItem(LANG_STORAGE_KEY, code); } catch { /* storage unavailable */ }
 }
 
+// ---------------------------------------------------------------------------
+// PHASE3 Repeating Groups (4c) — Field configurations
+//
+// These feed into the canonical factRecord, which is consumed by
+// /api/generate-form (server-side, paywall-verified via /api/verify-session).
+// ---------------------------------------------------------------------------
+
+const ENTRY_HISTORY_FIELDS: RepeatingField[] = [
+  { id: 'entry_date', label: 'Date of entry', type: 'date', required: true },
+  { id: 'entry_place', label: 'Place of entry (city)', type: 'text', required: false },
+  { id: 'entry_manner', label: 'Manner of entry', type: 'text', required: false },
+  { id: 'entry_status', label: 'Immigration status at entry', type: 'text', required: false },
+];
+
+const LAST_ADDRESS_FIELDS: RepeatingField[] = [
+  { id: 'street', label: 'Street address', type: 'text', required: true },
+  { id: 'city', label: 'City', type: 'text', required: true },
+  { id: 'region', label: 'State/Province', type: 'text', required: false },
+  { id: 'country', label: 'Country', type: 'text', required: true },
+  { id: 'from_date', label: 'From date', type: 'date', required: false },
+  { id: 'to_date', label: 'To date', type: 'date', required: false },
+];
+
+const CHILD_FIELDS: RepeatingField[] = [
+  { id: 'family_name', label: 'Family name', type: 'text', required: true },
+  { id: 'given_name', label: 'Given name', type: 'text', required: true },
+  { id: 'middle_name', label: 'Middle name', type: 'text', required: false },
+  { id: 'date_of_birth', label: 'Date of birth', type: 'date', required: false },
+  { id: 'country_of_birth', label: 'Country of birth', type: 'text', required: false },
+  { id: 'citizenship', label: 'Citizenship', type: 'text', required: false },
+];
+
+const RESIDENCES_FIELDS: RepeatingField[] = [
+  { id: 'street', label: 'Street address', type: 'text', required: true },
+  { id: 'city', label: 'City', type: 'text', required: true },
+  { id: 'region', label: 'State/Province', type: 'text', required: false },
+  { id: 'country', label: 'Country', type: 'text', required: true },
+  { id: 'from_date', label: 'From date', type: 'date', required: false },
+  { id: 'to_date', label: 'To date', type: 'date', required: false },
+];
+
+const EDUCATION_FIELDS: RepeatingField[] = [
+  { id: 'school_name', label: 'School name', type: 'text', required: true },
+  { id: 'school_city', label: 'City', type: 'text', required: false },
+  { id: 'school_country', label: 'Country', type: 'text', required: false },
+  { id: 'degree', label: 'Degree/diploma', type: 'text', required: false },
+  { id: 'field_of_study', label: 'Field of study', type: 'text', required: false },
+];
+
+const EMPLOYMENT_FIELDS: RepeatingField[] = [
+  { id: 'employer_name', label: 'Employer name', type: 'text', required: true },
+  { id: 'occupation', label: 'Your occupation', type: 'text', required: false },
+  { id: 'employer_city', label: 'City', type: 'text', required: false },
+  { id: 'employer_country', label: 'Country', type: 'text', required: false },
+];
+
+const FAMILY_FIELDS: RepeatingField[] = [
+  { id: 'family_name', label: 'Family name', type: 'text', required: true },
+  { id: 'given_name', label: 'Given name', type: 'text', required: false },
+  { id: 'relationship', label: 'Relationship (mother/father/brother/sister)', type: 'text', required: true },
+  { id: 'city', label: 'City where they live', type: 'text', required: false },
+  { id: 'country', label: 'Country where they live', type: 'text', required: false },
+];
+
+const SUPPLEMENT_B_FIELDS: RepeatingField[] = [
+  { id: 'continuation_text_1', label: 'Additional information (1)', type: 'text', required: false },
+  { id: 'continuation_text_2', label: 'Additional information (2)', type: 'text', required: false },
+  { id: 'continuation_text_3', label: 'Additional information (3)', type: 'text', required: false },
+];
+
 export default function App() {
   const [lang, setLang] = useState(() => loadPersistedLang());
 
   // Write on every language change (WS2). A failed analyze/checkout request
   // never touches lang, so it cannot reset the persisted choice.
   useEffect(() => { persistLang(lang); }, [lang]);
-  const [stage, setStage] = useState<'LANG' | 'PHASE1' | 'TRIAGE' | 'PHASE2' | 'PHASE3' | 'PHASE4' | 'PHOTO' | 'ANALYZING' | 'PACKET' | 'ENTRY' | 'GUIDE' | 'PACKAGES' | 'EVAL_INTAKE' | 'EVAL_REPORT' | 'RECOVER'>(() => PAYWALL_UI_ON() ? 'ENTRY' : 'LANG');
+  const [stage, setStage] = useState<'LANG' | 'DASHBOARD' | 'TIER1' | 'PATHWAY' | 'PHASE1' | 'TRIAGE' | 'PHASE2' | 'PHASE3' | 'PHASE4' | 'PHOTO' | 'ANALYZING' | 'PACKET' | 'ENTRY' | 'GUIDE' | 'PACKAGES' | 'EVAL_INTAKE' | 'EVAL_REPORT' | 'RECOVER'>(() => PAYWALL_UI_ON() ? 'ENTRY' : 'LANG');
+  // Mirrors the current stage for async callbacks (e.g. the Stripe-return
+  // verification below): a late resolution must not yank the visitor
+  // back after they have already navigated elsewhere.
+  const stageRef = useRef(stage);
+  useEffect(() => { stageRef.current = stage; }, [stage]);
+  const [resumeToken, setResumeToken] = useState('');
+  const [resumeError, setResumeError] = useState('');
+  const [tier1Form, setTier1Form] = useState<'n400' | 'i130' | 'i485' | 'i90' | 'i589' | 'i765' | null>(null);
+  // Pathway Add → checkout review state. Set when the customer clicks
+  // "Add <form>" on the Pathway panel; the PATHWAY stage then shows the
+  // checkout summary (lines, discount/bundle, total) instead of the
+  // guidance panel. Null = no purchase in progress.
+  const [pathwayCheckout, setPathwayCheckout] = useState<{
+    selectedForm: string; // form code, e.g. 'I-765'
+    selectedFormKey: string; // tier1 key, e.g. 'i765'
+    addedForm: string;
+    pricing: { lines: { form: string; regularCents: number; discountCents: number; finalCents: number; kind: string }[]; totalCents: number; bundleApplied: boolean; bundleSavingCents: number };
+  } | null>(null);
+  const [pathwayCheckoutBusy, setPathwayCheckoutBusy] = useState(false);
+  const [pathwayCheckoutError, setPathwayCheckoutError] = useState<string | null>(null);
   // Stripe return: after checkout, Stripe redirects to
   // /?checkout=success&session_id=cs_xxx. Verify the session server-side
   // (authoritative — Stripe is the source of truth) and route to the
@@ -223,11 +357,15 @@ export default function App() {
     if (!PAYWALL_UI_ON()) return;
     const params = new URLSearchParams(window.location.search);
     if (params.get('checkout') !== 'success') return;
+    // Routing below only fires while the visitor is still on ENTRY: a
+    // verification that resolves AFTER they navigated elsewhere must not
+    // yank them back (race found by the paid-journey browser spec).
+    const routeIfStillEntry = (s: string) => { if (stageRef.current === 'ENTRY') setStage(s as any); };
     const sessionId = params.get('session_id');
     if (!sessionId) {
       // No session ID — can't verify. Back to entry.
       window.history.replaceState({}, '', window.location.pathname);
-      setStage('ENTRY' as any);
+      routeIfStillEntry('ENTRY');
       return;
     }
     // Clean the URL immediately.
@@ -242,20 +380,81 @@ export default function App() {
         if (!r.ok || !d || !d.ok || !d.paid) {
           // Verification failed — back to entry. The user can use
           // "recover access" if they have their token.
-          setStage('ENTRY' as any);
+          routeIfStillEntry('ENTRY');
           return;
         }
         const ent = d.entitlement;
+        // Pathway formprep return: the pending record names the case
+        // (clientKey) and the selected form. A verified payment for
+        // that entitlement resumes the EXACT case position — straight
+        // into the selected form's questionnaire, answers intact
+        // (they live under the clientKey in assessment storage).
+        // The pending forms must be a SUBSET of the entitlement scope:
+        // a payment for one form never resumes a two-form purchase.
+        const pending = readPendingPathwayCheckout();
+        if (pending && ent && ent.id === pending.entitlementId
+          && ent.scope && ent.scope.kind === 'forms'
+          && Array.isArray(ent.scope.forms)
+          && pending.forms.every((f: string) => ent.scope.forms.includes(f))) {
+          clearPendingPathwayCheckout();
+          setTier1Form(pending.selectedFormKey as any);
+          routeIfStillEntry('TIER1');
+          return;
+        }
+        // Route by verified scope — never by payment alone. A readiness
+        // purchase enters the readiness assessment flow; a preparation
+        // purchase without a pending record enters form selection; a
+        // historical $1 evaluation enters its intake; anything else
+        // paid but unrecognized goes back to entry.
         if (ent && ent.scope && ent.scope.kind === 'evaluation') {
-          setStage('EVAL_INTAKE' as any);
-        } else if (ent && ent.paid) {
-          setStage('LANG' as any);
+          routeIfStillEntry('EVAL_INTAKE');
+        } else if (ent && ent.scope && ent.scope.kind === 'readiness') {
+          routeIfStillEntry('LANG');
+        } else if (ent && ent.paid && (!ent.scope || ent.scope.kind === 'forms')) {
+          routeIfStillEntry('DASHBOARD');
         } else {
-          setStage('ENTRY' as any);
+          routeIfStillEntry('ENTRY');
         }
       } catch {
-        setStage('ENTRY' as any);
+        routeIfStillEntry('ENTRY');
       }
+    })();
+  }, []);
+  // Pathway return when the paywall UI is OFF (the dashboard/Tier 1
+  // flow): same verification, same exact-position resume. The
+  // paywall-gated effect above returns early in this mode, so there is
+  // no double handling.
+  useEffect(() => {
+    if (PAYWALL_UI_ON()) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('checkout') !== 'success') return;
+    // Same no-yank rule as the paywall-ON return above: only resume
+    // into the questionnaire while the visitor is still on the entry
+    // stage they landed on.
+    const routeIfStillEntry = (s: string) => { if (stageRef.current === 'ENTRY' || stageRef.current === 'LANG' || stageRef.current === 'DASHBOARD') setStage(s as any); };
+    const sessionId = params.get('session_id');
+    const pending = readPendingPathwayCheckout();
+    if (!sessionId || !pending) return;
+    window.history.replaceState({}, '', window.location.pathname);
+    (async () => {
+      try {
+        const r = await fetch('/api/verify-session', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId }),
+        });
+        const d = await r.json().catch(() => null);
+        const ent = d && d.entitlement;
+        if (r.ok && d && d.ok && d.paid && ent && ent.id === pending.entitlementId
+          && ent.scope && ent.scope.kind === 'forms'
+          && Array.isArray(ent.scope.forms)
+          && pending.forms.every((f: string) => ent.scope.forms.includes(f))) {
+          clearPendingPathwayCheckout();
+          setTier1Form(pending.selectedFormKey as any);
+          routeIfStillEntry('TIER1');
+        }
+        // Unverified: leave the pending record in place (the buyer may
+        // still complete payment) and stay on the dashboard.
+      } catch { /* best-effort: stay on the dashboard */ }
     })();
   }, []);
   // Paywall journey data (carried between ENTRY/GUIDE/PACKAGES/EVAL stages).
@@ -323,6 +522,49 @@ export default function App() {
   const photoInputRef = useRef<HTMLInputElement | null>(null);
   // Canonical fact record + form preparation (directives §4/§7/§8).
   const [factRecord, setFactRecord] = useState<any>(null);
+  // PHASE3 repeating groups (4c): entry history, last address, children, residences,
+  // education, employment, parents/siblings, supplement B.
+  // Tracks which repeating step we're on: null = regular questions, otherwise group key.
+  const [repeatingStep, setRepeatingStep] = useState<'entries' | 'last_address' | 'children' | 'residences' | 'education' | 'employment' | 'family' | 'supplement_b' | null>(null);
+
+  // --- Repeating group adapters (4c) ---
+  // These delegate to src/repeatingAdapters.ts — the exact functions tested
+  // by the applicant-workflow test. App.tsx uses them directly; no duplication.
+  const getGroupEntries = (groupId: string): RepeatingEntry[] =>
+    getGroupEntriesAdapter(factRecord, groupId);
+
+  const getChildEntries = (): RepeatingEntry[] =>
+    getChildEntriesAdapter(factRecord);
+
+  const handleGroupAdd = (groupId: string, entry: RepeatingEntry) => {
+    const next = handleGroupAddAdapter(factRecord, groupId, entry);
+    if (next !== factRecord) setFactRecord(next);
+  };
+
+  const handleGroupUpdate = (groupId: string, entryId: string, entry: RepeatingEntry) => {
+    const next = handleGroupUpdateAdapter(factRecord, groupId, entryId, entry);
+    if (next !== factRecord) setFactRecord(next);
+  };
+
+  const handleGroupDelete = (groupId: string, entryId: string) => {
+    const next = handleGroupDeleteAdapter(factRecord, groupId, entryId);
+    if (next !== factRecord) setFactRecord(next);
+  };
+
+  const handleChildAdd = (entry: RepeatingEntry) => {
+    const next = handleChildAddAdapter(factRecord, entry);
+    if (next !== factRecord) setFactRecord(next);
+  };
+
+  const handleChildUpdate = (entryId: string, entry: RepeatingEntry) => {
+    const next = handleChildUpdateAdapter(factRecord, entryId, entry);
+    if (next !== factRecord) setFactRecord(next);
+  };
+
+  const handleChildDelete = (entryId: string) => {
+    const next = handleChildDeleteAdapter(factRecord, entryId);
+    if (next !== factRecord) setFactRecord(next);
+  };
   const [narrativeError, setNarrativeError] = useState('');
   const [narrativeDates, setNarrativeDates] = useState<Record<string, string>>({});
   const [selectedFormId, setSelectedFormId] = useState<string>('');
@@ -360,7 +602,7 @@ export default function App() {
   };
   // Purchase state for the offer panel (B2C §3), refreshed from the
   // server-side entitlement status of the tokens this browser holds.
-  const [purchaseState, setPurchaseState] = useState<{ hasEvaluation: boolean; ownedForms: string[] }>({ hasEvaluation: false, ownedForms: [] });
+  const [purchaseState, setPurchaseState] = useState<{ hasEvaluation: boolean; ownedForms: string[]; ownedReadinessForms: string[] }>({ hasEvaluation: false, ownedForms: [], ownedReadinessForms: [] });
   const [checkoutBusy, setCheckoutBusy] = useState(false);
 
   // Purchase state is refreshed from the server whenever the packet
@@ -689,8 +931,17 @@ export default function App() {
         setStage('PHASE3');
         setCurrentQ(0);
       } else if (stage === 'PHASE3') {
-        setStage('PHASE4');
-        setCurrentQ(0);
+        // 4c: After PHASE3 questions, go through repeating groups before PHASE4.
+        // Order: entries → last_address → children → PHASE4
+        if (!repeatingStep) {
+          setRepeatingStep('entries');
+          // Stay on PHASE3 stage, but show repeating group UI
+        } else {
+          // Repeating groups are handled by their own Continue buttons
+          setStage('PHASE4');
+          setCurrentQ(0);
+          setRepeatingStep(null);
+        }
       } else if (stage === 'PHASE4') {
         setStage('PHOTO');
         setCurrentQ(0);
@@ -942,9 +1193,13 @@ export default function App() {
       });
       const imageBase64 = dataUrl.split(',')[1] || '';
       phase = 'fetch';
+      // Document review is gated server-side (readiness or preparation).
+      const reviewHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+      const reviewToken = bestEntitlementToken();
+      if (reviewToken) reviewHeaders['x-entitlement-token'] = reviewToken;
       const response = await fetch('/api/review-image', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: reviewHeaders,
         body: JSON.stringify({
           imageBase64,
           mimeType: reviewMimeType,
@@ -1043,7 +1298,7 @@ export default function App() {
     // Complete reset: every form's drafts AND version counters clear.
     setFormDraftStore(emptyFormDraftStore());
     setEditingFactId('');
-    setPurchaseState({ hasEvaluation: false, ownedForms: [] });
+    setPurchaseState({ hasEvaluation: false, ownedForms: [], ownedReadinessForms: [] });
     // Start Over hardening (2026-10-28): the remaining workflow state
     // a packet run leaves behind — narrative edits, the fact editor,
     // and any in-flight busy flags — must not survive into a fresh
@@ -1155,8 +1410,8 @@ export default function App() {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       // The entitlement that covers THIS form (B2C scoped grants), with
       // the legacy single-token key as fallback.
-      const formTokens = loadFormTokens();
-      const savedToken = formTokens[selectedFormId] || sessionStorage.getItem('iru_entitlement_token');
+      const formTokens = getFormTokens();
+      const savedToken = formTokens[selectedFormId] || getStoredToken();
       if (savedToken) headers['x-entitlement-token'] = savedToken;
       // Freshness presentation (defect-closure P1): present the
       // snapshot hash of the record exactly as this interface holds
@@ -1216,30 +1471,60 @@ export default function App() {
    * table (single source of truth). Called at render time when the
    * PACKAGES stage is active.
    */
+  /**
+   * Product offers for PackageSelect (owner-approved pricing 2026-11-05,
+   * FINAL). Built from the same server pricing modules the checkout
+   * enforces with — what the consumer sees is what the server charges.
+   * Readiness $99.95 (I-589 or I-765 only); preparation per form
+   * (L1 $149 / L2 $199 / L3 $249); I-589+I-765 bundle $349 fixed.
+   * The retired $1 evaluation and its credit are gone — no offer here
+   * references them.
+   */
   const buildPackageOffers = () => {
-    const offer = buildOffer(lang);
-    const hasEval = !!getEvalToken();
-    // Include the $1 evaluation as the first option (not in offer.options).
-    const evalOption = offer.evaluation ? [{
-      sku: offer.evaluation.sku,
-      name: offer.evaluation.name,
-      desc: ppt('pkgEvalDesc', lang as any),
-      totalCents: offer.evaluation.chargeCents,
-      chargeCents: offer.evaluation.chargeCents,
-      savingsNote: undefined,
-      forms: undefined,
-    }] : [];
-    return [...evalOption, ...offer.options.map((o: any) => ({
-      sku: o.sku,
-      name: o.name,
-      desc: o.sku === 'evaluation' ? ppt('pkgEvalDesc', lang as any)
-        : o.sku === 'one_form' ? ppt('pkgOneFormDesc', lang as any)
-        : ppt('pkgBundleDesc', lang as any),
-      totalCents: o.totalCents,
-      chargeCents: hasEval ? Math.max(0, o.totalCents - 100) : o.totalCents,
-      savingsNote: o.savingsNote || (o.sku === 'bundle' ? ppt('pkgBundleSave', lang as any) : undefined),
-      forms: o.forms,
-    }))];
+    const offers: Array<{ sku: string; name: string; desc: string; totalCents: number; chargeCents: number; savingsNote?: string; forms?: string[]; formId?: string }> = [];
+    // Readiness — one eligible form, $99.95. Does not include preparation.
+    for (const form of READINESS_FORMS) {
+      const priced = priceReadiness(form);
+      if (!priced.ok) continue;
+      offers.push({
+        sku: READINESS_SKU,
+        formId: form,
+        name: `${ppt('pkgReadinessName', lang as any)} — ${form}`,
+        desc: ppt('pkgReadinessDesc', lang as any),
+        totalCents: priced.totalCents,
+        chargeCents: priced.totalCents,
+      });
+    }
+    // Preparation — one card per released form, level price.
+    const prepOrder = ['I-589', 'I-765', 'I-130', 'I-485', 'N-400', 'I-90'];
+    for (const code of prepOrder) {
+      const price = regularPriceCents(code);
+      if (price == null) continue;
+      offers.push({
+        sku: FORMPREP_SKU,
+        forms: [code],
+        name: `${ppt('pkgPrepName', lang as any)} — ${code}`,
+        desc: ppt('pkgPrepDesc', lang as any),
+        totalCents: price,
+        chargeCents: price,
+      });
+    }
+    // Special bundle — I-589 + I-765 for $349 fixed.
+    const bundle = pricePurchase({ ownedForms: [], selectedForm: 'I-589', addedForm: 'I-765' });
+    if (bundle.ok) {
+      offers.push({
+        sku: FORMPREP_SKU,
+        forms: ['I-589', 'I-765'],
+        name: `${ppt('pkgBundleName', lang as any)} — I-589 + I-765`,
+        desc: ppt('pkgBundleDesc', lang as any),
+        totalCents: bundle.totalCents,
+        chargeCents: bundle.totalCents,
+        savingsNote: bundle.bundleSavingCents > 0
+          ? `${t('pkgBundleSavePrefix', 'Save')} ${formatCents(bundle.bundleSavingCents)} ${t('pkgBundleSaveSuffix', 'vs buying each form separately')}`
+          : undefined,
+      });
+    }
+    return offers;
   };
 
   /**
@@ -1247,7 +1532,7 @@ export default function App() {
    * amount from its pricing table — the client names only the product
    * and, for upgrades, presents the token of the purchase it builds on.
    */
-  const handleCheckout = async (sku?: string, opts?: { formId?: string; prerequisiteToken?: string }) => {
+  const handleCheckout = async (sku?: string, opts?: { formId?: string; prerequisiteToken?: string; forms?: string[]; clientKey?: string; selectedFormKey?: string }) => {
     if (checkoutBusy) return;
     setCheckoutBusy(true);
     setFormError('');
@@ -1256,12 +1541,19 @@ export default function App() {
       if (sku) body.sku = sku;
       if (opts && opts.formId) body.formId = opts.formId;
       if (opts && opts.prerequisiteToken) body.entitlementToken = opts.prerequisiteToken;
+      // Readiness purchase: the server reads `form` (I-589 or I-765 only).
+      if (sku === READINESS_SKU && opts && opts.formId) body.form = opts.formId;
+      // Pathway formprep: the exact form set + case identity travel
+      // with the request so the server can price it and bind the
+      // session to the case.
+      if (opts && Array.isArray(opts.forms) && opts.forms.length > 0) body.forms = opts.forms;
+      if (opts && opts.clientKey) body.clientKey = opts.clientKey;
       // Checkout idempotency (payment-hardening 2026-10-24): one random
       // purchase-intent key per logical purchase, kept in sessionStorage
       // so a retried click replays the SAME purchase instead of minting
       // a second payable checkout. The key names the checkout attempt
       // only — it is never the entitlement credential.
-      const intentSlot = `iru_purchase_intent_${sku || 'legacy'}_${(opts && opts.formId) || 'none'}`;
+      const intentSlot = `iru_purchase_intent_${sku || 'legacy'}_${(opts && opts.forms && opts.forms.length > 0 ? opts.forms.join('+') : (opts && opts.formId) || 'none')}`;
       let intentKey = '';
       try { intentKey = sessionStorage.getItem(intentSlot) || ''; } catch { /* storage unavailable: fall through to a fresh key */ }
       if (!intentKey) {
@@ -1278,19 +1570,36 @@ export default function App() {
       const data = await resp.json().catch(() => null);
       if (!resp.ok || !data || !data.checkoutUrl) {
         const reason = data && data.reason;
-        if (reason === 'evaluation-required') throw new Error(t('errEvaluationRequired', 'The $1 evaluation purchase is required first — its payment is credited toward this total.'));
+        if (reason === 'evaluation-retired') throw new Error(t('errEvaluationRetired', 'That product is no longer offered. Please choose a current product — Readiness or Form Preparation — from the product list.'));
         if (reason === 'already-purchased') throw new Error(t('errAlreadyPurchased', 'This purchase has already been completed. A second charge would duplicate it.'));
         throw new Error(t('errCheckoutUnavailable', 'Checkout unavailable. Please try again later.'));
       }
       // Keep the buyer's credential(s) for the return + later delivery.
       // D2: localStorage for retained access; server remains authoritative.
-      if (data.sku === SKUS.EVALUATION) {
-        setEvalToken(data.entitlementToken);
+      // Readiness tokens live in their own map — readiness never counts
+      // as owning a form. (The retired $1 evaluation has no branch here:
+      // the server refuses it with 410 before any token is issued.)
+      if (data.scope && data.scope.kind === 'readiness' && Array.isArray(data.scope.forms)) {
+        for (const f of data.scope.forms) setReadinessToken(f, data.entitlementToken);
       } else if (data.scope && data.scope.kind === 'forms' && Array.isArray(data.scope.forms)) {
         for (const f of data.scope.forms) setFormToken(f, data.entitlementToken);
       } else {
         setStoredToken(data.entitlementToken);
         try { localStorage.setItem('iru_entitlement_id', data.entitlementId); } catch { /* ignore */ }
+      }
+      // Pathway formprep: record the pending purchase BEFORE leaving
+      // for Stripe, so the ?checkout=success return can verify payment
+      // and resume the exact case position (selected form's
+      // questionnaire, answers intact under the clientKey).
+      if (sku === FORMPREP_SKU && opts && Array.isArray(opts.forms) && opts.clientKey && opts.selectedFormKey) {
+        try {
+          localStorage.setItem(PENDING_PATHWAY_KEY, JSON.stringify({
+            clientKey: opts.clientKey,
+            forms: opts.forms,
+            entitlementId: data.entitlementId,
+            selectedFormKey: opts.selectedFormKey,
+          }));
+        } catch { /* storage unavailable — return falls back to entry */ }
       }
       window.location.href = data.checkoutUrl;
     } catch (e: any) {
@@ -1299,32 +1608,303 @@ export default function App() {
     }
   };
 
+  /**
+   * Pathway Add → purchase flow (owner-approved pricing 2026-11-05).
+   *
+   * The assessment clientKey is the case identity: created on first
+   * save in Tier1Flow, or here if the customer buys before answering
+   * anything. Owned prep forms come from this browser's form tokens
+   * (sessionStorage) plus the paywall journey state, so an additional
+   * form is priced as additional and an owned form is never re-charged.
+   */
+  const ensureClientKey = (): string => {
+    try {
+      let key = localStorage.getItem('iru_client_key');
+      if (!key) {
+        key = crypto.randomUUID();
+        localStorage.setItem('iru_client_key', key);
+      }
+      return key;
+    } catch {
+      return crypto.randomUUID();
+    }
+  };
+  const ownedPrepForms = (): string[] => {
+    const owned = new Set<string>();
+    try {
+      for (const f of Object.keys(getFormTokens())) owned.add(f);
+    } catch { /* ignore */ }
+    try {
+      for (const f of (purchaseState?.ownedForms || [])) owned.add(f);
+    } catch { /* ignore */ }
+    return [...owned];
+  };
+  const startPathwayCheckout = (selectedFormCode: string, selectedFormKey: string, addedFormCode: string) => {
+    setPathwayCheckoutError(null);
+    const priced = pricePurchase({
+      ownedForms: ownedPrepForms(),
+      selectedForm: selectedFormCode,
+      addedForm: addedFormCode,
+    });
+    if (!priced.ok) {
+      // Already owned (or unavailable): nothing to buy — continue to
+      // the questionnaire instead of showing a broken purchase.
+      if (priced.reason === 'already-owned') {
+        setTier1Form(selectedFormKey as any);
+        setStage('TIER1');
+        return;
+      }
+      setPathwayCheckoutError(priced.error || 'This purchase cannot be completed.');
+      return;
+    }
+    setPathwayCheckout({
+      selectedForm: selectedFormCode,
+      selectedFormKey,
+      addedForm: addedFormCode,
+      pricing: {
+        lines: priced.lines,
+        totalCents: priced.totalCents,
+        bundleApplied: priced.bundleApplied,
+        bundleSavingCents: priced.bundleSavingCents,
+      },
+    });
+  };
+  const startFormprepCheckout = async (forms: string[], selectedFormKey: string) => {
+    if (checkoutBusy || pathwayCheckoutBusy) return;
+    setPathwayCheckoutBusy(true);
+    setPathwayCheckoutError(null);
+    try {
+      const clientKey = ensureClientKey();
+      const owned = ownedPrepForms();
+      // Prerequisite proof for the server's owned-forms derivation:
+      // the token of the first owned form, if the case owns any prep.
+      let prerequisiteToken: string | undefined;
+      try {
+        const tokens = getFormTokens();
+        for (const f of owned) {
+          if (tokens[f]) { prerequisiteToken = tokens[f]; break; }
+        }
+      } catch { /* ignore */ }
+      await handleCheckout(FORMPREP_SKU, {
+        forms, clientKey, prerequisiteToken, selectedFormKey,
+      });
+    } catch (e: any) {
+      setPathwayCheckoutError(e && e.message ? e.message : 'Checkout unavailable. Please try again later.');
+    } finally {
+      setPathwayCheckoutBusy(false);
+    }
+  };
+
+  /**
+   * Paid-access verification (owner directive 2026-11-05 — the paid-access
+   * boundary). The server is authoritative: every stored token is checked
+   * against /api/entitlement-status, and access is granted only for the
+   * exact scope that token paid for. Readiness never unlocks preparation;
+   * one form never unlocks another; a bundle covers exactly its two forms.
+   * A verified token is persisted into its proper localStorage map so a
+   * recovered customer (RECOVER reissues only the generic token) is fully
+   * restored for pricing, duplicate protection, and later gates.
+   */
+  type VerifiedAccess = {
+    prepForms: string[]; readinessForms: string[]; hasEvaluation: boolean; hasLegacy: boolean;
+  };
+  const checkEntitlementStatus = async (token: string | null): Promise<any | null> => {
+    if (!token) return null;
+    try {
+      const resp = await fetch('/api/entitlement-status', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token }),
+      });
+      const data = await resp.json().catch(() => null);
+      return resp.ok && data && data.entitlement ? data.entitlement : null;
+    } catch { return null; }
+  };
+  const verifyStoredEntitlements = async (): Promise<VerifiedAccess> => {
+    const out: VerifiedAccess = { prepForms: [], readinessForms: [], hasEvaluation: false, hasLegacy: false };
+    const seen = new Set<string>();
+    const consider = async (token: string | null) => {
+      if (!token || seen.has(token)) return;
+      seen.add(token);
+      const ent = await checkEntitlementStatus(token);
+      if (!ent || !ent.paid) return;
+      if (ent.scope && ent.scope.kind === 'forms' && Array.isArray(ent.scope.forms)) {
+        for (const f of ent.scope.forms) {
+          if (!out.prepForms.includes(f)) out.prepForms.push(f);
+          setFormToken(f, token);
+        }
+      } else if (ent.scope && ent.scope.kind === 'readiness' && Array.isArray(ent.scope.forms)) {
+        for (const f of ent.scope.forms) {
+          if (!out.readinessForms.includes(f)) out.readinessForms.push(f);
+          setReadinessToken(f, token);
+        }
+      } else if (ent.scope && ent.scope.kind === 'evaluation') {
+        out.hasEvaluation = true;
+        setEvalToken(token);
+      } else if (!ent.scope) {
+        out.hasLegacy = true;
+        setStoredToken(token);
+      }
+    };
+    // Every token this browser holds: per-form maps, the historical
+    // evaluation token, and the generic token (RECOVER writes only this one).
+    for (const f of Object.keys(getFormTokens())) await consider(getFormTokens()[f]);
+    for (const f of Object.keys(getReadinessTokens())) await consider(getReadinessTokens()[f]);
+    await consider(getEvalToken());
+    await consider(getStoredToken());
+    return out;
+  };
+  /** The best token to present to a gated API: readiness first, then
+   * preparation, then the generic token. Callers that need a specific
+   * scope (analyze = readiness-only) use readinessToken() instead. */
+  const bestEntitlementToken = (formCode?: string): string | null => {
+    try {
+      if (formCode) {
+        const prep = getFormTokens();
+        if (prep[formCode]) return prep[formCode];
+        const read = getReadinessTokens();
+        if (read[formCode]) return read[formCode];
+      }
+      const read = getReadinessTokens();
+      const rk = Object.keys(read);
+      if (rk.length > 0) return read[rk[0]];
+      const prep = getFormTokens();
+      const pk = Object.keys(prep);
+      if (pk.length > 0) return prep[pk[0]];
+      return getStoredToken();
+    } catch { return null; }
+  };
+  /** A readiness token for the assessment flow (analyze is readiness-only). */
+  const readinessToken = (): string | null => {
+    try {
+      const read = getReadinessTokens();
+      const keys = Object.keys(read);
+      return keys.length > 0 ? read[keys[0]] : null;
+    } catch { return null; }
+  };
+  /** Header carrying the readiness token for analyze (readiness-only). */
+  const readinessHeader = (): Record<string, string> => {
+    const tok = readinessToken();
+    return tok ? { 'x-entitlement-token': tok } : {};
+  };
+
   /** Refresh what this browser owns, from server-side entitlement status. */
   const refreshPurchaseState = async () => {
     if (!PAYWALL_UI_ON()) return;
     try {
-      const ownedForms: string[] = [];
-      let hasEvaluation = false;
-      const check = async (token: string | null) => {
-        if (!token) return null;
-        const resp = await fetch('/api/entitlement-status', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token }),
-        });
-        const data = await resp.json().catch(() => null);
-        return resp.ok && data && data.entitlement ? data.entitlement : null;
-      };
-      const ev = await check(sessionStorage.getItem('iru_evaluation_token'));
-      if (ev && ev.paid && ev.scope && ev.scope.kind === 'evaluation') hasEvaluation = true;
-      const map = loadFormTokens();
-      for (const formId of Object.keys(map)) {
-        const ent = await check(map[formId]);
-        if (ent && ent.paid && ent.scope && ent.scope.kind === 'forms') {
-          for (const f of (ent.scope.forms || [])) if (!ownedForms.includes(f)) ownedForms.push(f);
-        }
-      }
-      setPurchaseState({ hasEvaluation, ownedForms });
+      const verified = await verifyStoredEntitlements();
+      setPurchaseState({ hasEvaluation: verified.hasEvaluation, ownedForms: verified.prepForms, ownedReadinessForms: verified.readinessForms });
     } catch { /* best-effort: the offer panel simply shows the entry state */ }
+  };
+
+  /**
+   * Paid-access gate (owner directive 2026-11-05). Maps each protected
+   * stage to the entitlement it requires; public stages return null.
+   * - DASHBOARD / PATHWAY: PUBLIC. Form selection and the Pathway
+   *   guidance panel (explanations, related forms, prices) are
+   *   pre-purchase surfaces — the directive keeps them freely visible.
+   *   The choke point is TIER1: "Continue to questionnaire" always
+   *   lands on the gate below for an unentitled visitor.
+   * - TIER1: preparation OR readiness covering THAT form (readiness
+   *   includes the questionnaire; it does not include the prepared PDF).
+   * - LANG + assessment phases + PACKET: readiness (either form).
+   * - EVAL_INTAKE / EVAL_REPORT: historical $1 evaluation only.
+   * ENTRY / GUIDE / PACKAGES / RECOVER are public (product info + pricing).
+   */
+  type GateRequirement = 'any' | 'readiness' | 'evaluation' | { form: string };
+  const FORM_CODE_BY_KEY: Record<string, string> = {
+    n400: 'N-400', i130: 'I-130', i485: 'I-485', i90: 'I-90', i589: 'I-589', i765: 'I-765',
+  };
+  const requirementForStage = (stageName: string, formKey: string | null): GateRequirement | null => {
+    if (stageName === 'DASHBOARD' || stageName === 'PATHWAY') return null;
+    if (stageName === 'TIER1') {
+      const code = formKey ? FORM_CODE_BY_KEY[formKey] : undefined;
+      return code ? { form: code } : 'any';
+    }
+    if (stageName === 'LANG' || stageName === 'PHASE1' || stageName === 'TRIAGE'
+      || stageName === 'PHASE2' || stageName === 'PHASE3' || stageName === 'PHASE4'
+      || stageName === 'PHOTO' || stageName === 'ANALYZING' || stageName === 'PACKET') return 'readiness';
+    if (stageName === 'EVAL_INTAKE' || stageName === 'EVAL_REPORT') return 'evaluation';
+    return null;
+  };
+  const satisfiesRequirement = (verified: VerifiedAccess, req: GateRequirement): boolean => {
+    if (req === 'any') return verified.prepForms.length > 0 || verified.readinessForms.length > 0 || verified.hasLegacy;
+    if (req === 'readiness') return verified.readinessForms.length > 0;
+    if (req === 'evaluation') return verified.hasEvaluation;
+    return verified.prepForms.includes(req.form) || verified.readinessForms.includes(req.form) || verified.hasLegacy;
+  };
+  const [gateStatus, setGateStatus] = useState<'idle' | 'checking' | 'allowed' | 'denied'>('idle');
+  const [gateHasPurchase, setGateHasPurchase] = useState(false);
+  useEffect(() => {
+    if (!PAYWALL_UI_ON()) { setGateStatus('idle'); return; }
+    const req = requirementForStage(stage as string, tier1Form as string | null);
+    if (!req) { setGateStatus('idle'); return; }
+    let cancelled = false;
+    setGateStatus('checking');
+    (async () => {
+      const verified = await verifyStoredEntitlements();
+      if (cancelled) return;
+      setGateHasPurchase(verified.prepForms.length > 0 || verified.readinessForms.length > 0 || verified.hasEvaluation || verified.hasLegacy);
+      setGateStatus(satisfiesRequirement(verified, req) ? 'allowed' : 'denied');
+    })();
+    return () => { cancelled = true; };
+  }, [stage, tier1Form]);
+
+  /** Access-required screen: shown instead of a protected stage while the
+   * gate is checking, and when the server says this browser holds no
+   * entitlement for it. It never renders the substantive workflow. */
+  const renderGateScreen = () => {
+    if (gateStatus === 'checking' || gateStatus === 'idle') {
+      return (
+        <div className="min-h-screen bg-slate-50">
+          <div className="max-w-3xl mx-auto px-4 py-12 text-center">
+            <p className="text-slate-600">{t('gateChecking', 'Checking your access…')}</p>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div className="min-h-screen bg-slate-50">
+        <div className="max-w-xl mx-auto px-4 py-12">
+          <h1 className="text-2xl font-bold mb-2">{t('gateTitle', 'A purchase is required')}</h1>
+          <p className="text-slate-600 mb-6">{t('gateDenied', 'This part of IRU is available after purchase. Choose a product below — Readiness or Form Preparation — or recover access if you already bought one.')}</p>
+          <div className="flex flex-wrap gap-3">
+            <button onClick={() => setStage('PACKAGES' as any)} className="px-5 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700">
+              {t('gateSeeProducts', 'See products')}
+            </button>
+            {gateHasPurchase && (
+              <button onClick={() => setStage('DASHBOARD' as any)} className="px-5 py-2.5 border-2 border-slate-300 text-slate-700 text-sm font-semibold rounded-xl">
+                {t('gateBackDashboard', 'Back to dashboard')}
+              </button>
+            )}
+            <button onClick={() => setStage('RECOVER' as any)} className="px-5 py-2.5 border-2 border-slate-300 text-slate-700 text-sm font-semibold rounded-xl">
+              {t('gateRecover', 'Recover access')}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+  /** Returning paid customer: verify stored tokens server-side and route
+   * by scope. Never routes on token presence alone. */
+  const [continueError, setContinueError] = useState('');
+  const continueMyCase = async () => {
+    setContinueError('');
+    const verified = await verifyStoredEntitlements();
+    if (verified.prepForms.length > 0 || verified.hasLegacy) {
+      setStage('DASHBOARD' as any);
+    } else if (verified.readinessForms.length > 0) {
+      setStage('LANG' as any);
+    } else if (verified.hasEvaluation) {
+      setStage('EVAL_INTAKE' as any);
+    } else {
+      setContinueError(t('gateNoPurchase', 'No paid purchase was found on this device. If you bought IRU before, use Recover access with the email from your purchase.'));
+    }
+  };
+  const hasStoredTokens = (): boolean => {
+    try {
+      return Object.keys(getFormTokens()).length > 0 || Object.keys(getReadinessTokens()).length > 0
+        || !!getEvalToken() || !!getStoredToken();
+    } catch { return false; }
   };
 
   const downloadBlankForm = () => {
@@ -1405,7 +1985,7 @@ export default function App() {
       // Route to Vercel serverless function — API key never exposed to client
       const response = await fetch('/api/analyze', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...readinessHeader() },
         body: JSON.stringify({
           answers: serverAnswers,
           lang,
@@ -1427,7 +2007,7 @@ export default function App() {
         signal: controller.signal,
       }).finally(() => clearTimeout(timeout));
 
-      if (!response.ok) throw new Error(`Server error: ${response.status}`);
+      if (!response.ok) throw new Error(response.status === 402 ? 'err-entitlement-required' : `Server error: ${response.status}`);
 
       // SSE streaming reader — defeats Vercel 10s kill-switch. The
       // consumer (api/_lib/sse.js) buffers partial lines across network
@@ -1447,6 +2027,13 @@ export default function App() {
       // offering the re-run.)
       setFactRecord((prev: any) => (prev ? markOutputsFresh(JSON.parse(JSON.stringify(prev)), new Date().toISOString()) : prev));
     } catch (error) {
+      if (error instanceof Error && error.message === 'err-entitlement-required') {
+        // Not entitled to the readiness assessment (or the token lapsed
+        // between the gate check and this call): back to the product
+        // list instead of landing on an empty PACKET.
+        setStage('PACKAGES');
+        return;
+      }
       if (error instanceof DOMException && error.name === 'AbortError') {
         console.error('AI request timed out after 90s');
       } else {
@@ -2134,6 +2721,12 @@ export default function App() {
   if (PAYWALL_UI_ON()) {
     const pwLang = lang as 'EN' | 'ES' | 'ZH' | 'HT' | 'AR';
     const pwNav = handlePaywallNavigate;
+    // Paid-access gate: a protected stage never renders its workflow
+    // until the server has verified an entitlement for it. Public
+    // stages (ENTRY / GUIDE / PACKAGES / RECOVER) pass through.
+    if (requirementForStage(stage as string, tier1Form as string | null) && gateStatus !== 'allowed') {
+      return renderGateScreen();
+    }
     if (stage === 'ENTRY') {
       return (
         <div className="min-h-screen bg-white">
@@ -2141,6 +2734,15 @@ export default function App() {
             <img src="/seal.png" alt="SMRG" className="w-20 h-20 mx-auto mb-4 object-contain" />
           </div>
           <EntryScreen lang={pwLang} onNavigate={pwNav} />
+          {hasStoredTokens() && (
+            <div className="max-w-xl mx-auto px-4 pb-8">
+              <button onClick={() => continueMyCase()} className="w-full text-left border-2 border-indigo-200 bg-indigo-50 rounded-2xl p-5 hover:border-indigo-400 transition-colors">
+                <div className="font-semibold text-indigo-700 text-base">{t('entryContinue', 'Continue my case')}</div>
+                <div className="text-sm text-slate-600 mt-1">{t('entryContinueDesc', 'You already bought IRU on this device. We will verify your purchase and take you back to your case.')}</div>
+              </button>
+              {continueError && <p className="text-sm text-red-700 mt-3 text-center">{continueError}</p>}
+            </div>
+          )}
         </div>
       );
     }
@@ -2158,8 +2760,7 @@ export default function App() {
             lang={pwLang}
             onNavigate={pwNav}
             offers={buildPackageOffers()}
-            hasEvalCredit={!!getEvalToken()}
-            onCheckout={(sku) => handleCheckout(sku)}
+            onCheckout={(sku, opts) => handleCheckout(sku, opts)}
             checkoutBusy={checkoutBusy}
           />
         </div>
@@ -2169,6 +2770,109 @@ export default function App() {
       return (
         <div className="min-h-screen bg-white">
           <EvalIntake lang={pwLang} onNavigate={pwNav} />
+        </div>
+      );
+    }
+    // ── Tier 1 dashboard: applicant-facing path chooser ──
+    if (stage === 'DASHBOARD') {
+      const workflows = [
+        { key: 'n400', number: 'N-400', title: 'Become a U.S. Citizen', desc: 'I have a green card and want to apply for citizenship' },
+        { key: 'i130', number: 'I-130', title: 'Petition for a Family Member', desc: 'I want to help a relative get a green card' },
+        { key: 'i485', number: 'I-485', title: 'Apply for a Green Card', desc: 'I am in the U.S. and want to become a permanent resident' },
+        { key: 'i90', number: 'I-90', title: 'Renew or Replace My Green Card', desc: 'My card is expiring, lost, stolen, or damaged' },
+        { key: 'i589', number: 'I-589', title: 'Apply for Asylum', desc: 'I fear persecution and want to apply for asylum' },
+        { key: 'i765', number: 'I-765', title: 'Apply for a Work Permit', desc: 'I want to apply for employment authorization' },
+      ];
+      return (
+        <div className="min-h-screen bg-slate-50">
+          <div className="max-w-3xl mx-auto px-4 py-12">
+            <h1 className="text-2xl font-bold mb-2">What do you need help with?</h1>
+            <p className="text-slate-600 mb-8">Choose the option that best describes your situation. Answer the questions that follow — a staff member will use your answers to help complete your form.</p>
+            <div className="space-y-4">
+              {workflows.map(w => (
+                <button key={w.key}
+                  onClick={() => { setTier1Form(w.key as any); setStage('PATHWAY'); }}
+                  className="w-full text-left bg-white border border-slate-200 rounded-xl p-5 hover:border-blue-500 transition-colors">
+                  <div className="font-bold text-lg">{w.number} — {w.title}</div>
+                  <div className="text-slate-600 text-sm mt-1">{w.desc}</div>
+                </button>
+              ))}
+              <button onClick={() => setStage('LANG')}
+                className="w-full text-left bg-white border border-slate-200 rounded-xl p-5 hover:border-blue-500 transition-colors">
+                <div className="font-bold text-lg">I-589 / I-765 — Full Readiness Assessment</div>
+                <div className="text-slate-600 text-sm mt-1">Asylum and employment authorization with PDF generation</div>
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    // ── Pathway Assistant interstitial: guidance BEFORE the questionnaire ──
+    // Shows when a form is selected on the dashboard. Explains the process,
+    // lists related forms with discounted prices, lets the customer add or decline.
+    if (stage === 'PATHWAY' && tier1Form) {
+      const formCodeMap: Record<string, string> = {
+        n400: 'N-400', i130: 'I-130', i485: 'I-485', i90: 'I-90', i589: 'I-589', i765: 'I-765',
+      };
+      const formCode = formCodeMap[tier1Form] || tier1Form.toUpperCase();
+      return (
+        <div className="min-h-screen bg-slate-50">
+          <div className="max-w-3xl mx-auto px-4 py-12">
+            {pathwayCheckout ? (
+              <PathwayCheckoutSummary
+                pricing={pathwayCheckout.pricing}
+                selectedForm={pathwayCheckout.selectedForm}
+                addedForm={pathwayCheckout.addedForm}
+                busy={pathwayCheckoutBusy || checkoutBusy}
+                error={pathwayCheckoutError}
+                onConfirm={() => startFormprepCheckout(
+                  [pathwayCheckout.selectedForm, pathwayCheckout.addedForm],
+                  pathwayCheckout.selectedFormKey,
+                )}
+                onBack={() => { setPathwayCheckout(null); setPathwayCheckoutError(null); }}
+              />
+            ) : (
+              <PathwayGuidance
+                currentForm={formCode}
+                ownedForms={ownedPrepForms()}
+                activeCatalog={getActiveCatalog()}
+                formsCatalog={FORMS}
+                placement="selection"
+                onAddForm={(form) => startPathwayCheckout(formCode, tier1Form, form)}
+                onDismiss={() => setStage('TIER1')}
+              />
+            )}
+            {pathwayCheckoutError && !pathwayCheckout && (
+              <p data-testid="pathway-checkout-error" style={{ color: '#dc2626', margin: '0 0 0.75rem' }}>
+                {pathwayCheckoutError}
+              </p>
+            )}
+            {!pathwayCheckout && (
+              <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1rem' }}>
+                <button
+                  data-testid="pathway-continue"
+                  onClick={() => setStage('TIER1')}
+                  style={{ background: '#1a56db', color: '#fff', border: '1px solid #1a56db', borderRadius: 8, padding: '0.6rem 1.2rem', cursor: 'pointer', fontWeight: 600 }}
+                >
+                  Continue to {formCode} questionnaire
+                </button>
+                <button
+                  data-testid="pathway-back"
+                  onClick={() => setStage('DASHBOARD')}
+                  style={{ background: 'transparent', border: '1px solid #9ca3af', borderRadius: 8, padding: '0.6rem 1.2rem', cursor: 'pointer' }}
+                >
+                  Back
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+    if (stage === 'TIER1' && tier1Form) {
+      return (
+        <div className="min-h-screen bg-slate-50">
+          <Tier1FlowWrapper formKey={tier1Form} lang={lang as any} onExit={() => setStage('DASHBOARD')} onFormprepCheckout={(forms) => startFormprepCheckout(forms, tier1Form)} />
         </div>
       );
     }
@@ -2194,6 +2898,169 @@ export default function App() {
     // After purchase, the buyer enters the normal preparation flow
     // (LANG → …) with their entitlement. Gating is enforced server-side
     // on every paid API call; the client routes by token presence.
+  }
+
+  // ── Pathway Assistant interstitial (top-level): guidance BEFORE the questionnaire ──
+  // Mirrors the paywall-flow copy above; the nested copy only renders when the
+  // paywall flow is active, so the top-level flow needs its own.
+  if (stage === 'PATHWAY' && tier1Form) {
+    const formCodeMap: Record<string, string> = {
+      n400: 'N-400', i130: 'I-130', i485: 'I-485', i90: 'I-90', i589: 'I-589', i765: 'I-765',
+    };
+    const formCode = formCodeMap[tier1Form] || tier1Form.toUpperCase();
+    return (
+      <div className="min-h-screen bg-slate-50">
+        <div className="max-w-3xl mx-auto px-4 py-12">
+          {pathwayCheckout ? (
+            <PathwayCheckoutSummary
+              pricing={pathwayCheckout.pricing}
+              selectedForm={pathwayCheckout.selectedForm}
+              addedForm={pathwayCheckout.addedForm}
+              busy={pathwayCheckoutBusy || checkoutBusy}
+              error={pathwayCheckoutError}
+              onConfirm={() => startFormprepCheckout(
+                [pathwayCheckout.selectedForm, pathwayCheckout.addedForm],
+                pathwayCheckout.selectedFormKey,
+              )}
+              onBack={() => { setPathwayCheckout(null); setPathwayCheckoutError(null); }}
+            />
+          ) : (
+            <PathwayGuidance
+              currentForm={formCode}
+              ownedForms={ownedPrepForms()}
+              activeCatalog={getActiveCatalog()}
+              formsCatalog={FORMS}
+              placement="selection"
+              onAddForm={(form) => startPathwayCheckout(formCode, tier1Form, form)}
+              onDismiss={() => setStage('TIER1')}
+            />
+          )}
+          {pathwayCheckoutError && !pathwayCheckout && (
+            <p data-testid="pathway-checkout-error" style={{ color: '#dc2626', margin: '0 0 0.75rem' }}>
+              {pathwayCheckoutError}
+            </p>
+          )}
+          {!pathwayCheckout && (
+          <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1rem' }}>
+            <button
+              data-testid="pathway-continue"
+              onClick={() => setStage('TIER1')}
+              style={{ background: '#1a56db', color: '#fff', border: '1px solid #1a56db', borderRadius: 8, padding: '0.6rem 1.2rem', cursor: 'pointer', fontWeight: 600 }}
+            >
+              Continue to {formCode} questionnaire
+            </button>
+            <button
+              data-testid="pathway-back"
+              onClick={() => setStage('DASHBOARD')}
+              style={{ background: 'transparent', border: '1px solid #9ca3af', borderRadius: 8, padding: '0.6rem 1.2rem', cursor: 'pointer' }}
+            >
+              Back
+            </button>
+          </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // DASHBOARD and TIER1 work in both paywall and non-paywall modes
+  // (moved outside PAYWALL_UI_ON block - they were unreachable when paywall is OFF)
+  if (stage === 'DASHBOARD') {
+    const handleResume = async () => {
+      setResumeError('');
+      try {
+        const clientKey = localStorage.getItem('iru_client_key');
+        if (!clientKey) {
+          setResumeError('No saved session found on this device.');
+          return;
+        }
+        const res = await fetch('/api/assessment-resume', {
+          method: 'POST',
+          headers: (() => {
+            const h: Record<string, string> = { 'Content-Type': 'application/json' };
+            const tok = bestEntitlementToken();
+            if (tok) h['x-entitlement-token'] = tok;
+            return h;
+          })(),
+          body: JSON.stringify({ token: resumeToken.trim(), clientKey }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setResumeError(data.error || 'Resume failed. Check your token.');
+          return;
+        }
+        // Navigate to the form — Tier1Flow restores its own autosaved
+        // answers (iru_tier1_<formKey>); the resume payload itself is
+        // not stored (no localStorage copy of applicant data is kept here).
+        setTier1Form(data.form_id as any);
+        setStage('TIER1');
+      } catch (e: any) {
+        setResumeError('Could not resume. Please try again.');
+      }
+    };
+    const workflows = [
+      { key: 'n400', number: 'N-400', title: 'Become a U.S. Citizen', desc: 'I have a green card and want to apply for citizenship' },
+      { key: 'i130', number: 'I-130', title: 'Petition for a Family Member', desc: 'I want to help a relative get a green card' },
+      { key: 'i485', number: 'I-485', title: 'Apply for a Green Card', desc: 'I am in the U.S. and want to become a permanent resident' },
+      { key: 'i90', number: 'I-90', title: 'Renew or Replace My Green Card', desc: 'My card is expiring, lost, stolen, or damaged' },
+      { key: 'i589', number: 'I-589', title: 'Apply for Asylum', desc: 'I fear persecution and want to apply for asylum' },
+      { key: 'i765', number: 'I-765', title: 'Apply for a Work Permit', desc: 'I want to apply for employment authorization' },
+    ];
+    return (
+      <div className="min-h-screen bg-slate-50">
+        <div className="max-w-3xl mx-auto px-4 py-12">
+          <h1 className="text-2xl font-bold mb-2">What do you need help with?</h1>
+          <p className="text-slate-600 mb-8">Choose the option that best describes your situation. Answer the questions that follow — a staff member will use your answers to help complete your form.</p>
+          
+          {/* Resume an application */}
+          <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12, padding: '1rem', marginBottom: '1.5rem' }}>
+            <div style={{ fontWeight: 'bold', marginBottom: '0.5rem' }}>Resume an application</div>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <input
+                data-testid="resume-token-input"
+                type="text"
+                placeholder="Paste your save token here"
+                value={resumeToken}
+                onChange={e => setResumeToken(e.target.value)}
+                style={{ flex: 1, padding: '0.5rem', border: '1px solid #cbd5e1', borderRadius: 6 }}
+              />
+              <button
+                data-testid="btn-resume"
+                onClick={handleResume}
+                style={{ padding: '0.5rem 1rem', background: '#1a56db', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer' }}
+              >
+                Resume
+              </button>
+            </div>
+            {resumeError && <div data-testid="resume-error" style={{ color: '#dc2626', marginTop: '0.5rem', fontSize: '0.9rem' }}>{resumeError}</div>}
+          </div>
+          
+          <div className="space-y-4">
+            {workflows.map(w => (
+              <button key={w.key}
+                data-testid={`form-card-${w.key}`}
+                onClick={() => { setTier1Form(w.key as any); setStage('PATHWAY'); }}
+                className="w-full text-left bg-white border border-slate-200 rounded-xl p-5 hover:border-blue-500 transition-colors">
+                <div className="font-bold text-lg">{w.number} — {w.title}</div>
+                <div className="text-slate-600 text-sm mt-1">{w.desc}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+  if (stage === 'TIER1' && tier1Form) {
+    return (
+      <Tier1FlowWrapper formKey={tier1Form} lang={lang as any} onExit={() => setStage('DASHBOARD')} onFormprepCheckout={(forms) => startFormprepCheckout(forms, tier1Form)} />
+    );
+  }
+
+  // Paid-access gate for the assessment flow (LANG / phases / PACKET),
+  // which renders through this return when the paywall is on. The
+  // nested block above already gates DASHBOARD / PATHWAY / TIER1.
+  if (PAYWALL_UI_ON() && requirementForStage(stage as string, tier1Form as string | null) && gateStatus !== 'allowed') {
+    return renderGateScreen();
   }
 
   return (
@@ -2272,7 +3139,7 @@ export default function App() {
               {LANGUAGES.map((l) => (
                 <button
                   key={l.code}
-                  onClick={() => { setLang(l.code); setStage('PHASE1'); setCurrentQ(0); }}
+                  onClick={() => { setLang(l.code); setStage('DASHBOARD'); setCurrentQ(0); }}
                   aria-pressed={lang === l.code}
                   className={`flex items-center justify-between gap-3 p-4 sm:p-5 rounded-xl border-2 text-left transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 ${lang === l.code ? 'border-blue-600 bg-blue-50 shadow-sm' : 'border-blue-200/80 bg-white/85 hover:border-blue-400 hover:bg-blue-50/70'}`}
                 >
@@ -2287,7 +3154,296 @@ export default function App() {
           </motion.div>
         )}
 
-        {(stage === 'PHASE1' || stage === 'TRIAGE' || stage === 'PHASE2' || stage === 'PHASE3') && question && (
+        {/* PHASE3 repeating groups (4c) — shown after PHASE3 questions, before PHASE4 */}
+        {stage === 'PHASE3' && repeatingStep === 'entries' && (
+          <motion.div
+            key="repeating-entries"
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.3 }}
+            className="p-8 sm:p-12"
+          >
+            <RepeatingGroup
+              groupId="entries"
+              title="US Entry History"
+              description="List each time you entered the United States, starting with the most recent."
+              fields={ENTRY_HISTORY_FIELDS}
+              entries={getGroupEntries('entries')}
+              onAdd={(e) => handleGroupAdd('entries', e)}
+              onUpdate={(id, e) => handleGroupUpdate('entries', id, e)}
+              onDelete={(id) => handleGroupDelete('entries', id)}
+            />
+            <div className="mt-6 flex justify-between">
+              <button
+                onClick={() => setRepeatingStep(null)}
+                className="px-6 py-3 rounded-xl border-2 border-slate-200 text-slate-600 font-semibold"
+              >
+                Back
+              </button>
+              <button
+                onClick={() => setRepeatingStep('last_address')}
+                className="px-6 py-3 rounded-xl bg-blue-600 text-white font-semibold"
+              >
+                Continue
+              </button>
+            </div>
+          </motion.div>
+        )}
+
+        {stage === 'PHASE3' && repeatingStep === 'last_address' && (
+          <motion.div
+            key="repeating-last-address"
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.3 }}
+            className="p-8 sm:p-12"
+          >
+            <RepeatingGroup
+              groupId="last_address"
+              title="Last Address Before Coming to the US"
+              description="Your address in your home country or country of last residence before coming to the United States."
+              fields={LAST_ADDRESS_FIELDS}
+              entries={getGroupEntries('last_address')}
+              onAdd={(e) => handleGroupAdd('last_address', e)}
+              onUpdate={(id, e) => handleGroupUpdate('last_address', id, e)}
+              onDelete={(id) => handleGroupDelete('last_address', id)}
+              maxEntries={1}
+            />
+            <div className="mt-6 flex justify-between">
+              <button
+                onClick={() => setRepeatingStep('entries')}
+                className="px-6 py-3 rounded-xl border-2 border-slate-200 text-slate-600 font-semibold"
+              >
+                Back
+              </button>
+              <button
+                onClick={() => setRepeatingStep('children')}
+                className="px-6 py-3 rounded-xl bg-blue-600 text-white font-semibold"
+              >
+                Continue
+              </button>
+            </div>
+          </motion.div>
+        )}
+
+        {stage === 'PHASE3' && repeatingStep === 'children' && (
+          <motion.div
+            key="repeating-children"
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.3 }}
+            className="p-8 sm:p-12"
+          >
+            <RepeatingGroup
+              groupId="children"
+              title="Your Children"
+              description="List all your children, including those not currently with you."
+              fields={CHILD_FIELDS}
+              entries={getChildEntries()}
+              onAdd={handleChildAdd}
+              onUpdate={handleChildUpdate}
+              onDelete={handleChildDelete}
+            />
+            <div className="mt-6 flex justify-between">
+              <button
+                onClick={() => setRepeatingStep('last_address')}
+                className="px-6 py-3 rounded-xl border-2 border-slate-200 text-slate-600 font-semibold"
+              >
+                Back
+              </button>
+              <button
+                onClick={() => {
+                  setRepeatingStep('residences');
+                }}
+                className="px-6 py-3 rounded-xl bg-blue-600 text-white font-semibold"
+              >
+                Continue
+              </button>
+            </div>
+          </motion.div>
+        )}
+
+        {stage === 'PHASE3' && repeatingStep === 'residences' && (
+          <motion.div
+            key="repeating-residences"
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.3 }}
+            className="p-8 sm:p-12"
+          >
+            <RepeatingGroup
+              groupId="residences"
+              title="Residences — Last 5 Years"
+              description="List every place you have lived during the last 5 years, starting with the most recent."
+              fields={RESIDENCES_FIELDS}
+              entries={getGroupEntries('addresses')}
+              onAdd={(e) => handleGroupAdd('addresses', e)}
+              onUpdate={(id, e) => handleGroupUpdate('addresses', id, e)}
+              onDelete={(id) => handleGroupDelete('addresses', id)}
+            />
+            <div className="mt-6 flex justify-between">
+              <button
+                onClick={() => setRepeatingStep('children')}
+                className="px-6 py-3 rounded-xl border-2 border-slate-200 text-slate-600 font-semibold"
+              >
+                Back
+              </button>
+              <button
+                onClick={() => setRepeatingStep('education')}
+                className="px-6 py-3 rounded-xl bg-blue-600 text-white font-semibold"
+              >
+                Continue
+              </button>
+            </div>
+          </motion.div>
+        )}
+
+        {stage === 'PHASE3' && repeatingStep === 'education' && (
+          <motion.div
+            key="repeating-education"
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.3 }}
+            className="p-8 sm:p-12"
+          >
+            <RepeatingGroup
+              groupId="education"
+              title="Education"
+              description="List the schools you have attended, starting with the most recent."
+              fields={EDUCATION_FIELDS}
+              entries={getGroupEntries('education')}
+              onAdd={(e) => handleGroupAdd('education', e)}
+              onUpdate={(id, e) => handleGroupUpdate('education', id, e)}
+              onDelete={(id) => handleGroupDelete('education', id)}
+            />
+            <div className="mt-6 flex justify-between">
+              <button
+                onClick={() => setRepeatingStep('residences')}
+                className="px-6 py-3 rounded-xl border-2 border-slate-200 text-slate-600 font-semibold"
+              >
+                Back
+              </button>
+              <button
+                onClick={() => setRepeatingStep('employment')}
+                className="px-6 py-3 rounded-xl bg-blue-600 text-white font-semibold"
+              >
+                Continue
+              </button>
+            </div>
+          </motion.div>
+        )}
+
+        {stage === 'PHASE3' && repeatingStep === 'employment' && (
+          <motion.div
+            key="repeating-employment"
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.3 }}
+            className="p-8 sm:p-12"
+          >
+            <RepeatingGroup
+              groupId="employment"
+              title="Employment — Last 5 Years"
+              description="List your employers during the last 5 years, starting with the most recent."
+              fields={EMPLOYMENT_FIELDS}
+              entries={getGroupEntries('employment')}
+              onAdd={(e) => handleGroupAdd('employment', e)}
+              onUpdate={(id, e) => handleGroupUpdate('employment', id, e)}
+              onDelete={(id) => handleGroupDelete('employment', id)}
+            />
+            <div className="mt-6 flex justify-between">
+              <button
+                onClick={() => setRepeatingStep('education')}
+                className="px-6 py-3 rounded-xl border-2 border-slate-200 text-slate-600 font-semibold"
+              >
+                Back
+              </button>
+              <button
+                onClick={() => setRepeatingStep('family')}
+                className="px-6 py-3 rounded-xl bg-blue-600 text-white font-semibold"
+              >
+                Continue
+              </button>
+            </div>
+          </motion.div>
+        )}
+
+        {stage === 'PHASE3' && repeatingStep === 'family' && (
+          <motion.div
+            key="repeating-family"
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.3 }}
+            className="p-8 sm:p-12"
+          >
+            <RepeatingGroup
+              groupId="family"
+              title="Parents and Siblings"
+              description="List your parents and siblings, including their current locations."
+              fields={FAMILY_FIELDS}
+              entries={getGroupEntries('family')}
+              onAdd={(e) => handleGroupAdd('family', e)}
+              onUpdate={(id, e) => handleGroupUpdate('family', id, e)}
+              onDelete={(id) => handleGroupDelete('family', id)}
+            />
+            <div className="mt-6 flex justify-between">
+              <button
+                onClick={() => setRepeatingStep('employment')}
+                className="px-6 py-3 rounded-xl border-2 border-slate-200 text-slate-600 font-semibold"
+              >
+                Back
+              </button>
+              <button
+                onClick={() => setRepeatingStep('supplement_b')}
+                className="px-6 py-3 rounded-xl bg-blue-600 text-white font-semibold"
+              >
+                Continue
+              </button>
+            </div>
+          </motion.div>
+        )}
+
+        {stage === 'PHASE3' && repeatingStep === 'supplement_b' && (
+          <motion.div
+            key="repeating-supplement-b"
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.3 }}
+            className="p-8 sm:p-12"
+          >
+            <RepeatingGroup
+              groupId="supplement_b"
+              title="Additional Information"
+              description="If you have additional information that did not fit in the previous sections, add it here. (Optional)"
+              fields={SUPPLEMENT_B_FIELDS}
+              entries={getGroupEntries('supplement_b')}
+              onAdd={(e) => handleGroupAdd('supplement_b', e)}
+              onUpdate={(id, e) => handleGroupUpdate('supplement_b', id, e)}
+              onDelete={(id) => handleGroupDelete('supplement_b', id)}
+              maxEntries={1}
+            />
+            <div className="mt-6 flex justify-between">
+              <button
+                onClick={() => setRepeatingStep('family')}
+                className="px-6 py-3 rounded-xl border-2 border-slate-200 text-slate-600 font-semibold"
+              >
+                Back
+              </button>
+              <button
+                onClick={() => {
+                  setRepeatingStep(null);
+                  setStage('PHASE4');
+                  setCurrentQ(0);
+                }}
+                className="px-6 py-3 rounded-xl bg-blue-600 text-white font-semibold"
+              >
+                Continue
+              </button>
+            </div>
+          </motion.div>
+        )}
+
+        {(stage === 'PHASE1' || stage === 'TRIAGE' || stage === 'PHASE2' || stage === 'PHASE3') && question && !repeatingStep && (
           <motion.div 
             key={question.id}
             initial={{ opacity: 0, x: 20 }}
@@ -3068,46 +4224,43 @@ export default function App() {
               );
             })()}
 
-            {/* ── B2C offer (directive §3): both options + exact totals BEFORE
-                payment. Only when the paywall build flag is on; amounts come
-                from the same pricing module the server enforces with. ── */}
+            {/* ── Preparation upsell (owner directive 2026-11-05): this
+                screen is the readiness report. Form preparation is a
+                separate purchase — priced here from the same server
+                pricing module checkout enforces with. The retired $1
+                evaluation is gone; nothing here references it. ── */}
             {PAYWALL_UI_ON() && (() => {
-              const offer = buildOffer(lang);
-              const evalToken = (() => { try { return sessionStorage.getItem('iru_evaluation_token'); } catch { return null; } })();
-              const formTokens = loadFormTokens();
               const owned = purchaseState.ownedForms;
-              const oneOwned = owned.length === 1 ? owned[0] : null;
-              const otherForm = oneOwned ? (oneOwned === 'I-589' ? 'I-765' : 'I-589') : null;
+              const formKeyFor = (code: string) => (code === 'I-589' ? 'i589' : code === 'I-765' ? 'i765' : null);
+              // Correct charge for adding this form now: full price for
+              // the first preparation, $50 off an additional form, or
+              // the $349 bundle remainder when it completes the pair.
+              const priceFor = (code: string): number | null => {
+                const priced = pricePurchase({ ownedForms: owned, selectedForm: code });
+                return priced.ok ? priced.totalCents : null;
+              };
+              const unowned = ['I-589', 'I-765'].filter((f) => !owned.includes(f));
+              const bundlePrice = owned.length === 0
+                ? (() => { const b = pricePurchase({ ownedForms: [], selectedForm: 'I-589', addedForm: 'I-765' }); return b.ok ? b.totalCents : null; })()
+                : null;
               return (
                 <div className="mt-8 mb-2 text-left border-2 border-amber-300 bg-amber-50 rounded-xl p-4">
                   <h3 className="text-base font-serif font-bold text-slate-900 mb-2">{t('offerTitle', 'Complete preparation — pricing')}</h3>
-                  <p className="text-xs text-slate-600 mb-3">{t('offerIntro', 'Begin with the $1.00 limited evaluation — a concise summary of the broad areas that need attention. Your $1.00 is credited in full toward complete preparation. One-time charges in USD. No subscription. IRU prepares drafts for your review; it is not a law firm, provides no legal advice, and files nothing.')}</p>
-                  <ul className="text-sm text-slate-700 list-disc pl-5 mb-3">
-                    {offer.options.map((o: any) => (
-                      <li key={o.sku}><strong>{o.name} — {formatCents(o.totalCents)} {t('offerTotalWord', 'total')}</strong> ({o.scope}){o.savingsNote ? ` — ${o.savingsNote}` : ''}</li>
-                    ))}
-                    <li><strong>{t('offerAddon', 'Second form later')}</strong> — {formatCents(PRICING.secondForm.chargeCents)} ({t('offerTotalWord', 'total')} {formatCents(PRICING.secondForm.totalCents)})</li>
-                  </ul>
+                  <p className="text-xs text-slate-600 mb-3">{t('offerIntro', 'Your readiness report is complete. To have IRU prepare your form as a reviewable draft, purchase preparation below. One-time charges in USD. No subscription. IRU prepares drafts for your review; it is not a law firm, provides no legal advice, and files nothing.')}</p>
                   <div className="flex flex-wrap gap-3">
-                    {!purchaseState.hasEvaluation && owned.length === 0 && (
-                      <button onClick={() => handleCheckout(SKUS.EVALUATION)} disabled={checkoutBusy} className="px-5 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-50">
-                        {t('offerStart', 'Start: $1.00 limited evaluation (test mode)')}
-                      </button>
-                    )}
-                    {purchaseState.hasEvaluation && owned.length === 0 && (
-                      <>
-                        <button onClick={() => { if (selectedFormId) handleCheckout(SKUS.ONE_FORM, { formId: selectedFormId, prerequisiteToken: evalToken || undefined }); }} disabled={checkoutBusy || !selectedFormId} className="px-5 py-2.5 border-2 border-indigo-600 text-indigo-700 text-sm font-semibold rounded-xl hover:bg-indigo-50 disabled:opacity-50">
-                          {t('offerOneForm', 'Complete ONE form')} ({selectedFormId || '…'}) — {formatCents(PRICING.oneForm.chargeCents)} {t('offerMore', 'more')}
+                    {unowned.map((code) => {
+                      const price = priceFor(code);
+                      const key = formKeyFor(code);
+                      if (price == null || !key) return null;
+                      return (
+                        <button key={code} onClick={() => startFormprepCheckout([code], key as any)} disabled={checkoutBusy || pathwayCheckoutBusy} className="px-5 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-50">
+                          {t('offerOneForm', 'Complete preparation')} — {code} — {formatCents(price)}
                         </button>
-                        <button onClick={() => handleCheckout(SKUS.BUNDLE, { prerequisiteToken: evalToken || undefined })} disabled={checkoutBusy} className="px-5 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-50">
-                          {t('offerBundle', 'Complete BOTH forms')} — {formatCents(PRICING.bundle.chargeCents)} {t('offerMore', 'more')}
-                        </button>
-                        {!selectedFormId && <span className="text-xs text-slate-500 self-center">{t('offerPickForm', 'Select a form below to enable the one-form option.')}</span>}
-                      </>
-                    )}
-                    {oneOwned && otherForm && (
-                      <button onClick={() => handleCheckout(SKUS.SECOND_FORM_ADDON, { prerequisiteToken: formTokens[oneOwned] })} disabled={checkoutBusy} className="px-5 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-50">
-                        {t('offerAddSecond', 'Add')} {otherForm} — {formatCents(PRICING.secondForm.chargeCents)} ({formatCents(PRICING.secondForm.totalCents)} {t('offerTotalWord', 'total')})
+                      );
+                    })}
+                    {bundlePrice != null && (
+                      <button onClick={() => startFormprepCheckout(['I-589', 'I-765'], 'i589' as any)} disabled={checkoutBusy || pathwayCheckoutBusy} className="px-5 py-2.5 border-2 border-indigo-600 text-indigo-700 text-sm font-semibold rounded-xl hover:bg-indigo-50 disabled:opacity-50">
+                        {t('offerBundle', 'Complete BOTH forms')} — {formatCents(bundlePrice)}
                       </button>
                     )}
                     {owned.length >= 2 && <span className="text-sm text-slate-700">{t('offerBothOwned', 'You have preparation for both forms. Generate each draft below.')}</span>}

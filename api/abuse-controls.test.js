@@ -133,11 +133,13 @@ describe('WS5 (a) rate limiters trip per-IP, per-endpoint', () => {
     const ip = '10.20.3.1';
     for (let i = 0; i < 5; i++) {
       const res = mockRes();
-      await checkoutHandler(reqFrom(ip, { body: { sku: 'iru-evaluation' } }), res);
+      // LEGACY checkout vehicle (no sku — env-priced; the $1
+      // evaluation checkout is retired).
+      await checkoutHandler(reqFrom(ip, { body: {} }), res);
       assert.equal(res.statusCode, 200, `checkout ${i + 1} within capacity 5`);
     }
     const blockedCheckout = mockRes();
-    await checkoutHandler(reqFrom(ip, { body: { sku: 'iru-evaluation' } }), blockedCheckout);
+    await checkoutHandler(reqFrom(ip, { body: {} }), blockedCheckout);
     assert.equal(blockedCheckout.statusCode, 429, 'checkout bucket for this IP is exhausted');
 
     const gen = mockRes();
@@ -205,7 +207,10 @@ describe('WS5 (b) malformed and oversized inputs', () => {
     await checkoutHandler(reqFrom('10.20.8.2', { body: JSON.stringify({ sku: 'iru-evaluation' }) + ' '.repeat(300 * 1024) }), strRes);
     assert.equal(strRes.statusCode, 413, 'oversized raw-string body refused');
     const okRes = mockRes();
-    await checkoutHandler(reqFrom('10.20.8.3', { body: { sku: 'iru-evaluation' } }), okRes);
+    // Normal-sized checkout still succeeds (LEGACY vehicle — the $1
+    // evaluation checkout is retired; the 413 assertions above are
+    // unaffected because the body-size check precedes plan resolution).
+    await checkoutHandler(reqFrom('10.20.8.3', { body: {} }), okRes);
     assert.equal(okRes.statusCode, 200, 'a normal-sized checkout still succeeds');
   });
 });

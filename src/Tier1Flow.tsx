@@ -3,6 +3,14 @@
 import { useState, useEffect } from 'react';
 import type { CSSProperties } from 'react';
 import { scoreAssessment, applyIntelligence, buildFactRecord, type ScoredAssessment, type FactRecord } from './tier1-assess';
+import PathwayGuidance from './components/PathwayGuidance';
+import PathwayCheckoutSummary from './components/PathwayCheckoutSummary';
+import { FORMS, getActiveCatalog } from '../api/_lib/catalog.js';
+import { pricePurchase } from '../api/_lib/checkout-pricing.js';
+// Entitlement tokens live in localStorage (paywall.tsx). Do not read
+// sessionStorage for tokens: checkout writes localStorage, and the
+// sessionStorage reads below used to find nothing (Gap 7, 2026-11-05).
+import { getFormTokens, getReadinessTokens, getStoredToken } from './paywall';
 
 export type Tier1Lang = 'EN' | 'ES' | 'ZH' | 'HT' | 'AR';
 
@@ -115,9 +123,13 @@ interface Props {
   lang: Tier1Lang;
   assess: (answers: Record<string, any>, lang: Tier1Lang) => { blockers: { t: string; d: string }[]; warnings: { t: string; d: string }[]; complete: { t: string; d: string }[]; ready: boolean };
   onExit: () => void;
+  /** Pathway Add at completion: App performs the formprep checkout POST
+   *  + Stripe redirect for these forms. Optional — without it the Add
+   *  button is inert. */
+  onFormprepCheckout?: (forms: string[]) => void;
 }
 
-export default function Tier1Flow({ formKey, questions, steps, info, lang, assess, onExit }: Props) {
+export default function Tier1Flow({ formKey, questions, steps, info, lang, assess, onExit, onFormprepCheckout }: Props) {
   const [qi, setQi] = useState(0);
   const [answers, setAnswers] = useState<Record<string, any>>(() => {
     // Restore from localStorage on mount (returning session)
@@ -173,9 +185,13 @@ export default function Tier1Flow({ formKey, questions, steps, info, lang, asses
       const hashArray = Array.from(new Uint8Array(hashBuffer));
       const clientKeyHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
       const factRecord = buildFactRecord(answers);
+      // Persistence is gated server-side (any paid entitlement).
+      const saveHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+      const saveTokenHeader = tier1TokenFor(formKey);
+      if (saveTokenHeader) saveHeaders['x-entitlement-token'] = saveTokenHeader;
       const res = await fetch('/api/assessment-save', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: saveHeaders,
         body: JSON.stringify({
           clientKeyHash,
           form_id: formKey,
@@ -205,7 +221,7 @@ export default function Tier1Flow({ formKey, questions, steps, info, lang, asses
     const basic = assess(answers, lang);
     const withIntel = applyIntelligence(formKey, answers, basic);
     const r: ScoredAssessment = scoreAssessment(withIntel, info.formNumber, [], factRecord);
-    return <Tier1Report info={info} lang={lang} result={r} questions={questions} steps={steps} answers={answers} factRecord={factRecord} onExit={onExit} />;
+    return <Tier1Report info={info} lang={lang} result={r} questions={questions} steps={steps} answers={answers} factRecord={factRecord} onExit={onExit} onFormprepCheckout={onFormprepCheckout} />;
   }
 
   const q = visible[qi];
@@ -280,7 +296,7 @@ export default function Tier1Flow({ formKey, questions, steps, info, lang, asses
         <button data-testid="btn-save" onClick={handleSave} disabled={isSaving} style={{ ...btnStyle, background: '#0e9f6e', color: '#fff', borderColor: '#0e9f6e' }}>
           {isSaving ? 'Saving...' : 'Save Progress'}
         </button>
-        <button data-testid="btn-next" onClick={goNext} style={{ ...btnStyle, background: '#1a56db', color: '#fff', borderColor: '#1a56db' }}>
+        <button data-testid={qi === visible.length - 1 ? "btn-see-report" : "btn-next"} onClick={goNext} style={{ ...btnStyle, background: '#1a56db', color: '#fff', borderColor: '#1a56db' }}>
           {qi === visible.length - 1 ? UI.seeReport[lang] : UI.next[lang]}
         </button>
       </div>
@@ -330,7 +346,7 @@ function RepeatingGroupEditor({ q, lang, rgData, setRgData, rgEditing, setRgEdit
   return (
     <div>
       {entries.map((e: any, i: number) => (
-        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, padding: '0.6rem 0.9rem', margin: '0.4rem 0' }}>
+        <div key={i} data-testid={`entry-card-${i}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, padding: '0.6rem 0.9rem', margin: '0.4rem 0' }}>
           <span>{schema.map(s => e[s.id]).filter(Boolean).join(' · ') || 'Entry ' + (i + 1)}</span>
           <span>
             <button onClick={() => startEdit(i)} style={{ ...btnStyle, padding: '0.3rem 0.7rem', fontSize: '0.85rem', marginRight: '0.4rem' }}>{UI.edit[lang]}</button>
@@ -344,6 +360,7 @@ function RepeatingGroupEditor({ q, lang, rgData, setRgData, rgEditing, setRgEdit
             <label key={s.id} style={{ fontSize: '0.85rem', color: '#64748b', display: 'block', margin: '0.4rem 0' }}>
               {RG_FIELD_LABELS[s.id]?.[lang] || s.id}
               <input type={s.type} value={draft[s.id] || ''} onChange={e => setDraft({ ...draft, [s.id]: e.target.value })}
+                data-testid={`entry-input-${s.id}`}
                 style={{ width: '100%', padding: '0.6rem', fontSize: '1rem', border: '1px solid #e2e8f0', borderRadius: 8, boxSizing: 'border-box', marginTop: '0.25rem' }} />
             </label>
           ))}
@@ -362,8 +379,18 @@ function RepeatingGroupEditor({ q, lang, rgData, setRgData, rgEditing, setRgEdit
   );
 }
 
-function Tier1Report({ info, lang, result, questions, steps, answers, factRecord, onExit }: any) {
+function Tier1Report({ info, lang, result, questions, steps, answers, factRecord, onExit, onFormprepCheckout }: any) {
   const r = result as ScoredAssessment;
+  // Pathway Add at completion: shows the checkout summary inline
+  // (lines, discount/bundle, total) instead of the guidance panel.
+  // onFormprepCheckout (from App) performs the formprep checkout POST
+  // + Stripe redirect for these forms.
+  const [pathwayCheckout, setPathwayCheckout] = useState<{
+    selectedForm: string;
+    addedForm: string;
+    pricing: { lines: { form: string; regularCents: number; discountCents: number; finalCents: number; kind: string }[]; totalCents: number; bundleApplied: boolean; bundleSavingCents: number };
+  } | null>(null);
+  const [pathwayCheckoutError, setPathwayCheckoutError] = useState<string | null>(null);
   // FIX (2026-11-03): banner reflects weakest section, not just blocker count.
   // A report with no blockers but an Incomplete section should not say "ready."
   const weakest = r.sections?.length ? r.sections.reduce((a, b) => a.score < b.score ? a : b) : null;
@@ -479,6 +506,69 @@ function Tier1Report({ info, lang, result, questions, steps, answers, factRecord
           <li>{t({ EN: 'Complete the form using the information provided above — organized by form section.' }, lang)}</li>
         </ol>
       </div>
+      {/* Pathway Assistant — related-form guidance at completion (before Generate) */}
+      {pathwayCheckout ? (
+        <PathwayCheckoutSummary
+          pricing={pathwayCheckout.pricing}
+          selectedForm={pathwayCheckout.selectedForm}
+          addedForm={pathwayCheckout.addedForm}
+          error={pathwayCheckoutError}
+          onConfirm={() => {
+            if (onFormprepCheckout) {
+              onFormprepCheckout([pathwayCheckout.selectedForm, pathwayCheckout.addedForm]);
+            }
+          }}
+          onBack={() => { setPathwayCheckout(null); setPathwayCheckoutError(null); }}
+        />
+      ) : (
+        <PathwayGuidance
+          currentForm={info.formNumber}
+          // Owned prep forms = forms this browser holds a PAID entitlement
+          // token for (set only after a successful checkout). Completing
+          // the questionnaire is NOT a purchase: the server re-derives
+          // ownership from the entitlement token and is authoritative on
+          // price, so the display must never treat the just-completed
+          // form as owned. (Bug found 2026-11-05 by the error crawl:
+          // the panel + summary showed $200 for I-589 at I-765 completion
+          // while the server charges the $349 bundle.)
+          ownedForms={Object.keys(getFormTokens())}
+          activeCatalog={getActiveCatalog()}
+          formsCatalog={FORMS}
+          placement="completion"
+          onAddForm={(form) => {
+            if (!onFormprepCheckout) return;
+            setPathwayCheckoutError(null);
+            // Owned prep forms: ONLY forms with a paid entitlement token
+            // in this browser — see the note above. The server is
+            // authoritative on price and charges the bundle when the
+            // current form is not actually owned.
+            let owned: string[] = [];
+            try {
+              const tokens = getFormTokens();
+              owned = [...new Set(Object.keys(tokens))];
+            } catch { /* ignore */ }
+            const priced = pricePurchase({
+              ownedForms: owned,
+              selectedForm: info.formNumber,
+              addedForm: form,
+            });
+            if (!priced.ok) {
+              setPathwayCheckoutError(priced.error || 'This purchase cannot be completed.');
+              return;
+            }
+            setPathwayCheckout({
+              selectedForm: info.formNumber,
+              addedForm: form,
+              pricing: {
+                lines: priced.lines,
+                totalCents: priced.totalCents,
+                bundleApplied: priced.bundleApplied,
+                bundleSavingCents: priced.bundleSavingCents,
+              },
+            });
+          }}
+        />
+      )}
       <div style={{ display: 'flex', gap: '1rem', margin: '1.25rem 0' }}>
         <button onClick={onExit} style={btnStyle}>{UI.startOver[lang]}</button>
         <a href={info.pdfUrl} target="_blank" rel="noopener"><button style={{ ...btnStyle, background: '#1a56db', color: '#fff', borderColor: '#1a56db' }}>{UI.downloadPdf[lang]} {info.formNumber}</button></a>
@@ -536,6 +626,23 @@ function Tier1Report({ info, lang, result, questions, steps, answers, factRecord
 }
 
 
+// Best entitlement token for this form's server calls (fill + save):
+// the preparation token for the form, else readiness, else generic.
+// The server decides what each token unlocks; this only presents it.
+function tier1TokenFor(formKey: string): string | null {
+  const codeMap: Record<string, string> = { i130: 'I-130', i90: 'I-90', n400: 'N-400', i765: 'I-765', i485: 'I-485', i589: 'I-589' };
+  const code = codeMap[formKey];
+  try {
+    if (code) {
+      const prep = getFormTokens();
+      if (prep[code]) return prep[code];
+      const read = getReadinessTokens();
+      if (read[code]) return read[code];
+    }
+    return getStoredToken();
+  } catch { return null; }
+}
+
 // Generate completed form via Python endpoint
 async function generateCompletedForm(formKey: string, facts: Record<string, any>): Promise<void> {
   const endpoint = formKey === 'i130' ? '/api/fill-i130' : formKey === 'i90' ? '/api/fill-i90' : formKey === 'n400' ? '/api/fill-n400' : formKey === 'i765' ? '/api/fill-i765' : formKey === 'i485' ? '/api/fill-i485' : null;
@@ -544,11 +651,21 @@ async function generateCompletedForm(formKey: string, facts: Record<string, any>
     return;
   }
   try {
+    // Preparation is gated server-side: present this form's token.
+    // A readiness-only token is refused 402 — readiness does not
+    // include the prepared form draft.
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const token = tier1TokenFor(formKey);
+    if (token) headers['x-entitlement-token'] = token;
     const res = await fetch(endpoint, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ facts, addresses: [], biographic: {} }),
     });
+    if (res.status === 402) {
+      alert('A paid Form Preparation purchase for this form is required to generate its draft.');
+      return;
+    }
     if (!res.ok) throw new Error('Generation failed');
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
