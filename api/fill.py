@@ -1,9 +1,55 @@
-"""Vercel Python serverless: fill I485 from Tier1Fact JSON."""
+"""Vercel Python serverless: fill any Tier 1 form from Tier1Fact JSON.
+
+Single function for all five forms. The five near-identical fill-*.py
+files were consolidated because Vercel's Hobby plan caps a deployment
+at 12 serverless functions and the five fill files plus the other
+handlers exceeded it (16 functions). The form is selected by:
+  1. ?form=<key> query param (set by the vercel.json rewrites that map
+     the legacy /api/fill-<key> URLs to /api/fill?form=<key>),
+  2. a /api/fill-<key> path suffix, or
+  3. a `form` field in the JSON body.
+Form keys: i765, i90, n400, i130, i485. The legacy /api/fill-<key>
+URLs keep working via the rewrites; no client change was needed.
+"""
 import json, fitz, os, sys
 import urllib.request, urllib.error
+import urllib.parse
 sys.path.insert(0, os.path.dirname(__file__))  # _python is sibling
 from http.server import BaseHTTPRequestHandler
-TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), '../public/forms/i-485.pdf')
+
+# form key -> (FORM_ID, template file, download filename,
+#              binder module, build function name)
+FORMS = {
+    'i765': ('I-765', 'i-765.pdf', 'i765-draft.pdf',
+             '_python.i765_full_binder', 'build_i765_full_plan'),
+    'i90': ('I-90', 'i-90.pdf', 'i90-draft.pdf',
+            '_python.i90_full_binder', 'build_i90_full_plan'),
+    'n400': ('N-400', 'n-400.pdf', 'n400-draft.pdf',
+             '_python.n400_full_binder', 'build_n400_full_plan'),
+    'i485': ('I-485', 'i-485.pdf', 'i485-draft.pdf',
+             '_python.i485_full_binder', 'build_i485_full_plan'),
+    # I-130 uses the master binder: build_master_plan(facts, addresses,
+    # biographic) -> (plan, review, stats). All other forms use
+    # build_<form>_full_plan(facts) -> (plan, review).
+    'i130': ('I-130', 'i-130.pdf', 'i130-draft.pdf',
+             '_python.master_binder', 'build_master_plan'),
+}
+
+
+def _resolve_form(path, body):
+    """Return the form key from query, path suffix, or body — else None."""
+    parsed = urllib.parse.urlparse(path or '')
+    query = urllib.parse.parse_qs(parsed.query)
+    form = (query.get('form') or [None])[0]
+    if form in FORMS:
+        return form
+    if parsed.path.startswith('/api/fill-'):
+        suffix = parsed.path[len('/api/fill-'):].split('/')[0].split('?')[0]
+        if suffix in FORMS:
+            return suffix
+    if isinstance(body, dict) and body.get('form') in FORMS:
+        return body['form']
+    return None
 
 # ── Paid-access gate (owner directive 2026-11-05) ──
 # Duplicate of the canonical helper in api_server.py (same repo):
@@ -19,7 +65,6 @@ TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), '../public/forms/i-485.p
 # NOTE: this path is implemented but CANNOT be proven live from the
 # dev VM — it needs a Preview deploy plus a shared (non-in-memory)
 # entitlement store.
-FORM_ID = 'I-485'
 
 def _entitlement_status_url(host):
     override = os.environ.get('IRU_ENTITLEMENT_STATUS_URL')
@@ -79,9 +124,28 @@ def _check_paid_access(token, form_id, status_url):
 
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
+        try:
+            length = int(self.headers.get('content-length', 0))
+            raw = self.rfile.read(length) if length > 0 else b'{}'
+            body = json.loads(raw)
+        except Exception:
+            self.send_response(400)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({'error': 'Invalid JSON body'}).encode())
+            return
+        form_key = _resolve_form(self.path, body)
+        if not form_key:
+            self.send_response(400)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({'error': 'Unknown form. Use ?form=i765|i90|n400|i130|i485'}).encode())
+            return
+        form_id, template_file, download_name, binder_module, build_fn = FORMS[form_key]
+        template_path = os.path.join(os.path.dirname(__file__), '../public/forms', template_file)
         if os.environ.get('PAYWALL_ENABLED') == 'true':
             allowed, reason = _check_paid_access(
-                self.headers.get('x-entitlement-token'), FORM_ID,
+                self.headers.get('x-entitlement-token'), form_id,
                 _entitlement_status_url(self.headers.get('host')))
             if not allowed:
                 self.send_response(402)
@@ -90,21 +154,25 @@ class handler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({'error': 'A paid entitlement covering this form is required.', 'reason': reason}).encode())
                 return
         try:
-            length = int(self.headers.get('content-length', 0))
-            body = json.loads(self.rfile.read(length))
             facts = body.get('facts', {})
-            from _python.i485_full_binder import build_i485_full_plan as build_i485_plan
             from _python.binder import apply_fill
             import tempfile
-            plan, review = build_i485_plan(facts)
+            import importlib
+            binder = importlib.import_module(binder_module)
+            build = getattr(binder, build_fn)
+            if form_key == 'i130':
+                plan, review, _stats = build(
+                    facts, body.get('addresses', []), body.get('biographic', {}))
+            else:
+                plan, review = build(facts)
             with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
                 tmp_path = tmp.name
-            filled, errors = apply_fill(TEMPLATE_PATH, tmp_path, plan)
+            filled, errors = apply_fill(template_path, tmp_path, plan)
             with open(tmp_path, 'rb') as f: pdf_bytes = f.read()
             os.unlink(tmp_path)
             self.send_response(200)
             self.send_header('Content-Type', 'application/pdf')
-            self.send_header('Content-Disposition', 'attachment; filename="i485-draft.pdf"')
+            self.send_header('Content-Disposition', 'attachment; filename="%s"' % download_name)
             self.send_header('X-Fields-Filled', str(filled))
             self.send_header('X-Review-Items', str(len(review)))
             self.end_headers()

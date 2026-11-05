@@ -25,9 +25,9 @@ from urllib.parse import urlparse
 # paywall is on: a missing token, an unpaid/wrong-scope entitlement,
 # or ANY verification failure (including the endpoint being
 # unreachable) denies access with 402. Stdlib only (urllib), 3s
-# timeout, no tokens or secrets in logs. The Vercel fill handlers
-# (api/fill-*.py) carry a duplicate of this helper — see the comment
-# there — because each is a standalone serverless function.
+# timeout, no tokens or secrets in logs. The Vercel fill handler
+# (api/fill.py) carries a duplicate of this helper — see the comment
+# there — because it is a standalone serverless function.
 ENTITLEMENT_STATUS_URL = os.environ.get(
     'IRU_ENTITLEMENT_STATUS_URL', 'http://localhost:3001/api/entitlement-status')
 

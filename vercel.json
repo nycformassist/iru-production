@@ -1,6 +1,26 @@
 {
   "rewrites": [
     {
+      "source": "/api/fill-i765",
+      "destination": "/api/fill?form=i765"
+    },
+    {
+      "source": "/api/fill-i90",
+      "destination": "/api/fill?form=i90"
+    },
+    {
+      "source": "/api/fill-n400",
+      "destination": "/api/fill?form=n400"
+    },
+    {
+      "source": "/api/fill-i130",
+      "destination": "/api/fill?form=i130"
+    },
+    {
+      "source": "/api/fill-i485",
+      "destination": "/api/fill?form=i485"
+    },
+    {
       "source": "/api/(.*)",
       "destination": "/api/$1"
     },
@@ -10,7 +30,7 @@
     }
   ],
   "functions": {
-    "api/fill-*.py": {
+    "api/fill.py": {
       "maxDuration": 60
     },
     "api/assessment-save.js": {
