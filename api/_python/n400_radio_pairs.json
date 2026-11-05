@@ -1,0 +1,156 @@
+[
+  {
+    "fact": "gender",
+    "yes_values": [
+      "male"
+    ],
+    "no_values": [
+      "female"
+    ],
+    "yes_field": "form1[0].#subform[1].P2_Line7_Gender[0]",
+    "no_field": "form1[0].#subform[1].P2_Line7_Gender[1]"
+  },
+  {
+    "fact": "disability_accom",
+    "yes_values": [
+      "yes"
+    ],
+    "no_values": [
+      "no"
+    ],
+    "yes_field": "form1[0].#subform[1].P2_Line10_claimdisability[0]",
+    "no_field": "form1[0].#subform[1].P2_Line10_claimdisability[1]"
+  },
+  {
+    "fact": "disability_2",
+    "yes_values": [
+      "yes"
+    ],
+    "no_values": [
+      "no"
+    ],
+    "yes_field": "form1[0].#subform[1].P2_Line11_claimdisability[0]",
+    "no_field": "form1[0].#subform[1].P2_Line11_claimdisability[1]"
+  },
+  {
+    "fact": "name_change_request",
+    "yes_values": [
+      "yes"
+    ],
+    "no_values": [
+      "no"
+    ],
+    "yes_field": "form1[0].#subform[1].P2_Line34_NameChange[0]",
+    "no_field": "form1[0].#subform[1].P2_Line34_NameChange[1]"
+  },
+  {
+    "fact": "ethnicity",
+    "yes_values": [
+      "yes"
+    ],
+    "no_values": [
+      "no"
+    ],
+    "yes_field": "form1[0].#subform[2].P7_Line1_Ethnicity[0]",
+    "no_field": "form1[0].#subform[2].P7_Line1_Ethnicity[1]"
+  },
+  {
+    "fact": "military_service",
+    "yes_values": [
+      "yes"
+    ],
+    "no_values": [
+      "no"
+    ],
+    "yes_field": "form1[0].#subform[3].P7_Line2_Forces[0]",
+    "no_field": "form1[0].#subform[3].P7_Line2_Forces[1]"
+  },
+  {
+    "fact": "p9_22b",
+    "yes_values": [
+      "yes"
+    ],
+    "no_values": [
+      "no"
+    ],
+    "yes_field": "form1[0].#subform[8].Pt9_Line22b[0]",
+    "no_field": "form1[0].#subform[8].Pt9_Line22b[1]"
+  },
+  {
+    "fact": "spouse_citizen",
+    "yes_values": [
+      "yes"
+    ],
+    "no_values": [
+      "no"
+    ],
+    "yes_field": "form1[0].#subform[10].P10_Line1_Citizen[0]",
+    "no_field": "form1[0].#subform[10].P10_Line1_Citizen[1]"
+  },
+  {
+    "fact": "spouse_immig",
+    "yes_values": [
+      "us_citizen"
+    ],
+    "no_values": [
+      "other"
+    ],
+    "yes_field": "form1[0].#subform[3].P10_Line5_Citizen[0]",
+    "no_field": "form1[0].#subform[3].P10_Line5_Citizen[1]"
+  },
+  {
+    "fact": "spouse_natz_when",
+    "yes_values": [
+      "before_marriage"
+    ],
+    "no_values": [
+      "after_marriage"
+    ],
+    "yes_field": "form1[0].#subform[10].P10_Line5a[0]",
+    "no_field": "form1[0].#subform[10].P10_Line5a[1]"
+  },
+  {
+    "fact": "child_17a",
+    "yes_values": [
+      "yes"
+    ],
+    "no_values": [
+      "no"
+    ],
+    "yes_field": "form1[0].#subform[8].P11_Line17A[0]",
+    "no_field": "form1[0].#subform[8].P11_Line17A[1]"
+  },
+  {
+    "fact": "child_17b",
+    "yes_values": [
+      "yes"
+    ],
+    "no_values": [
+      "no"
+    ],
+    "yes_field": "form1[0].#subform[8].P11_Line17B[0]",
+    "no_field": "form1[0].#subform[8].P11_Line17B[1]"
+  },
+  {
+    "fact": "child_17c",
+    "yes_values": [
+      "yes"
+    ],
+    "no_values": [
+      "no"
+    ],
+    "yes_field": "form1[0].#subform[8].P11_Line17C[0]",
+    "no_field": "form1[0].#subform[8].P11_Line17C[1]"
+  },
+  {
+    "fact": "child_26d",
+    "yes_values": [
+      "yes"
+    ],
+    "no_values": [
+      "no"
+    ],
+    "yes_field": "form1[0].#subform[9].P11_Line26d[0]",
+    "no_field": "form1[0].#subform[9].P11_Line26d[1]"
+  }
+]

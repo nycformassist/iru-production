@@ -1,0 +1,16 @@
+{
+ "i90_filing_reason": {
+  "2a": "P2_checkbox2[5]",
+  "2b": "P2_checkbox2[6]",
+  "2c": "P2_checkbox2[7]",
+  "2d": "P2_checkbox2[4]",
+  "2e": "P2_checkbox2[0]",
+  "2f": "P2_checkbox2[1]",
+  "2g": "P2_checkbox2[2]",
+  "2h": "P2_checkbox2[3]"
+ },
+ "family_name": "P1_Line3a_FamilyName[0]",
+ "given_name": "P1_Line3b_GivenName[0]",
+ "a_number": "P1_Line1_AlienNumber[0]",
+ "date_of_birth": "P1_Line9_DateOfBirth[0]"
+}

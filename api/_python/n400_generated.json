@@ -1,0 +1,702 @@
+{
+ "address": [
+  {
+   "field": "P2_Line11_CountryOfNationality[0]",
+   "full_name": "form1[0].#subform[1].P2_Line11_CountryOfNationality[0]",
+   "type": "Text",
+   "semantic": "country",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P2_Line10_CountryOfBirth[0]",
+   "full_name": "form1[0].#subform[1].P2_Line10_CountryOfBirth[0]",
+   "type": "Text",
+   "semantic": "country",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P7_Line1_Ethnicity[0]",
+   "full_name": "form1[0].#subform[2].P7_Line1_Ethnicity[0]",
+   "type": "CheckBox",
+   "semantic": "city",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P7_Line1_Ethnicity[1]",
+   "full_name": "form1[0].#subform[2].P7_Line1_Ethnicity[1]",
+   "type": "CheckBox",
+   "semantic": "city",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P4_Line3_CityTown3[0]",
+   "full_name": "form1[0].#subform[2].P4_Line3_CityTown3[0]",
+   "type": "Text",
+   "semantic": "city",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P4_Line3_CityTown2[0]",
+   "full_name": "form1[0].#subform[2].P4_Line3_CityTown2[0]",
+   "type": "Text",
+   "semantic": "city",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P4_Line3_CityTown1[0]",
+   "full_name": "form1[0].#subform[2].P4_Line3_CityTown1[0]",
+   "type": "Text",
+   "semantic": "city",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P4_Line3_ZipCode1[0]",
+   "full_name": "form1[0].#subform[2].P4_Line3_ZipCode1[0]",
+   "type": "Text",
+   "semantic": "zip",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P4_Line3_ZipCode2[0]",
+   "full_name": "form1[0].#subform[2].P4_Line3_ZipCode2[0]",
+   "type": "Text",
+   "semantic": "zip",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P4_Line3_ZipCode3[0]",
+   "full_name": "form1[0].#subform[2].P4_Line3_ZipCode3[0]",
+   "type": "Text",
+   "semantic": "zip",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P4_Line3_State1[0]",
+   "full_name": "form1[0].#subform[2].P4_Line3_State1[0]",
+   "type": "Text",
+   "semantic": "state",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P4_Line3_State2[0]",
+   "full_name": "form1[0].#subform[2].P4_Line3_State2[0]",
+   "type": "Text",
+   "semantic": "state",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P4_Line3_State3[0]",
+   "full_name": "form1[0].#subform[2].P4_Line3_State3[0]",
+   "type": "Text",
+   "semantic": "state",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P4_Line3_Country1[0]",
+   "full_name": "form1[0].#subform[2].P4_Line3_Country1[0]",
+   "type": "Text",
+   "semantic": "country",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P4_Line3_Country2[0]",
+   "full_name": "form1[0].#subform[2].P4_Line3_Country2[0]",
+   "type": "Text",
+   "semantic": "country",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P4_Line3_Country3[0]",
+   "full_name": "form1[0].#subform[2].P4_Line3_Country3[0]",
+   "type": "Text",
+   "semantic": "country",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P4_Line1_City[0]",
+   "full_name": "form1[0].#subform[2].P4_Line1_City[0]",
+   "type": "Text",
+   "semantic": "city",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P4_Line1_State[0]",
+   "full_name": "form1[0].#subform[2].P4_Line1_State[0]",
+   "type": "ComboBox",
+   "semantic": "state",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P4_Line1_ZipCode[0]",
+   "full_name": "form1[0].#subform[2].P4_Line1_ZipCode[0]",
+   "type": "Text",
+   "semantic": "zip",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P4_Line1_PostalCode[0]",
+   "full_name": "form1[0].#subform[2].P4_Line1_PostalCode[0]",
+   "type": "Text",
+   "semantic": "postal_code",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P4_Line1_Province[0]",
+   "full_name": "form1[0].#subform[2].P4_Line1_Province[0]",
+   "type": "Text",
+   "semantic": "province",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P4_Line1_StreetName[0]",
+   "full_name": "form1[0].#subform[2].P4_Line1_StreetName[0]",
+   "type": "Text",
+   "semantic": "street",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P4_Line1_InCareOfName[0]",
+   "full_name": "form1[0].#subform[2].P4_Line1_InCareOfName[0]",
+   "type": "Text",
+   "semantic": "in_care_of",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P4_Line1_Unit[0]",
+   "full_name": "form1[0].#subform[2].P4_Line1_Unit[0]",
+   "type": "CheckBox",
+   "semantic": "unit",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P4_Line1_Unit[1]",
+   "full_name": "form1[0].#subform[2].P4_Line1_Unit[1]",
+   "type": "CheckBox",
+   "semantic": "unit",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P4_Line1_Unit[2]",
+   "full_name": "form1[0].#subform[2].P4_Line1_Unit[2]",
+   "type": "CheckBox",
+   "semantic": "unit",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P4_Line1_Country[0]",
+   "full_name": "form1[0].#subform[2].P4_Line1_Country[0]",
+   "type": "Text",
+   "semantic": "country",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P5_Line1b_City[0]",
+   "full_name": "form1[0].#subform[3].P5_Line1b_City[0]",
+   "type": "Text",
+   "semantic": "city",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P4_Line1_State[1]",
+   "full_name": "form1[0].#subform[3].P4_Line1_State[1]",
+   "type": "ComboBox",
+   "semantic": "state",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P5_Line1b_ZipCode[0]",
+   "full_name": "form1[0].#subform[3].P5_Line1b_ZipCode[0]",
+   "type": "Text",
+   "semantic": "zip",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P5_Line1b_PostalCode[0]",
+   "full_name": "form1[0].#subform[3].P5_Line1b_PostalCode[0]",
+   "type": "Text",
+   "semantic": "postal_code",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P5_Line1b_Province[0]",
+   "full_name": "form1[0].#subform[3].P5_Line1b_Province[0]",
+   "type": "Text",
+   "semantic": "province",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P5_Line1b_StreetName[0]",
+   "full_name": "form1[0].#subform[3].P5_Line1b_StreetName[0]",
+   "type": "Text",
+   "semantic": "street",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P5_Line1b_InCareOfName[0]",
+   "full_name": "form1[0].#subform[3].P5_Line1b_InCareOfName[0]",
+   "type": "Text",
+   "semantic": "in_care_of",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P5_Line1b_Unit[0]",
+   "full_name": "form1[0].#subform[3].P5_Line1b_Unit[0]",
+   "type": "CheckBox",
+   "semantic": "unit",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P5_Line1b_Unit[1]",
+   "full_name": "form1[0].#subform[3].P5_Line1b_Unit[1]",
+   "type": "CheckBox",
+   "semantic": "unit",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P5_Line1b_Unit[2]",
+   "full_name": "form1[0].#subform[3].P5_Line1b_Unit[2]",
+   "type": "CheckBox",
+   "semantic": "unit",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P5_Line1b_Country[0]",
+   "full_name": "form1[0].#subform[3].P5_Line1b_Country[0]",
+   "type": "Text",
+   "semantic": "country",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P7_City3[0]",
+   "full_name": "form1[0].#subform[4].P7_City3[0]",
+   "type": "Text",
+   "semantic": "city",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P7_City2[0]",
+   "full_name": "form1[0].#subform[4].P7_City2[0]",
+   "type": "Text",
+   "semantic": "city",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P7_City1[0]",
+   "full_name": "form1[0].#subform[4].P7_City1[0]",
+   "type": "Text",
+   "semantic": "city",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P7_State1[0]",
+   "full_name": "form1[0].#subform[4].P7_State1[0]",
+   "type": "Text",
+   "semantic": "state",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P7_State2[0]",
+   "full_name": "form1[0].#subform[4].P7_State2[0]",
+   "type": "Text",
+   "semantic": "state",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P7_State3[0]",
+   "full_name": "form1[0].#subform[4].P7_State3[0]",
+   "type": "Text",
+   "semantic": "state",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P7_ZipCode1[0]",
+   "full_name": "form1[0].#subform[4].P7_ZipCode1[0]",
+   "type": "Text",
+   "semantic": "zip",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P7_ZipCode2[0]",
+   "full_name": "form1[0].#subform[4].P7_ZipCode2[0]",
+   "type": "Text",
+   "semantic": "zip",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P7_ZipCode3[0]",
+   "full_name": "form1[0].#subform[4].P7_ZipCode3[0]",
+   "type": "Text",
+   "semantic": "zip",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P7_Country3[0]",
+   "full_name": "form1[0].#subform[4].P7_Country3[0]",
+   "type": "Text",
+   "semantic": "country",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P7_Country2[0]",
+   "full_name": "form1[0].#subform[4].P7_Country2[0]",
+   "type": "Text",
+   "semantic": "country",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P7_Country1[0]",
+   "full_name": "form1[0].#subform[4].P7_Country1[0]",
+   "type": "Text",
+   "semantic": "country",
+   "source": "generated: address-component-pattern",
+   "confidence": "high"
+  }
+ ],
+ "identity": [
+  {
+   "field": "Line1_AlienNumber[0]",
+   "full_name": "form1[0].#subform[0].#area[0].Line1_AlienNumber[0]",
+   "type": "Text",
+   "semantic": "a_number",
+   "source": "generated: identity-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P2_Line1_MiddleName[0]",
+   "full_name": "form1[0].#subform[0].P2_Line1_MiddleName[0]",
+   "type": "Text",
+   "semantic": "middle_name",
+   "source": "generated: identity-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P2_Line1_GivenName[0]",
+   "full_name": "form1[0].#subform[0].P2_Line1_GivenName[0]",
+   "type": "Text",
+   "semantic": "given_name",
+   "source": "generated: identity-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P2_Line1_FamilyName[0]",
+   "full_name": "form1[0].#subform[0].P2_Line1_FamilyName[0]",
+   "type": "Text",
+   "semantic": "family_name",
+   "source": "generated: identity-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "Line3_MiddleName2[0]",
+   "full_name": "form1[0].#subform[0].Line3_MiddleName2[0]",
+   "type": "Text",
+   "semantic": "middle_name",
+   "source": "generated: identity-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "Line3_GivenName2[0]",
+   "full_name": "form1[0].#subform[0].Line3_GivenName2[0]",
+   "type": "Text",
+   "semantic": "given_name",
+   "source": "generated: identity-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "Line3_MiddleName1[0]",
+   "full_name": "form1[0].#subform[0].Line3_MiddleName1[0]",
+   "type": "Text",
+   "semantic": "middle_name",
+   "source": "generated: identity-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "Line3_GivenName1[0]",
+   "full_name": "form1[0].#subform[0].Line3_GivenName1[0]",
+   "type": "Text",
+   "semantic": "given_name",
+   "source": "generated: identity-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "Line2_FamilyName1[0]",
+   "full_name": "form1[0].#subform[0].Line2_FamilyName1[0]",
+   "type": "Text",
+   "semantic": "family_name",
+   "source": "generated: identity-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "Line2_FamilyName2[0]",
+   "full_name": "form1[0].#subform[0].Line2_FamilyName2[0]",
+   "type": "Text",
+   "semantic": "family_name",
+   "source": "generated: identity-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "Line1_AlienNumber[1]",
+   "full_name": "form1[0].#subform[1].#area[1].Line1_AlienNumber[1]",
+   "type": "Text",
+   "semantic": "a_number",
+   "source": "generated: identity-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P2_Line8_DateOfBirth[0]",
+   "full_name": "form1[0].#subform[1].P2_Line8_DateOfBirth[0]",
+   "type": "Text",
+   "semantic": "date_of_birth",
+   "source": "generated: identity-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "Part2Line4a_MiddleName[0]",
+   "full_name": "form1[0].#subform[1].Part2Line4a_MiddleName[0]",
+   "type": "Text",
+   "semantic": "middle_name",
+   "source": "generated: identity-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "Part2Line4a_GivenName[0]",
+   "full_name": "form1[0].#subform[1].Part2Line4a_GivenName[0]",
+   "type": "Text",
+   "semantic": "given_name",
+   "source": "generated: identity-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "Part2Line3_FamilyName[0]",
+   "full_name": "form1[0].#subform[1].Part2Line3_FamilyName[0]",
+   "type": "Text",
+   "semantic": "family_name",
+   "source": "generated: identity-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "Line1_AlienNumber[2]",
+   "full_name": "form1[0].#subform[2].#area[2].Line1_AlienNumber[2]",
+   "type": "Text",
+   "semantic": "a_number",
+   "source": "generated: identity-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "Line1_AlienNumber[3]",
+   "full_name": "form1[0].#subform[3].#area[3].Line1_AlienNumber[3]",
+   "type": "Text",
+   "semantic": "a_number",
+   "source": "generated: identity-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P10_Line4a_MiddleName[0]",
+   "full_name": "form1[0].#subform[3].P10_Line4a_MiddleName[0]",
+   "type": "Text",
+   "semantic": "middle_name",
+   "source": "generated: identity-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P10_Line4a_GivenName[0]",
+   "full_name": "form1[0].#subform[3].P10_Line4a_GivenName[0]",
+   "type": "Text",
+   "semantic": "given_name",
+   "source": "generated: identity-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P10_Line4a_FamilyName[0]",
+   "full_name": "form1[0].#subform[3].P10_Line4a_FamilyName[0]",
+   "type": "Text",
+   "semantic": "family_name",
+   "source": "generated: identity-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P10_Line4d_DateofBirth[0]",
+   "full_name": "form1[0].#subform[3].P10_Line4d_DateofBirth[0]",
+   "type": "Text",
+   "semantic": "date_of_birth",
+   "source": "generated: identity-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "Line1_AlienNumber[4]",
+   "full_name": "form1[0].#subform[4].#area[4].Line1_AlienNumber[4]",
+   "type": "Text",
+   "semantic": "a_number",
+   "source": "generated: identity-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P7_Line6_ANumber[0]",
+   "full_name": "form1[0].#subform[4].#area[5].P7_Line6_ANumber[0]",
+   "type": "Text",
+   "semantic": "a_number",
+   "source": "generated: identity-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "Line1_AlienNumber[5]",
+   "full_name": "form1[0].#subform[5].#area[6].Line1_AlienNumber[5]",
+   "type": "Text",
+   "semantic": "a_number",
+   "source": "generated: identity-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "Line1_AlienNumber[6]",
+   "full_name": "form1[0].#subform[6].#area[7].Line1_AlienNumber[6]",
+   "type": "Text",
+   "semantic": "a_number",
+   "source": "generated: identity-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "Line1_AlienNumber[7]",
+   "full_name": "form1[0].#subform[7].#area[8].Line1_AlienNumber[7]",
+   "type": "Text",
+   "semantic": "a_number",
+   "source": "generated: identity-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "Line1_AlienNumber[8]",
+   "full_name": "form1[0].#subform[8].#area[9].Line1_AlienNumber[8]",
+   "type": "Text",
+   "semantic": "a_number",
+   "source": "generated: identity-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "Line1_AlienNumber[9]",
+   "full_name": "form1[0].#subform[9].#area[10].Line1_AlienNumber[9]",
+   "type": "Text",
+   "semantic": "a_number",
+   "source": "generated: identity-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "Line1_AlienNumber[10]",
+   "full_name": "form1[0].#subform[10].#area[11].Line1_AlienNumber[10]",
+   "type": "Text",
+   "semantic": "a_number",
+   "source": "generated: identity-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "Line1_AlienNumber[11]",
+   "full_name": "form1[0].#subform[11].#area[12].Line1_AlienNumber[11]",
+   "type": "Text",
+   "semantic": "a_number",
+   "source": "generated: identity-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P14_Line1_nterpreterGivenName[0]",
+   "full_name": "form1[0].#subform[11].P14_Line1_nterpreterGivenName[0]",
+   "type": "Text",
+   "semantic": "given_name",
+   "source": "generated: identity-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P14_Line1_nterpreterFamilyName[0]",
+   "full_name": "form1[0].#subform[11].P14_Line1_nterpreterFamilyName[0]",
+   "type": "Text",
+   "semantic": "family_name",
+   "source": "generated: identity-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "Line1_AlienNumber[12]",
+   "full_name": "form1[0].#subform[12].#area[13].Line1_AlienNumber[12]",
+   "type": "Text",
+   "semantic": "a_number",
+   "source": "generated: identity-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P2_Line1_FamilyName[1]",
+   "full_name": "form1[0].#subform[12].P2_Line1_FamilyName[1]",
+   "type": "Text",
+   "semantic": "family_name",
+   "source": "generated: identity-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P2_Line1_GivenName[1]",
+   "full_name": "form1[0].#subform[12].P2_Line1_GivenName[1]",
+   "type": "Text",
+   "semantic": "given_name",
+   "source": "generated: identity-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "P2_Line1_MiddleName[1]",
+   "full_name": "form1[0].#subform[12].P2_Line1_MiddleName[1]",
+   "type": "Text",
+   "semantic": "middle_name",
+   "source": "generated: identity-pattern",
+   "confidence": "high"
+  },
+  {
+   "field": "Line1_AlienNumber[13]",
+   "full_name": "form1[0].#subform[13].#area[14].Line1_AlienNumber[13]",
+   "type": "Text",
+   "semantic": "a_number",
+   "source": "generated: identity-pattern",
+   "confidence": "high"
+  }
+ ]
+}

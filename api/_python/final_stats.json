@@ -1,0 +1,42 @@
+{
+ "i130": {
+  "total": 438,
+  "auto": 23,
+  "ask": 361,
+  "consumer": 54,
+  "mapped": 364,
+  "groups": 78
+ },
+ "i90": {
+  "total": 188,
+  "auto": 8,
+  "ask": 165,
+  "consumer": 15,
+  "generated": 64,
+  "mapped": 72
+ },
+ "n400": {
+  "total": 426,
+  "auto": 21,
+  "ask": 392,
+  "consumer": 13,
+  "generated": 87,
+  "mapped": 108
+ },
+ "i765": {
+  "total": 154,
+  "auto": 8,
+  "ask": 132,
+  "consumer": 14,
+  "generated": 63,
+  "mapped": 71
+ },
+ "i485": {
+  "total": 706,
+  "auto": 30,
+  "ask": 661,
+  "consumer": 15,
+  "generated": 191,
+  "mapped": 221
+ }
+}

@@ -1,0 +1,1532 @@
+[
+  {
+    "fact": "i485_adm_01",
+    "base": "Pt8Line13_YesNo",
+    "yes_field": "form1[0].#subform[13].Pt8Line13_YesNo[1]",
+    "no_field": "form1[0].#subform[13].Pt8Line13_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_02",
+    "base": "Pt8Line17_YesNo",
+    "yes_field": "form1[0].#subform[13].Pt8Line17_YesNo[0]",
+    "no_field": "form1[0].#subform[13].Pt8Line17_YesNo[1]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_03",
+    "base": "Pt8Line18_YesNo",
+    "yes_field": "form1[0].#subform[13].Pt8Line18_YesNo[0]",
+    "no_field": "form1[0].#subform[13].Pt8Line18_YesNo[1]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_04",
+    "base": "Pt8Line19_YesNo",
+    "yes_field": "form1[0].#subform[13].Pt8Line19_YesNo[1]",
+    "no_field": "form1[0].#subform[13].Pt8Line19_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_05",
+    "base": "Pt8Line1_YesNo",
+    "yes_field": "form1[0].#subform[12].Pt8Line1_YesNo[1]",
+    "no_field": "form1[0].#subform[12].Pt8Line1_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_06",
+    "base": "Pt8Line20_YesNo",
+    "yes_field": "form1[0].#subform[13].Pt8Line20_YesNo[0]",
+    "no_field": "form1[0].#subform[13].Pt8Line20_YesNo[1]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_07",
+    "base": "Pt8Line22_YesNo",
+    "yes_field": "form1[0].#subform[13].Pt8Line22_YesNo[0]",
+    "no_field": "form1[0].#subform[13].Pt8Line22_YesNo[1]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_08",
+    "base": "Pt8Line23_YesNo",
+    "yes_field": "form1[0].#subform[13].Pt8Line23_YesNo[1]",
+    "no_field": "form1[0].#subform[13].Pt8Line23_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_09",
+    "base": "Pt8Line24a_YesNo",
+    "yes_field": "form1[0].#subform[13].Pt8Line24a_YesNo[0]",
+    "no_field": "form1[0].#subform[13].Pt8Line24a_YesNo[1]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_10",
+    "base": "Pt8Line24b_YesNo",
+    "yes_field": "form1[0].#subform[13].Pt8Line24b_YesNo[1]",
+    "no_field": "form1[0].#subform[13].Pt8Line24b_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_11",
+    "base": "Pt8Line24c_YesNo",
+    "yes_field": "form1[0].#subform[13].Pt8Line24c_YesNo[0]",
+    "no_field": "form1[0].#subform[13].Pt8Line24c_YesNo[1]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_12",
+    "base": "Pt8Line25_YesNo",
+    "yes_field": "form1[0].#subform[14].Pt8Line25_YesNo[1]",
+    "no_field": "form1[0].#subform[14].Pt8Line25_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_13",
+    "base": "Pt8Line26_YesNo",
+    "yes_field": "form1[0].#subform[14].Pt8Line26_YesNo[1]",
+    "no_field": "form1[0].#subform[14].Pt8Line26_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_14",
+    "base": "Pt8Line27_YesNo",
+    "yes_field": "form1[0].#subform[14].Pt8Line27_YesNo[1]",
+    "no_field": "form1[0].#subform[14].Pt8Line27_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_15",
+    "base": "Pt8Line28_YesNo",
+    "yes_field": "form1[0].#subform[14].Pt8Line28_YesNo[1]",
+    "no_field": "form1[0].#subform[14].Pt8Line28_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_16",
+    "base": "Pt8Line29_YesNo",
+    "yes_field": "form1[0].#subform[14].Pt8Line29_YesNo[1]",
+    "no_field": "form1[0].#subform[14].Pt8Line29_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_17",
+    "base": "Pt8Line30_YesNo",
+    "yes_field": "form1[0].#subform[14].Pt8Line30_YesNo[1]",
+    "no_field": "form1[0].#subform[14].Pt8Line30_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_18",
+    "base": "Pt8Line31_YesNo",
+    "yes_field": "form1[0].#subform[14].Pt8Line31_YesNo[0]",
+    "no_field": "form1[0].#subform[14].Pt8Line31_YesNo[1]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_19",
+    "base": "Pt8Line32_YesNo",
+    "yes_field": "form1[0].#subform[14].Pt8Line32_YesNo[0]",
+    "no_field": "form1[0].#subform[14].Pt8Line32_YesNo[1]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_20",
+    "base": "Pt8Line33_YesNo",
+    "yes_field": "form1[0].#subform[14].Pt8Line33_YesNo[0]",
+    "no_field": "form1[0].#subform[14].Pt8Line33_YesNo[1]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_21",
+    "base": "Pt8Line34_YesNo",
+    "yes_field": "form1[0].#subform[14].Pt8Line34_YesNo[1]",
+    "no_field": "form1[0].#subform[14].Pt8Line34_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_22",
+    "base": "Pt8Line35a_YesNo",
+    "yes_field": "form1[0].#subform[14].Pt8Line35a_YesNo[0]",
+    "no_field": "form1[0].#subform[14].Pt8Line35a_YesNo[1]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_23",
+    "base": "Pt8Line35b_YesNo",
+    "yes_field": "form1[0].#subform[14].Pt8Line35b_YesNo[1]",
+    "no_field": "form1[0].#subform[14].Pt8Line35b_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_24",
+    "base": "Pt8Line36_YesNo",
+    "yes_field": "form1[0].#subform[14].Pt8Line36_YesNo[1]",
+    "no_field": "form1[0].#subform[14].Pt8Line36_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_25",
+    "base": "Pt8Line37_YesNo",
+    "yes_field": "form1[0].#subform[14].Pt8Line37_YesNo[1]",
+    "no_field": "form1[0].#subform[14].Pt8Line37_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_26",
+    "base": "Pt8Line38_YesNo",
+    "yes_field": "form1[0].#subform[15].Pt8Line38_YesNo[0]",
+    "no_field": "form1[0].#subform[15].Pt8Line38_YesNo[1]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_27",
+    "base": "Pt8Line40_YesNo",
+    "yes_field": "form1[0].#subform[15].Pt8Line40_YesNo[1]",
+    "no_field": "form1[0].#subform[15].Pt8Line40_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_28",
+    "base": "Pt8Line41_YesNo",
+    "yes_field": "form1[0].#subform[15].Pt8Line41_YesNo[0]",
+    "no_field": "form1[0].#subform[15].Pt8Line41_YesNo[1]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_29",
+    "base": "Pt8Line42c_YesNo",
+    "yes_field": "form1[0].#subform[15].Pt8Line42c_YesNo[1]",
+    "no_field": "form1[0].#subform[15].Pt8Line42c_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_30",
+    "base": "Pt8Line42d_YesNo",
+    "yes_field": "form1[0].#subform[15].Pt8Line42d_YesNo[0]",
+    "no_field": "form1[0].#subform[15].Pt8Line42d_YesNo[1]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_31",
+    "base": "Pt8Line43a_YesNo",
+    "yes_field": "form1[0].#subform[15].Pt8Line43a_YesNo[1]",
+    "no_field": "form1[0].#subform[15].Pt8Line43a_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_32",
+    "base": "Pt8Line43b_YesNo",
+    "yes_field": "form1[0].#subform[15].Pt8Line43b_YesNo[0]",
+    "no_field": "form1[0].#subform[15].Pt8Line43b_YesNo[1]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_33",
+    "base": "Pt8Line43c_YesNo",
+    "yes_field": "form1[0].#subform[15].Pt8Line43c_YesNo[0]",
+    "no_field": "form1[0].#subform[15].Pt8Line43c_YesNo[1]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_34",
+    "base": "Pt8Line43d_YesNo",
+    "yes_field": "form1[0].#subform[15].Pt8Line43d_YesNo[0]",
+    "no_field": "form1[0].#subform[15].Pt8Line43d_YesNo[1]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_35",
+    "base": "Pt8Line43e_YesNo",
+    "yes_field": "form1[0].#subform[15].Pt8Line43e_YesNo[0]",
+    "no_field": "form1[0].#subform[15].Pt8Line43e_YesNo[1]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_36",
+    "base": "Pt8Line43g_YesNo",
+    "yes_field": "form1[0].#subform[15].Pt8Line43g_YesNo[0]",
+    "no_field": "form1[0].#subform[15].Pt8Line43g_YesNo[1]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_37",
+    "base": "Pt8Line43h_YesNo",
+    "yes_field": "form1[0].#subform[15].Pt8Line43h_YesNo[1]",
+    "no_field": "form1[0].#subform[15].Pt8Line43h_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_38",
+    "base": "Pt8Line43i_YesNo",
+    "yes_field": "form1[0].#subform[15].Pt8Line43i_YesNo[1]",
+    "no_field": "form1[0].#subform[15].Pt8Line43i_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_39",
+    "base": "Pt8Line44_YesNo",
+    "yes_field": "form1[0].#subform[15].Pt8Line44_YesNo[0]",
+    "no_field": "form1[0].#subform[15].Pt8Line44_YesNo[1]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_40",
+    "base": "Pt8Line45_YesNo",
+    "yes_field": "form1[0].#subform[15].Pt8Line45_YesNo[1]",
+    "no_field": "form1[0].#subform[15].Pt8Line45_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_41",
+    "base": "Pt8Line46_YesNo",
+    "yes_field": "form1[0].#subform[16].Pt8Line46_YesNo[0]",
+    "no_field": "form1[0].#subform[16].Pt8Line46_YesNo[1]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_42",
+    "base": "Pt8Line47_YesNo",
+    "yes_field": "form1[0].#subform[16].Pt8Line47_YesNo[1]",
+    "no_field": "form1[0].#subform[16].Pt8Line47_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_43",
+    "base": "Pt8Line48_YesNo",
+    "yes_field": "form1[0].#subform[16].Pt8Line48_YesNo[1]",
+    "no_field": "form1[0].#subform[16].Pt8Line48_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_44",
+    "base": "Pt8Line49_YesNo",
+    "yes_field": "form1[0].#subform[16].Pt8Line49_YesNo[0]",
+    "no_field": "form1[0].#subform[16].Pt8Line49_YesNo[1]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_45",
+    "base": "Pt8Line50_YesNo",
+    "yes_field": "form1[0].#subform[16].Pt8Line50_YesNo[1]",
+    "no_field": "form1[0].#subform[16].Pt8Line50_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_46",
+    "base": "Pt8Line51_YesNo",
+    "yes_field": "form1[0].#subform[16].Pt8Line51_YesNo[0]",
+    "no_field": "form1[0].#subform[16].Pt8Line51_YesNo[1]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_47",
+    "base": "Pt8Line52_YesNo",
+    "yes_field": "form1[0].#subform[16].Pt8Line52_YesNo[1]",
+    "no_field": "form1[0].#subform[16].Pt8Line52_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_48",
+    "base": "Pt8Line53a_YesNo",
+    "yes_field": "form1[0].#subform[16].Pt8Line53a_YesNo[0]",
+    "no_field": "form1[0].#subform[16].Pt8Line53a_YesNo[1]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_49",
+    "base": "Pt8Line53b_YesNo",
+    "yes_field": "form1[0].#subform[16].Pt8Line53b_YesNo[0]",
+    "no_field": "form1[0].#subform[16].Pt8Line53b_YesNo[1]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_50",
+    "base": "Pt8Line53c_YesNo",
+    "yes_field": "form1[0].#subform[16].Pt8Line53c_YesNo[0]",
+    "no_field": "form1[0].#subform[16].Pt8Line53c_YesNo[1]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_51",
+    "base": "Pt8Line53d_YesNo",
+    "yes_field": "form1[0].#subform[16].Pt8Line53d_YesNo[1]",
+    "no_field": "form1[0].#subform[16].Pt8Line53d_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_52",
+    "base": "Pt8Line54_YesNo",
+    "yes_field": "form1[0].#subform[16].Pt8Line54_YesNo[1]",
+    "no_field": "form1[0].#subform[16].Pt8Line54_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_53",
+    "base": "Pt8Line55_YesNo",
+    "yes_field": "form1[0].#subform[16].Pt8Line55_YesNo[0]",
+    "no_field": "form1[0].#subform[16].Pt8Line55_YesNo[1]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_54",
+    "base": "Pt9Line10_YesNo",
+    "yes_field": "form1[0].#subform[13].Pt9Line10_YesNo[1]",
+    "no_field": "form1[0].#subform[13].Pt9Line10_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_55",
+    "base": "Pt9Line11_YesNo",
+    "yes_field": "form1[0].#subform[13].Pt9Line11_YesNo[0]",
+    "no_field": "form1[0].#subform[13].Pt9Line11_YesNo[1]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_56",
+    "base": "Pt9Line12_YesNo",
+    "yes_field": "form1[0].#subform[13].Pt9Line12_YesNo[0]",
+    "no_field": "form1[0].#subform[13].Pt9Line12_YesNo[1]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_57",
+    "base": "Pt9Line23_YesNo",
+    "yes_field": "form1[0].#subform[14].Pt9Line23_YesNo[1]",
+    "no_field": "form1[0].#subform[14].Pt9Line23_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_58",
+    "base": "Pt9Line24_YesNo",
+    "yes_field": "form1[0].#subform[14].Pt9Line24_YesNo[0]",
+    "no_field": "form1[0].#subform[14].Pt9Line24_YesNo[1]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_59",
+    "base": "Pt9Line39_YesNo",
+    "yes_field": "form1[0].#subform[15].Pt9Line39_YesNo[1]",
+    "no_field": "form1[0].#subform[15].Pt9Line39_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_60",
+    "base": "Pt9Line63_YesNo",
+    "yes_field": "form1[0].#subform[18].Pt9Line63_YesNo[0]",
+    "no_field": "form1[0].#subform[18].Pt9Line63_YesNo[1]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_61",
+    "base": "Pt9Line67_YesNo",
+    "yes_field": "form1[0].#subform[20].Pt9Line67_YesNo[1]",
+    "no_field": "form1[0].#subform[20].Pt9Line67_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_62",
+    "base": "Pt9Line68_YesNo",
+    "yes_field": "form1[0].#subform[20].Pt9Line68_YesNo[0]",
+    "no_field": "form1[0].#subform[20].Pt9Line68_YesNo[1]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_63",
+    "base": "Pt9Line69_YesNo",
+    "yes_field": "form1[0].#subform[20].Pt9Line69_YesNo[1]",
+    "no_field": "form1[0].#subform[20].Pt9Line69_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_64",
+    "base": "Pt9Line70_YesNo",
+    "yes_field": "form1[0].#subform[20].Pt9Line70_YesNo[0]",
+    "no_field": "form1[0].#subform[20].Pt9Line70_YesNo[1]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_65",
+    "base": "Pt9Line71_YesNo",
+    "yes_field": "form1[0].#subform[20].Pt9Line71_YesNo[1]",
+    "no_field": "form1[0].#subform[20].Pt9Line71_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_66",
+    "base": "Pt9Line72_YesNo",
+    "yes_field": "form1[0].#subform[20].Pt9Line72_YesNo[0]",
+    "no_field": "form1[0].#subform[20].Pt9Line72_YesNo[1]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_67",
+    "base": "Pt9Line73_YesNo",
+    "yes_field": "form1[0].#subform[20].Pt9Line73_YesNo[1]",
+    "no_field": "form1[0].#subform[20].Pt9Line73_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_68",
+    "base": "Pt9Line74_YesNo",
+    "yes_field": "form1[0].#subform[20].Pt9Line74_YesNo[1]",
+    "no_field": "form1[0].#subform[20].Pt9Line74_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_69",
+    "base": "Pt9Line75_YesNo",
+    "yes_field": "form1[0].#subform[20].Pt9Line75_YesNo[0]",
+    "no_field": "form1[0].#subform[20].Pt9Line75_YesNo[1]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_70",
+    "base": "Pt9Line76_YesNo",
+    "yes_field": "form1[0].#subform[20].Pt9Line76_YesNo[1]",
+    "no_field": "form1[0].#subform[20].Pt9Line76_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_71",
+    "base": "Pt9Line77_YesNo",
+    "yes_field": "form1[0].#subform[21].Pt9Line77_YesNo[0]",
+    "no_field": "form1[0].#subform[21].Pt9Line77_YesNo[1]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_72",
+    "base": "Pt9Line78a_YesNo",
+    "yes_field": "form1[0].#subform[21].Pt9Line78a_YesNo[1]",
+    "no_field": "form1[0].#subform[21].Pt9Line78a_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_73",
+    "base": "Pt9Line78b_YesNo",
+    "yes_field": "form1[0].#subform[21].Pt9Line78b_YesNo[0]",
+    "no_field": "form1[0].#subform[21].Pt9Line78b_YesNo[1]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_74",
+    "base": "Pt9Line79_YesNo",
+    "yes_field": "form1[0].#subform[21].Pt9Line79_YesNo[0]",
+    "no_field": "form1[0].#subform[21].Pt9Line79_YesNo[1]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_75",
+    "base": "Pt9Line80_YesNo",
+    "yes_field": "form1[0].#subform[21].Pt9Line80_YesNo[1]",
+    "no_field": "form1[0].#subform[21].Pt9Line80_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_76",
+    "base": "Pt9Line81_YesNo",
+    "yes_field": "form1[0].#subform[21].Pt9Line81_YesNo[0]",
+    "no_field": "form1[0].#subform[21].Pt9Line81_YesNo[1]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_77",
+    "base": "Pt9Line82_YesNo",
+    "yes_field": "form1[0].#subform[21].Pt9Line82_YesNo[1]",
+    "no_field": "form1[0].#subform[21].Pt9Line82_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_78",
+    "base": "Pt9Line83_YesNo",
+    "yes_field": "form1[0].#subform[21].Pt9Line83_YesNo[0]",
+    "no_field": "form1[0].#subform[21].Pt9Line83_YesNo[1]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_79",
+    "base": "Pt9Line84a_YesNo",
+    "yes_field": "form1[0].#subform[21].Pt9Line84a_YesNo[1]",
+    "no_field": "form1[0].#subform[21].Pt9Line84a_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_80",
+    "base": "Pt9Line84b_YesNo",
+    "yes_field": "form1[0].#subform[21].Pt9Line84b_YesNo[1]",
+    "no_field": "form1[0].#subform[21].Pt9Line84b_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_81",
+    "base": "Pt9Line84c_YesNo",
+    "yes_field": "form1[0].#subform[21].Pt9Line84c_YesNo[1]",
+    "no_field": "form1[0].#subform[21].Pt9Line84c_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_82",
+    "base": "Pt9Line85_YesNo",
+    "yes_field": "form1[0].#subform[21].Pt9Line85_YesNo[1]",
+    "no_field": "form1[0].#subform[21].Pt9Line85_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_83",
+    "base": "a_YesNo",
+    "yes_field": "form1[0].#subform[15].Pt8Line42\\.a_YesNo[0]",
+    "no_field": "form1[0].#subform[15].Pt8Line42\\.a_YesNo[1]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_84",
+    "base": "b_YesNo",
+    "yes_field": "form1[0].#subform[15].Pt8Line42\\.b_YesNo[1]",
+    "no_field": "form1[0].#subform[15].Pt8Line42\\.b_YesNo[0]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  },
+  {
+    "fact": "i485_adm_43f",
+    "base": "Pt8Line43fYesNo",
+    "yes_field": "form1[0].#subform[15].Pt8Line43fYesNo[0]",
+    "no_field": "form1[0].#subform[15].Pt8Line43fYesNo[1]",
+    "yes_values": [
+      "yes",
+      "y",
+      "true",
+      "1"
+    ],
+    "no_values": [
+      "no",
+      "n",
+      "false",
+      "0"
+    ]
+  }
+]

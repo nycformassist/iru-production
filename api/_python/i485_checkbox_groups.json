@@ -1,0 +1,168 @@
+[
+  {
+    "fact": "i485_marital_status",
+    "mapping": {
+      "single_never_married": "form1[0].#subform[9].Pt6Line1_MaritalStatus[1]",
+      "married": "form1[0].#subform[9].Pt6Line1_MaritalStatus[3]",
+      "divorced": "form1[0].#subform[9].Pt6Line1_MaritalStatus[0]",
+      "widowed": "form1[0].#subform[9].Pt6Line1_MaritalStatus[2]",
+      "annulled": "form1[0].#subform[9].Pt6Line1_MaritalStatus[4]",
+      "legally_separated": "form1[0].#subform[9].Pt6Line1_MaritalStatus[5]"
+    }
+  },
+  {
+    "fact": "i485_spouse_applying",
+    "mapping": {
+      "yes": "form1[0].#subform[10].Pt6Line11_YN[1]",
+      "no": "form1[0].#subform[10].Pt6Line11_YN[0]"
+    }
+  },
+  {
+    "fact": "i485_child2_applying",
+    "mapping": {
+      "yes": "form1[0].#subform[11].Pt7Line2_YN[1]",
+      "no": "form1[0].#subform[11].Pt7Line2_YN[0]"
+    }
+  },
+  {
+    "fact": "i485_child3_applying",
+    "mapping": {
+      "yes": "form1[0].#subform[11].Pt7Line3_YN[1]",
+      "no": "form1[0].#subform[11].Pt7Line3_YN[0]"
+    }
+  },
+  {
+    "fact": "i485_how_marriage_ended",
+    "mapping": {
+      "divorced": "form1[0].#subform[10].Pt6Line19_MaritalStatus[3]",
+      "spouse_deceased": "form1[0].#subform[10].Pt6Line19_MaritalStatus[0]",
+      "annulled": "form1[0].#subform[10].Pt6Line19_MaritalStatus[1]",
+      "other": "form1[0].#subform[10].Pt6Line19_MaritalStatus[2]"
+    }
+  },
+  {
+    "fact": "i485_ethnicity",
+    "mapping": {
+      "hispanic_latino": "form1[0].#subform[12].Pt7Line1_Ethnicity[0]",
+      "not_hispanic_latino": "form1[0].#subform[12].Pt7Line1_Ethnicity[1]"
+    }
+  },
+  {
+    "fact": "i485_race",
+    "mapping": {
+      "white": "form1[0].#subform[12].Pt7Line2_Race[1]",
+      "asian": "form1[0].#subform[12].Pt7Line2_Race[0]",
+      "black_african_american": "form1[0].#subform[12].Pt7Line2_Race[2]",
+      "american_indian_alaska_native": "form1[0].#subform[12].Pt7Line2_Race[3]",
+      "native_hawaiian_pacific": "form1[0].#subform[12].Pt7Line2_Race[4]"
+    }
+  },
+  {
+    "fact": "i485_eye_color",
+    "mapping": {
+      "black": "form1[0].#subform[12].Pt7Line5_Eyecolor[1]",
+      "blue": "form1[0].#subform[12].Pt7Line5_Eyecolor[0]",
+      "brown": "form1[0].#subform[12].Pt7Line5_Eyecolor[2]",
+      "gray": "form1[0].#subform[12].Pt7Line5_Eyecolor[3]",
+      "green": "form1[0].#subform[12].Pt7Line5_Eyecolor[4]",
+      "hazel": "form1[0].#subform[12].Pt7Line5_Eyecolor[5]",
+      "maroon": "form1[0].#subform[12].Pt7Line5_Eyecolor[6]",
+      "pink": "form1[0].#subform[12].Pt7Line5_Eyecolor[7]",
+      "unknown_other": "form1[0].#subform[12].Pt7Line5_Eyecolor[8]"
+    }
+  },
+  {
+    "fact": "i485_hair_color",
+    "mapping": {
+      "bald": "form1[0].#subform[12].Pt7Line6_Haircolor[0]",
+      "black": "form1[0].#subform[12].Pt7Line6_Haircolor[1]",
+      "blond": "form1[0].#subform[12].Pt7Line6_Haircolor[2]",
+      "brown": "form1[0].#subform[12].Pt7Line6_Haircolor[3]",
+      "gray": "form1[0].#subform[12].Pt7Line6_Haircolor[4]",
+      "red": "form1[0].#subform[12].Pt7Line6_Haircolor[5]",
+      "sandy": "form1[0].#subform[12].Pt7Line6_Haircolor[6]",
+      "white": "form1[0].#subform[12].Pt7Line6_Haircolor[7]",
+      "unknown_other": "form1[0].#subform[12].Pt7Line6_Haircolor[8]"
+    }
+  },
+  {
+    "fact": "i485_adm_43f",
+    "mapping": {
+      "yes": "form1[0].#subform[15].Pt8Line43fYesNo[0]",
+      "no": "form1[0].#subform[15].Pt8Line43fYesNo[1]"
+    }
+  },
+  {
+    "fact": "i485_public_charge_exempt",
+    "mapping": {
+      "vawa": "form1[0].#subform[17].Pt9Line56_CB[5]",
+      "sij": "form1[0].#subform[17].Pt9Line56_CB[6]",
+      "afghan_iraqi": "form1[0].#subform[17].Pt9Line56_CB[0]",
+      "asylee": "form1[0].#subform[17].Pt9Line56_CB[3]",
+      "refugee": "form1[0].#subform[17].Pt9Line56_CB[1]",
+      "victim_u": "form1[0].#subform[17].Pt9Line56_CB[2]",
+      "valid_u_other": "form1[0].#subform[17].Pt9Line56_CB[4]",
+      "trafficking_t": "form1[0].#subform[17].Pt9Line56_CB[9]",
+      "pending_t_other": "form1[0].#subform[17].Pt9Line56_CB[12]",
+      "cuban_adjustment": "form1[0].#subform[17].Pt9Line56_CB[7]",
+      "cuban_battered": "form1[0].#subform[17].Pt9Line56_CB[10]",
+      "hrifa_dependent": "form1[0].#subform[17].Pt9Line56_CB[11]",
+      "hrifa_battered": "form1[0].#subform[17].Pt9Line56_CB[8]",
+      "cuban_haitian_entrants": "form1[0].#subform[17].Pt9Line56_CB[17]",
+      "lautenberg": "form1[0].#subform[17].Pt9Line56_CB[18]",
+      "vietnam_cambodia_laos": "form1[0].#subform[17].Pt9Line56_CB[19]",
+      "registry": "form1[0].#subform[17].Pt9Line56_CB[13]",
+      "amerasian": "form1[0].#subform[17].Pt9Line56_CB[15]",
+      "polish_hungarian": "form1[0].#subform[17].Pt9Line56_CB[16]",
+      "nacara": "form1[0].#subform[17].Pt9Line56_CB[14]",
+      "american_indian_canada": "form1[0].#subform[17].Pt9Line56_CB[20]",
+      "liberian_fairness": "form1[0].#subform[17].Pt9Line56_CB[21]",
+      "syrian_national": "form1[0].#subform[18].Pt9Line56_CB[24]",
+      "military_family": "form1[0].#subform[18].Pt9Line56_CB[22]",
+      "none_complete_57_64": "form1[0].#subform[18].Pt9Line56_CB[23]"
+    }
+  },
+  {
+    "fact": "i485_household_income",
+    "mapping": {
+      "0_27000": "form1[0].#subform[18].Pt9Line53_CB[0]",
+      "27001_52000": "form1[0].#subform[18].Pt9Line53_CB[1]",
+      "52001_85000": "form1[0].#subform[18].Pt9Line53_CB[2]",
+      "85001_141000": "form1[0].#subform[18].Pt9Line53_CB[3]",
+      "over_141000": "form1[0].#subform[18].Pt9Line53_CB[4]"
+    }
+  },
+  {
+    "fact": "i485_household_assets",
+    "mapping": {
+      "0_18400": "form1[0].#subform[18].Pt9Line59_CB[0]",
+      "18401_136000": "form1[0].#subform[18].Pt9Line59_CB[1]",
+      "136001_321400": "form1[0].#subform[18].Pt9Line59_CB[2]",
+      "321401_707100": "form1[0].#subform[18].Pt9Line59_CB[3]",
+      "over_707100": "form1[0].#subform[18].Pt9Line59_CB[4]"
+    }
+  },
+  {
+    "fact": "i485_household_liabilities",
+    "mapping": {
+      "0": "form1[0].#subform[18].Pt9Line60_CB[0]",
+      "1_10100": "form1[0].#subform[18].Pt9Line60_CB[1]",
+      "10101_57700": "form1[0].#subform[18].Pt9Line60_CB[2]",
+      "57701_186800": "form1[0].#subform[18].Pt9Line60_CB[3]",
+      "over_186800": "form1[0].#subform[18].Pt9Line60_CB[4]"
+    }
+  },
+  {
+    "fact": "i485_education_level",
+    "mapping": {
+      "less_than_diploma": "form1[0].#subform[18].Pt9Line61_CB[0]",
+      "high_school_ged": "form1[0].#subform[18].Pt9Line61_CB[2]",
+      "some_college": "form1[0].#subform[18].Pt9Line61_CB[1]",
+      "associates": "form1[0].#subform[18].Pt9Line61_CB[3]",
+      "bachelors": "form1[0].#subform[18].Pt9Line61_CB[7]",
+      "masters": "form1[0].#subform[18].Pt9Line61_CB[4]",
+      "professional": "form1[0].#subform[18].Pt9Line61_CB[5]",
+      "doctorate": "form1[0].#subform[18].Pt9Line61_CB[6]"
+    }
+  }
+]

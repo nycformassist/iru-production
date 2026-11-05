@@ -1,0 +1,182 @@
+[
+ {
+  "fact": "n400_gmc_00",
+  "yes_field": "form1[0].#subform[6].P12_6a[0]",
+  "no_field": "form1[0].#subform[6].P12_6a[1]",
+  "base": "P12_6a"
+ },
+ {
+  "fact": "n400_gmc_01",
+  "yes_field": "form1[0].#subform[6].P12_6b[0]",
+  "no_field": "form1[0].#subform[6].P12_6b[1]",
+  "base": "P12_6b"
+ },
+ {
+  "fact": "n400_gmc_02",
+  "yes_field": "form1[0].#subform[6].P12_6c[0]",
+  "no_field": "form1[0].#subform[6].P12_6c[1]",
+  "base": "P12_6c"
+ },
+ {
+  "fact": "n400_gmc_03",
+  "yes_field": "form1[0].#subform[7].P12_Line16[0]",
+  "no_field": "form1[0].#subform[7].P12_Line16[1]",
+  "base": "P12_Line16"
+ },
+ {
+  "fact": "n400_gmc_04",
+  "yes_field": "form1[0].#subform[8].P12_Line17d[0]",
+  "no_field": "form1[0].#subform[8].P12_Line17d[1]",
+  "base": "P12_Line17d"
+ },
+ {
+  "fact": "n400_gmc_05",
+  "yes_field": "form1[0].#subform[8].P12_Line17e[0]",
+  "no_field": "form1[0].#subform[8].P12_Line17e[1]",
+  "base": "P12_Line17e"
+ },
+ {
+  "fact": "n400_gmc_06",
+  "yes_field": "form1[0].#subform[8].P12_Line17f[0]",
+  "no_field": "form1[0].#subform[8].P12_Line17f[1]",
+  "base": "P12_Line17f"
+ },
+ {
+  "fact": "n400_gmc_07",
+  "yes_field": "form1[0].#subform[8].P12_Line17g[0]",
+  "no_field": "form1[0].#subform[8].P12_Line17g[1]",
+  "base": "P12_Line17g"
+ },
+ {
+  "fact": "n400_gmc_08",
+  "yes_field": "form1[0].#subform[8].P12_Line17h[0]",
+  "no_field": "form1[0].#subform[8].P12_Line17h[1]",
+  "base": "P12_Line17h"
+ },
+ {
+  "fact": "n400_gmc_09",
+  "yes_field": "form1[0].#subform[8].P12_Line18[0]",
+  "no_field": "form1[0].#subform[8].P12_Line18[1]",
+  "base": "P12_Line18"
+ },
+ {
+  "fact": "n400_gmc_10",
+  "yes_field": "form1[0].#subform[8].P12_Line19[0]",
+  "no_field": "form1[0].#subform[8].P12_Line19[1]",
+  "base": "P12_Line19"
+ },
+ {
+  "fact": "n400_gmc_11",
+  "yes_field": "form1[0].#subform[8].P12_Line20[0]",
+  "no_field": "form1[0].#subform[8].P12_Line20[1]",
+  "base": "P12_Line20"
+ },
+ {
+  "fact": "n400_gmc_12",
+  "yes_field": "form1[0].#subform[8].P12_Line21[0]",
+  "no_field": "form1[0].#subform[8].P12_Line21[1]",
+  "base": "P12_Line21"
+ },
+ {
+  "fact": "n400_gmc_13",
+  "yes_field": "form1[0].#subform[8].P12_Line23[0]",
+  "no_field": "form1[0].#subform[8].P12_Line23[1]",
+  "base": "P12_Line23"
+ },
+ {
+  "fact": "n400_gmc_14",
+  "yes_field": "form1[0].#subform[8].P12_Line24[0]",
+  "no_field": "form1[0].#subform[8].P12_Line24[1]",
+  "base": "P12_Line24"
+ },
+ {
+  "fact": "n400_gmc_15",
+  "yes_field": "form1[0].#subform[8].P12_Line25[0]",
+  "no_field": "form1[0].#subform[8].P12_Line25[1]",
+  "base": "P12_Line25"
+ },
+ {
+  "fact": "n400_gmc_16",
+  "yes_field": "form1[0].#subform[9].P12_Line26a[0]",
+  "no_field": "form1[0].#subform[9].P12_Line26a[1]",
+  "base": "P12_Line26a"
+ },
+ {
+  "fact": "n400_gmc_17",
+  "yes_field": "form1[0].#subform[9].P12_Line26b[0]",
+  "no_field": "form1[0].#subform[9].P12_Line26b[1]",
+  "base": "P12_Line26b"
+ },
+ {
+  "fact": "n400_gmc_18",
+  "yes_field": "form1[0].#subform[9].P12_Line26c[0]",
+  "no_field": "form1[0].#subform[9].P12_Line26c[1]",
+  "base": "P12_Line26c"
+ },
+ {
+  "fact": "n400_gmc_19",
+  "yes_field": "form1[0].#subform[9].P12_Line27[0]",
+  "no_field": "form1[0].#subform[9].P12_Line27[1]",
+  "base": "P12_Line27"
+ },
+ {
+  "fact": "n400_gmc_20",
+  "yes_field": "form1[0].#subform[9].P12_Line28[0]",
+  "no_field": "form1[0].#subform[9].P12_Line28[1]",
+  "base": "P12_Line28"
+ },
+ {
+  "fact": "n400_gmc_21",
+  "yes_field": "form1[0].#subform[9].P12_Line30a[0]",
+  "no_field": "form1[0].#subform[9].P12_Line30a[1]",
+  "base": "P12_Line30a"
+ },
+ {
+  "fact": "n400_gmc_22",
+  "yes_field": "form1[0].#subform[9].P12_Line30b[0]",
+  "no_field": "form1[0].#subform[9].P12_Line30b[1]",
+  "base": "P12_Line30b"
+ },
+ {
+  "fact": "n400_gmc_23",
+  "yes_field": "form1[0].#subform[9].P12_Line31[0]",
+  "no_field": "form1[0].#subform[9].P12_Line31[1]",
+  "base": "P12_Line31"
+ },
+ {
+  "fact": "n400_gmc_24",
+  "yes_field": "form1[0].#subform[9].P12_Line32[0]",
+  "no_field": "form1[0].#subform[9].P12_Line32[1]",
+  "base": "P12_Line32"
+ },
+ {
+  "fact": "n400_gmc_25",
+  "yes_field": "form1[0].#subform[9].P12_Line33[0]",
+  "no_field": "form1[0].#subform[9].P12_Line33[1]",
+  "base": "P12_Line33"
+ },
+ {
+  "fact": "n400_gmc_26",
+  "yes_field": "form1[0].#subform[9].P12_Line34[0]",
+  "no_field": "form1[0].#subform[9].P12_Line34[1]",
+  "base": "P12_Line34"
+ },
+ {
+  "fact": "n400_gmc_27",
+  "yes_field": "form1[0].#subform[9].P12_Line35[0]",
+  "no_field": "form1[0].#subform[9].P12_Line35[1]",
+  "base": "P12_Line35"
+ },
+ {
+  "fact": "n400_gmc_28",
+  "yes_field": "form1[0].#subform[9].P12_Line36[0]",
+  "no_field": "form1[0].#subform[9].P12_Line36[1]",
+  "base": "P12_Line36"
+ },
+ {
+  "fact": "n400_gmc_29",
+  "yes_field": "form1[0].#subform[9].P12_Line37[0]",
+  "no_field": "form1[0].#subform[9].P12_Line37[1]",
+  "base": "P12_Line37"
+ }
+]
