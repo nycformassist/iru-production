@@ -527,6 +527,64 @@ function detectI765Intelligence(answers: Record<string, any>): IntelligenceResul
     inferred.push({ t: 'Renewal timing', d: 'File renewal applications up to 180 days before expiration. Do not let the current EAD lapse — check automatic extension eligibility for your category.', section: 'Eligibility' });
   }
 
+  // --- Premium intelligence: date contradictions (adversarial) ---
+  // These catch mutually contradictory dates/facts the section score
+  // alone would miss. Conflicts become BLOCKERS via applyIntelligence
+  // (ready=false). The 2026-11-09 I-765 report scored 88% / "Ready to
+  // prepare" while missing exactly this: entered 2026-11-01, filed a
+  // (c)(8) renewal 8 days later — impossible, since (c)(8) needs the
+  // asylum application pending 150 days, and the applicant cannot have
+  // filed asylum before entering. The old text only said "verify with
+  // staff". These checks make the contradiction a blocker.
+  const parseDate = (raw: any): Date | null => {
+    if (!raw) return null;
+    const d = new Date(String(raw));
+    return Number.isNaN(d.getTime()) ? null : d;
+  };
+  const daysBetween = (a: Date, b: Date) => Math.floor((b.getTime() - a.getTime()) / 86400000);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const lastEntry = parseDate(get('i765_last_entry'));
+  const dob = parseDate(get('i765_dob'));
+
+  // Future dates are impossible.
+  if (lastEntry && lastEntry > today) {
+    conflicts.push({ t: 'Last entry date is in the future', d: `Last entry (${get('i765_last_entry')}) is after today. A future entry date cannot be correct — correct it before filing.`, section: 'Immigration History' });
+  }
+  if (dob && dob > today) {
+    conflicts.push({ t: 'Date of birth is in the future', d: `Date of birth (${get('i765_dob')}) is after today. A future birth date cannot be correct — correct it before filing.`, section: 'Personal Information' });
+  }
+
+  // (c)(8) requires the asylum application to have been pending >= 150
+  // days. The applicant cannot have filed asylum before entering the US,
+  // so an entry less than 150 days ago makes a 150-day-pending (c)(8)
+  // claim impossible.
+  if (category === 'c8' && lastEntry && lastEntry <= today) {
+    const daysSinceEntry = daysBetween(lastEntry, today);
+    if (daysSinceEntry < 150) {
+      conflicts.push({ t: '(c)(8) clock cannot have reached 150 days', d: `Category (c)(8) needs the asylum application pending at least 150 days, but last entry was ${daysSinceEntry} day(s) ago (${get('i765_last_entry')}). The asylum application cannot have been pending 150 days — the filing date, entry date, or category needs review before filing.`, section: 'Eligibility' });
+    }
+  }
+
+  // Renewal very soon after entry: a renewal needs a prior EAD, which
+  // needs an earlier stay. Warning, not a hard conflict — a prior EAD
+  // from an earlier stay is possible.
+  if (filingType === 'renewal' && lastEntry && lastEntry <= today) {
+    const daysSinceEntry = daysBetween(lastEntry, today);
+    if (daysSinceEntry < 30) {
+      inferred.push({ t: 'Renewal very soon after last entry', d: `Renewal filed ${daysSinceEntry} day(s) after last entry (${get('i765_last_entry')}). A renewal needs a prior EAD — confirm the prior EAD relates to an earlier stay, not this entry.`, section: 'Eligibility' });
+    }
+  }
+
+  // Very young renewal applicant: unusual, verify (warning).
+  if (filingType === 'renewal' && dob && dob <= today) {
+    const ageYears = (today.getTime() - dob.getTime()) / (365.25 * 86400000);
+    if (ageYears < 14) {
+      inferred.push({ t: 'Young renewal applicant', d: `Date of birth (${get('i765_dob')}) indicates an applicant under 14 filing a renewal. Verify the birth date and the prior EAD — a renewal for a young child is unusual.`, section: 'Personal Information' });
+    }
+  }
+
   return { inferred, conflicts };
 }
 

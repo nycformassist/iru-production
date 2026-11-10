@@ -120,6 +120,75 @@ describe('Adversarial I-765 intelligence', () => {
     const found = basic.warnings.some(w => w.t.includes('A-Number format'));
     assert.ok(found, 'Should flag short A-Number');
   });
+
+  // Owner's 2026-11-09 report case: the readiness report scored 88% /
+  // "Ready to prepare" for a (c)(8) RENEWAL filed 8 days after entry,
+  // with an 8-year-old applicant — and only said "verify with staff".
+  // Premium intelligence must catch the mutually contradictory dates as
+  // a BLOCKER, not a soft warning.
+  const isoDaysAgo = (n) => {
+    const d = new Date();
+    d.setDate(d.getDate() - n);
+    return d.toISOString().slice(0, 10);
+  };
+  const isoYearsAgo = (n) => {
+    const d = new Date();
+    d.setFullYear(d.getFullYear() - n);
+    return d.toISOString().slice(0, 10);
+  };
+
+  it("catches (c)(8) renewal 8 days after entry — clock cannot have reached 150 days", () => {
+    const answers = {
+      i765_category: 'c8', i765_filing_type: 'renewal', i765_prior_ead: 'yes',
+      i765_full_name: 'fgg fgdg', i765_dob: isoYearsAgo(8), i765_country_birth: 'Cuba',
+      i765_last_entry: isoDaysAgo(8), i765_status: 'entered without inspection', i765_current_status: 'pending',
+    };
+    const basic = assessI765(answers, 'EN');
+    const withIntel = applyIntel765('i765', answers, basic);
+    const found = withIntel.blockers.some(b => b.t.includes('(c)(8) clock cannot have reached 150 days'));
+    assert.ok(found, 'Should flag (c)(8) + entry 8 days ago as a CONFLICT blocker');
+    assert.equal(withIntel.ready, false, 'Contradictory dates must block ready=true');
+    const scored = score765(withIntel, 'I-765');
+    assert.ok(scored.overallScore < 0.88, `Score must drop below the old 88% once the contradiction is a blocker (got ${scored.overallScore})`);
+  });
+
+  it('does NOT flag (c)(8) when entry was more than 150 days ago', () => {
+    const answers = {
+      i765_category: 'c8', i765_filing_type: 'initial',
+      i765_full_name: 'Test', i765_dob: '1990-01-01', i765_country_birth: 'Test',
+      i765_last_entry: isoDaysAgo(200), i765_status: 'Pending', i765_current_status: 'Pending',
+    };
+    const basic = assessI765(answers, 'EN');
+    const withIntel = applyIntel765('i765', answers, basic);
+    const found = withIntel.blockers.some(b => b.t.includes('150 days'));
+    assert.equal(found, false, 'Entry 200 days ago can satisfy the 150-day clock');
+  });
+
+  it('flags a future last-entry date as impossible', () => {
+    const d = new Date();
+    d.setDate(d.getDate() + 5);
+    const answers = {
+      i765_category: 'c9', i765_filing_type: 'initial',
+      i765_full_name: 'Test', i765_dob: '1990-01-01', i765_country_birth: 'Test',
+      i765_last_entry: d.toISOString().slice(0, 10), i765_status: 'B-2', i765_current_status: 'Pending',
+    };
+    const basic = assessI765(answers, 'EN');
+    const withIntel = applyIntel765('i765', answers, basic);
+    const found = withIntel.blockers.some(b => b.t.includes('Last entry date is in the future'));
+    assert.ok(found, 'Future entry date must be a blocker');
+  });
+
+  it('flags a young renewal applicant for verification', () => {
+    const answers = {
+      i765_category: 'c9', i765_filing_type: 'renewal', i765_prior_ead: 'yes',
+      i765_full_name: 'Test', i765_dob: isoYearsAgo(8), i765_country_birth: 'Test',
+      i765_last_entry: isoDaysAgo(400), i765_status: 'B-2', i765_current_status: 'Pending',
+    };
+    const basic = assessI765(answers, 'EN');
+    const withIntel = applyIntel765('i765', answers, basic);
+    const found = withIntel.warnings.some(w => w.t.includes('Young renewal applicant'));
+    assert.ok(found, 'An 8-year-old renewal applicant should be flagged for verification');
+  });
 });
 
 import { buildFactRecord, markConflicts, scoreSectionWeighted } from '../src/tier1-assess.ts';
