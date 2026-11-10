@@ -37,9 +37,27 @@ export const config = { api: { bodyParser: false } };
 const limiter = createLimiter({ capacity: 120, windowMs: 60 * 1000 });
 const MAX_BODY_BYTES = 256 * 1024;
 
-function rawBodyOf(req) {
+// Read the exact raw bytes of the request body. Stripe's HMAC is computed
+// over the exact bytes sent, so a re-serialized JSON object never verifies.
+// Vercel populates req.body via a LAZY getter (docs: "only computed when
+// it is accessed") — reading the stream BEFORE touching req.body yields the
+// exact bytes; touching req.body first consumes the stream and only a
+// re-serialization remains. So: stream first, parsed body only as a
+// fallback for non-Stripe callers and unit-test mocks (which are not
+// async-iterable). Root cause of pending_webhooks stuck at 1 for the
+// 2026-11-09 $349 purchase: every delivery re-serialized the parsed body
+// and failed the HMAC check with 400, so Stripe kept retrying.
+async function rawBodyOf(req) {
   if (typeof req.rawBody === 'string') return req.rawBody;
+  if (req && typeof req[Symbol.asyncIterator] === 'function') {
+    const chunks = [];
+    for await (const chunk of req) {
+      chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
+    }
+    if (chunks.length > 0) return Buffer.concat(chunks).toString('utf8');
+  }
   if (typeof req.body === 'string') return req.body;
+  if (Buffer.isBuffer(req.body)) return req.body.toString('utf8');
   return JSON.stringify(req.body || {});
 }
 
@@ -47,7 +65,7 @@ async function handler(req, res, store = entitlementStore) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
-  const rawBody = rawBodyOf(req);
+  const rawBody = await rawBodyOf(req);
   if (Buffer.byteLength(rawBody) > MAX_BODY_BYTES) {
     return res.status(413).json({ error: 'Request too large.' });
   }
