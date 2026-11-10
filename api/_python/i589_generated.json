@@ -1,0 +1,166 @@
+{
+ "identity": [
+  {
+   "field": "PtAILine4_LastName[0]",
+   "full_name": "form1[0].#subform[0].PtAILine4_LastName[0]",
+   "type": "Text",
+   "semantic": "family_name",
+   "source": "i589: Part A.I Item 4",
+   "confidence": "high"
+  },
+  {
+   "field": "PtAILine5_FirstName[0]",
+   "full_name": "form1[0].#subform[0].PtAILine5_FirstName[0]",
+   "type": "Text",
+   "semantic": "given_name",
+   "source": "i589: Part A.I Item 5",
+   "confidence": "high"
+  },
+  {
+   "field": "PtAILine6_MiddleName[0]",
+   "full_name": "form1[0].#subform[0].PtAILine6_MiddleName[0]",
+   "type": "Text",
+   "semantic": "middle_name",
+   "source": "i589: Part A.I Item 6",
+   "confidence": "high"
+  },
+  {
+   "field": "DateTimeField1[0]",
+   "full_name": "form1[0].#subform[0].DateTimeField1[0]",
+   "type": "Text",
+   "semantic": "date_of_birth",
+   "source": "i589: Part A.I Item 12",
+   "confidence": "high"
+  },
+  {
+   "field": "PtAILine1_ANumber[0]",
+   "full_name": "form1[0].#subform[0].PtAILine1_ANumber[0]",
+   "type": "Text",
+   "semantic": "a_number",
+   "source": "i589: Part A.I Item 1",
+   "confidence": "high"
+  }
+ ],
+ "address": [
+  {
+   "field": "PtAILine8_StreetNumandName[0]",
+   "full_name": "form1[0].#subform[0].PtAILine8_StreetNumandName[0]",
+   "type": "Text",
+   "semantic": "residence_street",
+   "source": "i589: Part A.I Item 8 residence",
+   "confidence": "high"
+  },
+  {
+   "field": "PtAILine8_AptNumber[0]",
+   "full_name": "form1[0].#subform[0].PtAILine8_AptNumber[0]",
+   "type": "Text",
+   "semantic": "residence_apt",
+   "source": "i589: Part A.I Item 8 residence",
+   "confidence": "high"
+  },
+  {
+   "field": "TextField1[2]",
+   "full_name": "form1[0].#subform[0].TextField1[2]",
+   "type": "Text",
+   "semantic": "residence_city",
+   "source": "i589: Part A.I Item 8 residence",
+   "confidence": "high"
+  },
+  {
+   "field": "PtAILine8_State[0]",
+   "full_name": "form1[0].#subform[0].PtAILine8_State[0]",
+   "type": "Text",
+   "semantic": "residence_state",
+   "source": "i589: Part A.I Item 8 residence",
+   "confidence": "high"
+  },
+  {
+   "field": "PtAILine8_Zipcode[0]",
+   "full_name": "form1[0].#subform[0].PtAILine8_Zipcode[0]",
+   "type": "Text",
+   "semantic": "residence_zip",
+   "source": "i589: Part A.I Item 8 residence",
+   "confidence": "high"
+  },
+  {
+   "field": "PtAILine8_AreaCode[0]",
+   "full_name": "form1[0].#subform[0].PtAILine8_AreaCode[0]",
+   "type": "Text",
+   "semantic": "residence_tel_area",
+   "source": "i589: Part A.I Item 8 residence",
+   "confidence": "high"
+  },
+  {
+   "field": "PtAILine8_TelephoneNumber[0]",
+   "full_name": "form1[0].#subform[0].PtAILine8_TelephoneNumber[0]",
+   "type": "Text",
+   "semantic": "residence_tel",
+   "source": "i589: Part A.I Item 8 residence",
+   "confidence": "high"
+  },
+  {
+   "field": "PtAILine9_InCareOf[0]",
+   "full_name": "form1[0].#subform[0].PtAILine9_InCareOf[0]",
+   "type": "Text",
+   "semantic": "mailing_care_of",
+   "source": "i589: Part A.I Item 9 mailing",
+   "confidence": "high"
+  },
+  {
+   "field": "PtAILine9_StreetNumandName[0]",
+   "full_name": "form1[0].#subform[0].PtAILine9_StreetNumandName[0]",
+   "type": "Text",
+   "semantic": "mailing_street",
+   "source": "i589: Part A.I Item 9 mailing",
+   "confidence": "high"
+  },
+  {
+   "field": "PtAILine9_AptNumber[0]",
+   "full_name": "form1[0].#subform[0].PtAILine9_AptNumber[0]",
+   "type": "Text",
+   "semantic": "mailing_apt",
+   "source": "i589: Part A.I Item 9 mailing",
+   "confidence": "high"
+  },
+  {
+   "field": "PtAILine9_City[0]",
+   "full_name": "form1[0].#subform[0].PtAILine9_City[0]",
+   "type": "Text",
+   "semantic": "mailing_city",
+   "source": "i589: Part A.I Item 9 mailing",
+   "confidence": "high"
+  },
+  {
+   "field": "PtAILine9_State[0]",
+   "full_name": "form1[0].#subform[0].PtAILine9_State[0]",
+   "type": "Text",
+   "semantic": "mailing_state",
+   "source": "i589: Part A.I Item 9 mailing",
+   "confidence": "high"
+  },
+  {
+   "field": "PtAILine9_ZipCode[0]",
+   "full_name": "form1[0].#subform[0].PtAILine9_ZipCode[0]",
+   "type": "Text",
+   "semantic": "mailing_zip",
+   "source": "i589: Part A.I Item 9 mailing",
+   "confidence": "high"
+  },
+  {
+   "field": "PtAILine9_AreaCode[0]",
+   "full_name": "form1[0].#subform[0].PtAILine9_AreaCode[0]",
+   "type": "Text",
+   "semantic": "mailing_tel_area",
+   "source": "i589: Part A.I Item 9 mailing",
+   "confidence": "high"
+  },
+  {
+   "field": "PtAILine9_TelephoneNumbe[0]",
+   "full_name": "form1[0].#subform[0].PtAILine9_TelephoneNumbe[0]",
+   "type": "Text",
+   "semantic": "mailing_tel",
+   "source": "i589: Part A.I Item 9 mailing",
+   "confidence": "high"
+  }
+ ]
+}
