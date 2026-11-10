@@ -21,6 +21,10 @@
       "destination": "/api/fill?form=i485"
     },
     {
+      "source": "/api/fill-i589",
+      "destination": "/api/fill?form=i589"
+    },
+    {
       "source": "/api/(.*)",
       "destination": "/api/$1"
     },

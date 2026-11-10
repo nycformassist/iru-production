@@ -35,6 +35,7 @@ ENTITLEMENT_STATUS_URL = os.environ.get(
 # FORM_IDS), keyed by the dev fill-route suffix.
 FORM_ID_BY_KEY = {
     'i130': 'I-130', 'i90': 'I-90', 'n400': 'N-400', 'i765': 'I-765', 'i485': 'I-485',
+    'i589': 'I-589',
 }
 
 def paywall_enabled():
@@ -140,6 +141,12 @@ FORMS = {
         'func': 'build_i485_full_plan',
         'template': 'public/forms/i-485.pdf',
         'filename': 'i485-draft.pdf',
+    },
+    'i589': {
+        'binder': 'i589_full_binder',
+        'func': 'build_i589_full_plan',
+        'template': 'public/forms/i-589.pdf',
+        'filename': 'i589-draft.pdf',
     },
 }
 

@@ -1,6 +1,6 @@
 """Vercel Python serverless: fill any Tier 1 form from Tier1Fact JSON.
 
-Single function for all five forms. The five near-identical fill-*.py
+Single function for all six forms. The five near-identical fill-*.py
 files were consolidated because Vercel's Hobby plan caps a deployment
 at 12 serverless functions and the five fill files plus the other
 handlers exceeded it (16 functions). The form is selected by:
@@ -8,7 +8,7 @@ handlers exceeded it (16 functions). The form is selected by:
      the legacy /api/fill-<key> URLs to /api/fill?form=<key>),
   2. a /api/fill-<key> path suffix, or
   3. a `form` field in the JSON body.
-Form keys: i765, i90, n400, i130, i485. The legacy /api/fill-<key>
+Form keys: i765, i90, n400, i130, i485, i589. The legacy /api/fill-<key>
 URLs keep working via the rewrites; no client change was needed.
 """
 import json, fitz, os, sys
@@ -28,6 +28,8 @@ FORMS = {
              '_python.n400_full_binder', 'build_n400_full_plan'),
     'i485': ('I-485', 'i-485.pdf', 'i485-draft.pdf',
              '_python.i485_full_binder', 'build_i485_full_plan'),
+    'i589': ('I-589', 'i-589.pdf', 'i589-draft.pdf',
+             '_python.i589_full_binder', 'build_i589_full_plan'),
     # I-130 uses the master binder: build_master_plan(facts, addresses,
     # biographic) -> (plan, review, stats). All other forms use
     # build_<form>_full_plan(facts) -> (plan, review).
@@ -139,7 +141,7 @@ class handler(BaseHTTPRequestHandler):
             self.send_response(400)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
-            self.wfile.write(json.dumps({'error': 'Unknown form. Use ?form=i765|i90|n400|i130|i485'}).encode())
+            self.wfile.write(json.dumps({'error': 'Unknown form. Use ?form=i765|i90|n400|i130|i485|i589'}).encode())
             return
         form_id, template_file, download_name, binder_module, build_fn = FORMS[form_key]
         template_path = os.path.join(os.path.dirname(__file__), '../public/forms', template_file)

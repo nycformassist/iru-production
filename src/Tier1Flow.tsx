@@ -617,6 +617,15 @@ function Tier1Report({ info, lang, result, questions, steps, answers, factRecord
             {lang === 'EN' ? 'Generate completed I-485' : lang === 'ES' ? 'Generar I-485 completado' : lang === 'ZH' ? '生成已完成的 I-485' : lang === 'HT' ? 'Jenere I-485 ki konplè' : 'إنشاء نموذج I-485 مكتمل'}
           </button>
         )}
+        {info.formNumber === 'I-589' && (
+          <button
+            data-testid="btn-generate"
+            onClick={() => generateCompletedForm('i589', factRecord?.facts || {})}
+            style={{ ...btnStyle, background: '#059669', color: '#fff', borderColor: '#059669' }}
+          >
+            {lang === 'EN' ? 'Generate completed I-589' : lang === 'ES' ? 'Generar I-589 completado' : lang === 'ZH' ? '生成已完成的 I-589' : lang === 'HT' ? 'Jenere I-589 ki konplè' : 'إنشاء نموذج I-589 مكتمل'}
+          </button>
+        )}
       </div>
       <p style={{ color: '#64748b', fontSize: '0.9rem' }}>
         <a href={info.instructionsUrl} target="_blank" rel="noopener" style={{ color: '#1a56db' }}>{UI.officialInstructions[lang]}</a> · {UI.notLegalAdvice[lang]}
@@ -645,7 +654,7 @@ function tier1TokenFor(formKey: string): string | null {
 
 // Generate completed form via Python endpoint
 async function generateCompletedForm(formKey: string, facts: Record<string, any>): Promise<void> {
-  const endpoint = formKey === 'i130' ? '/api/fill-i130' : formKey === 'i90' ? '/api/fill-i90' : formKey === 'n400' ? '/api/fill-n400' : formKey === 'i765' ? '/api/fill-i765' : formKey === 'i485' ? '/api/fill-i485' : null;
+  const endpoint = formKey === 'i130' ? '/api/fill-i130' : formKey === 'i90' ? '/api/fill-i90' : formKey === 'n400' ? '/api/fill-n400' : formKey === 'i765' ? '/api/fill-i765' : formKey === 'i485' ? '/api/fill-i485' : formKey === 'i589' ? '/api/fill-i589' : null;
   if (!endpoint) {
     alert('Form generation not yet available for ' + formKey);
     return;
