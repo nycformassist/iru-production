@@ -91,7 +91,7 @@ import { N400_QUESTIONS, N400_STEPS, N400_FORM_INFO } from './n400-questions';
 import { I130_QUESTIONS, I130_STEPS, I130_FORM_INFO } from './i130-questions';
 import { I485_QUESTIONS, I485_STEPS, I485_FORM_INFO } from './i485-questions';
 import { I90_QUESTIONS, I90_STEPS, I90_FORM_INFO } from './i90-questions';
-import { EntryScreen, GuideFlow, PackageSelect, EvalIntake, EvalReport, RecoverFlow, pt as ppt, suggestForms, getStoredToken, setStoredToken, getEvalToken, setEvalToken, getFormTokens, setFormToken, getReadinessTokens, setReadinessToken } from './paywall';
+import { EntryScreen, GuideFlow, PackageSelect, EvalIntake, EvalReport, RecoverFlow, pt as ppt, suggestForms, getStoredToken, setStoredToken, getEvalToken, setEvalToken, getFormTokens, setFormToken, removeFormToken, getReadinessTokens, setReadinessToken, removeReadinessToken } from './paywall';
 
 // Nationwide layered resource model (local → statewide → national → fallback).
 import { resolveResources, resolveResourcesForLocation, ResourceResult, ResourceOrg, localizedResourceText, localizedNationalDescription } from './resources';
@@ -1639,10 +1639,24 @@ export default function App() {
     } catch { /* ignore */ }
     return [...owned];
   };
-  const startPathwayCheckout = (selectedFormCode: string, selectedFormKey: string, addedFormCode: string) => {
+  const startPathwayCheckout = async (selectedFormCode: string, selectedFormKey: string, addedFormCode: string) => {
     setPathwayCheckoutError(null);
+    // Verify ownership fresh from the server (owner, 2026-11-09): the
+    // Pathway "add to" must price from verified paid entitlements, not
+    // from stale localStorage tokens. A token that never corresponded to
+    // a completed payment must not make a form look owned, or the bundle
+    // total never reads $349. This also runs the stale-token cleanup in
+    // verifyStoredEntitlements, so a bad token is removed before pricing.
+    let owned: string[] = [];
+    try {
+      const verified = await verifyStoredEntitlements();
+      owned = verified.prepForms;
+      setPurchaseState({ hasEvaluation: verified.hasEvaluation, ownedForms: verified.prepForms, ownedReadinessForms: verified.readinessForms });
+    } catch {
+      owned = ownedPrepForms();
+    }
     const priced = pricePurchase({
-      ownedForms: ownedPrepForms(),
+      ownedForms: owned,
       selectedForm: selectedFormCode,
       addedForm: addedFormCode,
     });
@@ -1722,21 +1736,33 @@ export default function App() {
   const verifyStoredEntitlements = async (): Promise<VerifiedAccess> => {
     const out: VerifiedAccess = { prepForms: [], readinessForms: [], hasEvaluation: false, hasLegacy: false };
     const seen = new Set<string>();
-    const consider = async (token: string | null) => {
+    // Stale-token cleanup (owner, 2026-11-09): a token that does NOT verify
+    // as a paid entitlement for the form it claims must not keep counting
+    // as "owned". Otherwise the Pathway "add to" prices a bundle as if the
+    // first form were already paid for when no transaction ever happened,
+    // and the checkout total never reads $349. Remove the stale mapping
+    // so pricing falls back to the full bundle.
+    const consider = async (token: string | null, formId?: string, kind?: 'prep' | 'readiness') => {
       if (!token || seen.has(token)) return;
       seen.add(token);
       const ent = await checkEntitlementStatus(token);
-      if (!ent || !ent.paid) return;
+      if (!ent || !ent.paid) {
+        if (formId && kind === 'prep') removeFormToken(formId);
+        if (formId && kind === 'readiness') removeReadinessToken(formId);
+        return;
+      }
       if (ent.scope && ent.scope.kind === 'forms' && Array.isArray(ent.scope.forms)) {
         for (const f of ent.scope.forms) {
           if (!out.prepForms.includes(f)) out.prepForms.push(f);
           setFormToken(f, token);
         }
+        if (formId && kind === 'prep' && !ent.scope.forms.includes(formId)) removeFormToken(formId);
       } else if (ent.scope && ent.scope.kind === 'readiness' && Array.isArray(ent.scope.forms)) {
         for (const f of ent.scope.forms) {
           if (!out.readinessForms.includes(f)) out.readinessForms.push(f);
           setReadinessToken(f, token);
         }
+        if (formId && kind === 'readiness' && !ent.scope.forms.includes(formId)) removeReadinessToken(formId);
       } else if (ent.scope && ent.scope.kind === 'evaluation') {
         out.hasEvaluation = true;
         setEvalToken(token);
@@ -1747,8 +1773,8 @@ export default function App() {
     };
     // Every token this browser holds: per-form maps, the historical
     // evaluation token, and the generic token (RECOVER writes only this one).
-    for (const f of Object.keys(getFormTokens())) await consider(getFormTokens()[f]);
-    for (const f of Object.keys(getReadinessTokens())) await consider(getReadinessTokens()[f]);
+    for (const f of Object.keys(getFormTokens())) await consider(getFormTokens()[f], f, 'prep');
+    for (const f of Object.keys(getReadinessTokens())) await consider(getReadinessTokens()[f], f, 'readiness');
     await consider(getEvalToken());
     await consider(getStoredToken());
     return out;

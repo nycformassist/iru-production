@@ -16,6 +16,7 @@
  */
 
 import { getFormInfo } from '../../api/_lib/pathway.js';
+import { BUNDLE_589_765_CENTS } from '../../api/_lib/checkout-pricing.js';
 
 export function formatPrice(cents: number) {
   return `$${(cents / 100).toFixed(2)}`;
@@ -108,10 +109,13 @@ export default function PathwayCheckoutSummary({
 
       {pricing.bundleApplied && (
         <p style={{ margin: '0 0 0.5rem', color: '#15803d', lineHeight: 1.5 }}>
-          Special bundle price for I-589 + I-765: {formatPrice(pricing.totalCents)} — a
+          Special bundle price for I-589 + I-765: {formatPrice(BUNDLE_589_765_CENTS)} — a
           saving of {formatPrice(pricing.bundleSavingCents)} versus the regular
           prices. This bundle price applies instead of the usual additional-form
           discount for this combination.
+          {pricing.totalCents !== BUNDLE_589_765_CENTS && (
+            <> You are charged {formatPrice(pricing.totalCents)} now for the form above; the rest of the {formatPrice(BUNDLE_589_765_CENTS)} bundle total is already covered by a form you own.</>
+          )}
         </p>
       )}
 

@@ -253,6 +253,13 @@ export function setFormToken(formId: string, token: string): void {
   safeSet(FORM_TOKENS_KEY, JSON.stringify(map));
   safeSet(TOKEN_KEY, token);
 }
+export function removeFormToken(formId: string): void {
+  const map = getFormTokens();
+  if (formId in map) {
+    delete map[formId];
+    safeSet(FORM_TOKENS_KEY, JSON.stringify(map));
+  }
+}
 // Readiness tokens (owner-approved 2026-11-05): one paid readiness
 // entitlement per form (I-589 or I-765, $99.95). Kept in a separate
 // map from preparation tokens — readiness never counts as owning a
@@ -266,6 +273,13 @@ export function setReadinessToken(formId: string, token: string): void {
   map[formId] = token;
   safeSet(READINESS_TOKENS_KEY, JSON.stringify(map));
   safeSet(TOKEN_KEY, token);
+}
+export function removeReadinessToken(formId: string): void {
+  const map = getReadinessTokens();
+  if (formId in map) {
+    delete map[formId];
+    safeSet(READINESS_TOKENS_KEY, JSON.stringify(map));
+  }
 }
 export function clearTokens(): void {
   safeRemove(TOKEN_KEY); safeRemove(EVAL_TOKEN_KEY); safeRemove(FORM_TOKENS_KEY); safeRemove(READINESS_TOKENS_KEY);
