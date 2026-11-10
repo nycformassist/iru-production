@@ -2572,9 +2572,9 @@ export default function App() {
           @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&display=swap');
           body { font-family: 'Inter', sans-serif; color: #0f172a; max-width: 800px; margin: 0 auto; padding: 2rem; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           h1, h2, h3, .font-serif { font-family: 'Playfair Display', serif; }
-          body::after { content: ""; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background-image: url('/seal.png'); background-repeat: no-repeat; background-position: center; background-size: 50%; opacity: 0.08; z-index: -1; pointer-events: none; }
+          body::after { content: ""; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background-image: url('/iru-logo.svg'); background-repeat: no-repeat; background-position: center; background-size: 50%; opacity: 0.08; z-index: -1; pointer-events: none; }
           .header { text-align: center; border-bottom: 2px solid #0f172a; padding-bottom: 2rem; margin-bottom: 2rem; }
-          .header img { width: 6rem; height: 6rem; margin: 0 auto 1rem auto; object-fit: contain; }
+          .header img { height: 4rem; width: auto; margin: 0 auto 1rem auto; object-fit: contain; }
           .header h1 { font-size: 1.875rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; margin: 0 0 0.5rem 0; }
           .header p { font-size: 0.875rem; font-family: monospace; color: #64748b; text-transform: uppercase; letter-spacing: 0.1em; margin: 0; }
           .section { margin-bottom: 2rem; page-break-inside: avoid; }
@@ -2592,7 +2592,7 @@ export default function App() {
       </head>
       <body>
         <div class="header">
-          <img src="/seal.png" alt="SMRG - Saint Martin Revenue Group" />
+          <img src="/iru-logo.svg" alt="IRU — Immigration Readiness Utility" />
           <h1 class="font-serif">${ui.packetTitle}</h1>
           <p>${ui.humanAnchorSeal} • ${new Date().toLocaleDateString()}</p>
           <div style="margin-top: 1rem; display: inline-block; background-color: #eef2ff; color: #4f46e5; padding: 0.5rem 1rem; border-radius: 9999px; font-weight: 700; font-size: 0.875rem;">
@@ -2755,14 +2755,14 @@ export default function App() {
       return (
         <div className="min-h-screen bg-white">
           <div className="max-w-3xl mx-auto text-center pt-8">
-            <img src="/seal.png" alt="SMRG" className="w-20 h-20 mx-auto mb-4 object-contain" />
+            <img src="/iru-logo.svg" alt="IRU — Immigration Readiness Utility" className="h-16 w-auto mx-auto mb-4 object-contain" />
           </div>
           <EntryScreen lang={pwLang} onNavigate={pwNav} onLanguageChange={(code) => setLang(code)} />
           {hasStoredTokens() && (
             <div className="max-w-xl mx-auto px-4 pb-8">
               <button onClick={() => continueMyCase()} className="w-full text-left border-2 border-indigo-200 bg-indigo-50 rounded-2xl p-5 hover:border-indigo-400 transition-colors">
-                <div className="font-semibold text-indigo-700 text-base">{t('entryContinue', 'Continue my case')}</div>
-                <div className="text-sm text-slate-600 mt-1">{t('entryContinueDesc', 'You already bought IRU on this device. We will verify your purchase and take you back to your case.')}</div>
+                <div className="font-semibold text-indigo-700 text-base">{ppt('entryContinue', pwLang)}</div>
+                <div className="text-sm text-slate-600 mt-1">{ppt('entryContinueDesc', pwLang)}</div>
               </button>
               {continueError && <p className="text-sm text-red-700 mt-3 text-center">{continueError}</p>}
             </div>
@@ -3103,7 +3103,7 @@ export default function App() {
         </svg>
       )}
       <div className="max-w-3xl w-full text-center mb-8 relative z-10">
-        <img src="/seal.png" alt="SMRG - Saint Martin Revenue Group" className="w-24 h-24 mx-auto mb-6 object-contain" />
+        <img src="/iru-logo.svg" alt="IRU — Immigration Readiness Utility" className="h-20 w-auto mx-auto mb-6 object-contain" />
         <h1 className="text-4xl sm:text-5xl font-serif font-bold text-[#0a2a5e] mb-4 tracking-tight">
           {ui.title}
         </h1>

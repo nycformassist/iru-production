@@ -29,7 +29,7 @@ g.window.confirm = () => true;
 
 import React from 'react';
 import { render, fireEvent } from '@testing-library/react';
-import { EntryScreen } from './paywall';
+import { EntryScreen, pt } from './paywall';
 
 test('entry screen shows the language selector FIRST, above the title and pathway options', () => {
   const { container } = render(
@@ -75,4 +75,26 @@ test('choosing Español calls onLanguageChange with ES and re-renders the entry 
   assert.match(container.textContent || '', /Elija su idioma/);
   assert.equal(container.querySelector('[data-testid="entry-language-ES"]')?.getAttribute('aria-pressed'), 'true');
   assert.equal(container.querySelector('[data-testid="entry-language-EN"]')?.getAttribute('aria-pressed'), 'false');
+});
+
+test('Continue my case card translates in all five languages (owner finding 2026-11-10)', () => {
+  // The card is rendered by App.tsx after <EntryScreen/>, not inside it,
+  // and it reads pt('entryContinue' / 'entryContinueDesc', lang) — the
+  // same function the four pathway cards use. Before this fix those keys
+  // were undefined and the card fell back to English in every language.
+  const expected: Record<string, [string, string]> = {
+    EN: ['Continue my case', 'You already bought IRU on this device. We will verify your purchase and take you back to your case.'],
+    ES: ['Continuar con mi caso', 'Ya compró IRU en este dispositivo. Verificaremos su compra y lo llevaremos de vuelta a su caso.'],
+    ZH: ['继续我的案件', '您已在此设备上购买了 IRU。我们将验证您的购买，并将您带回您的案件。'],
+    HT: ['Kontinye ak ka mwen', 'Ou te deja achte IRU sou aparèy sa a. N ap verifye acha ou epi mennen ou tounen nan ka ou.'],
+    AR: ['متابعة قضيتي', 'لقد اشتريت IRU بالفعل على هذا الجهاز. سنقوم بالتحقق من عملية الشراء وإعادتك إلى قضيتك.'],
+  };
+  for (const [code, [title, desc]] of Object.entries(expected)) {
+    assert.equal(pt('entryContinue', code as 'EN' | 'ES' | 'ZH' | 'HT' | 'AR'), title, `entryContinue in ${code}`);
+    assert.equal(pt('entryContinueDesc', code as 'EN' | 'ES' | 'ZH' | 'HT' | 'AR'), desc, `entryContinueDesc in ${code}`);
+  }
+  // In Spanish the text must differ from English — the exact failure the
+  // owner saw (card stayed in English in the Spanish view).
+  assert.notEqual(pt('entryContinue', 'ES'), pt('entryContinue', 'EN'));
+  assert.notEqual(pt('entryContinueDesc', 'ES'), pt('entryContinueDesc', 'EN'));
 });

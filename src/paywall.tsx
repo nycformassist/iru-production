@@ -108,6 +108,25 @@ export const PAYWALL_LABELS: Record<string, Record<Lang, string>> = {
     HT: 'Wè fòm imigrasyon IRU sipòte yo ak kijan yo gen rapò youn ak lòt.',
     AR: 'اطّلع على نماذج الهجرة التي يدعمها IRU وكيفية ارتباطها ببعضها.',
   },
+  // Entry — "Continue my case" card (owner finding 2026-11-10): this card
+  // is rendered by App.tsx after <EntryScreen/>, not inside it, and it used
+  // t('entryContinue') which has no definition in the ui strings, so it
+  // fell back to English in every language. It belongs in PAYWALL_LABELS
+  // with its four sibling pathway cards, read via pt().
+  entryContinue: {
+    EN: 'Continue my case',
+    ES: 'Continuar con mi caso',
+    ZH: '继续我的案件',
+    HT: 'Kontinye ak ka mwen',
+    AR: 'متابعة قضيتي',
+  },
+  entryContinueDesc: {
+    EN: 'You already bought IRU on this device. We will verify your purchase and take you back to your case.',
+    ES: 'Ya compró IRU en este dispositivo. Verificaremos su compra y lo llevaremos de vuelta a su caso.',
+    ZH: '您已在此设备上购买了 IRU。我们将验证您的购买，并将您带回您的案件。',
+    HT: 'Ou te deja achte IRU sou aparèy sa a. N ap verifye acha ou epi mennen ou tounen nan ka ou.',
+    AR: 'لقد اشتريت IRU بالفعل على هذا الجهاز. سنقوم بالتحقق من عملية الشراء وإعادتك إلى قضيتك.',
+  },
 
   // Guidance
   guideTitle: {
