@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 392 96" role="img" aria-label="IRU — Immigration Readiness Utility">
+  <title>IRU — Immigration Readiness Utility</title>
+  <!-- Mark: deep navy badge with a gold readiness check -->
+  <rect x="6" y="12" width="72" height="72" rx="16" fill="#0a2a5e"/>
+  <polyline points="22,48 34,60 60,32" fill="none" stroke="#f59e0b" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Wordmark -->
+  <text x="94" y="54" font-family="Arial, Helvetica, sans-serif" font-size="46" font-weight="800" letter-spacing="1" fill="#0a2a5e">IRU</text>
+  <text x="95" y="78" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="600" letter-spacing="2" fill="#0a2a5e">IMMIGRATION READINESS UTILITY</text>
+</svg>
