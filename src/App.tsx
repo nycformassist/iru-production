@@ -2757,7 +2757,7 @@ export default function App() {
           <div className="max-w-3xl mx-auto text-center pt-8">
             <img src="/seal.png" alt="SMRG" className="w-20 h-20 mx-auto mb-4 object-contain" />
           </div>
-          <EntryScreen lang={pwLang} onNavigate={pwNav} />
+          <EntryScreen lang={pwLang} onNavigate={pwNav} onLanguageChange={(code) => setLang(code)} />
           {hasStoredTokens() && (
             <div className="max-w-xl mx-auto px-4 pb-8">
               <button onClick={() => continueMyCase()} className="w-full text-left border-2 border-indigo-200 bg-indigo-50 rounded-2xl p-5 hover:border-indigo-400 transition-colors">

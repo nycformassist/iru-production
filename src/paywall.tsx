@@ -14,6 +14,7 @@
  */
 
 import React from 'react';
+import { LANGUAGES } from './constants';
 
 // ---------------------------------------------------------------------------
 // Labels (5 languages). Muse self-verified via back-translation;
@@ -23,6 +24,15 @@ import React from 'react';
 type Lang = 'EN' | 'ES' | 'ZH' | 'HT' | 'AR';
 
 export const PAYWALL_LABELS: Record<string, Record<Lang, string>> = {
+  // Entry — language first: a visitor who cannot read English must be able
+  // to choose their language before any pathway option or question.
+  chooseLanguage: {
+    EN: 'Choose your language',
+    ES: 'Elija su idioma',
+    ZH: '选择您的语言',
+    HT: 'Chwazi lang ou',
+    AR: 'اختر لغتك',
+  },
   // Entry
   entryTitle: {
     EN: 'Prepare your immigration forms',
@@ -312,10 +322,40 @@ function Disclaimer({ lang }: { lang: Lang }) {
   );
 }
 
-export function EntryScreen({ lang, onNavigate }: Props) {
+// Language selector — rendered FIRST on the entry screen, above the title
+// and pathway options, so a visitor chooses their language before reading
+// anything else. Names are in each language's own script so a non-English
+// speaker can recognize theirs without reading English. The choice is
+// applied immediately by the parent (App holds the lang state and persists
+// it to localStorage on every change), so the whole entry screen and every
+// screen after it re-renders in the chosen language.
+export function LanguageSelector({ lang, onLanguageChange }: { lang: Lang; onLanguageChange: (code: Lang) => void }) {
+  return (
+    <div data-testid="entry-language-selector" className="mb-8 rounded-2xl border-2 border-indigo-200 bg-indigo-50/60 p-5">
+      <p className="text-base font-semibold text-[#0a2a5e] text-center mb-4">{pt('chooseLanguage', lang)}</p>
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        {LANGUAGES.map((l) => (
+          <button
+            key={l.code}
+            type="button"
+            onClick={() => onLanguageChange(l.code as Lang)}
+            aria-pressed={lang === l.code}
+            data-testid={`entry-language-${l.code}`}
+            className={`px-3 py-3 rounded-xl border-2 text-base font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600 focus-visible:ring-offset-2 ${lang === l.code ? 'border-indigo-600 bg-white text-indigo-800 shadow-sm' : 'border-slate-300 bg-white text-slate-800 hover:border-indigo-400'}`}
+          >
+            {l.name}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function EntryScreen({ lang, onNavigate, onLanguageChange }: Props & { onLanguageChange: (code: Lang) => void }) {
   const card = 'w-full text-left border-2 border-slate-200 rounded-2xl p-5 hover:border-indigo-400 hover:bg-indigo-50 transition-colors';
   return (
     <div className="max-w-xl mx-auto px-4 py-8">
+      <LanguageSelector lang={lang} onLanguageChange={onLanguageChange} />
       <h1 className="text-2xl font-serif font-bold text-slate-900 text-center mb-2">{pt('entryTitle', lang)}</h1>
       <p className="text-sm text-slate-600 text-center mb-8 max-w-lg mx-auto">{pt('entrySubtitle', lang)}</p>
       <div className="space-y-4">
