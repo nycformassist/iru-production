@@ -877,3 +877,118 @@ export function scoreSectionWeighted(
 // current behavior.
   opts?: { premium?: boolean },
   if (opts?.premium === false) return assessment;
+
+  // --- Premium intelligence (owner directive 2026-11-10) ---
+  // Immigration history, entries, status, and inadmissibility grounds
+  // must be mutually consistent. Contradictions are CONFLICT blockers.
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const dob = parseAnyDate(get('i485_dob'));
+  const arrival = parseAnyDate(get('i485_arrival_date'));
+  const asylumGrant = parseAnyDate(get('i485_asylum_grant_date'));
+  const refugeeAdmission = parseAnyDate(get('i485_refugee_admission_date'));
+  const visaIssue = parseAnyDate(get('i485_visa_issue_date'));
+  const visaDecision = parseAnyDate(get('i485_visa_decision_date'));
+  const priorMarriage = parseAnyDate(get('i485_prior_marriage_date'));
+  const priorityDate = parseAnyDate(get('i485_petition_priority_date'));
+  const i94Expiry = parseAnyDate(get('i485_i94_expiry'));
+  const statusExpiry = parseAnyDate(get('i485_current_status_expiry'));
+  const passportExpiry = parseAnyDate(get('i485_passport_expiry'));
+
+  // Future dates are impossible.
+  const futureChecks: [string, Date | null, string, string][] = [
+    ['i485_dob', dob, 'Date of birth', 'Personal Information'],
+    ['i485_arrival_date', arrival, 'Date of last arrival', 'Immigration History'],
+    ['i485_asylum_grant_date', asylumGrant, 'Asylum grant date', 'Eligibility'],
+    ['i485_refugee_admission_date', refugeeAdmission, 'Refugee admission date', 'Eligibility'],
+    ['i485_visa_issue_date', visaIssue, 'Visa issue date', 'Immigration History'],
+    ['i485_visa_decision_date', visaDecision, 'Visa decision date', 'Immigration History'],
+    ['i485_prior_marriage_date', priorMarriage, 'Prior marriage date', 'Family'],
+    ['i485_petition_priority_date', priorityDate, 'Priority date', 'Eligibility'],
+  ];
+  for (const [id, d, label, section] of futureChecks) {
+    if (d && d > today) {
+      conflicts.push({ t: `${label} is in the future`, d: `${label} (${get(id)}) is after today. A future date cannot be correct — correct it before filing.`, section });
+    }
+  }
+
+  // Arrived before being born is impossible; married to a prior spouse
+  // before being born is impossible; a child cannot be born before the parent.
+  if (dob && arrival && arrival < dob) {
+    conflicts.push({ t: 'Arrival date is before date of birth', d: `Last arrival (${get('i485_arrival_date')}) is before the date of birth (${get('i485_dob')}). One of these dates is wrong.`, section: 'Immigration History' });
+  }
+  if (dob && priorMarriage && priorMarriage < dob) {
+    conflicts.push({ t: 'Prior marriage date is before date of birth', d: `Prior marriage date (${get('i485_prior_marriage_date')}) is before the date of birth (${get('i485_dob')}). One of these dates is wrong.`, section: 'Family' });
+  }
+  for (const childId of ['i485_child2_dob', 'i485_child3_dob'] as const) {
+    const childDob = parseAnyDate(get(childId));
+    if (dob && childDob && childDob < dob) {
+      conflicts.push({ t: 'Child date of birth is before parent date of birth', d: `Child date of birth (${get(childId)}) is before the applicant's date of birth (${get('i485_dob')}). A child cannot be born before their parent — correct one of the dates.`, section: 'Family' });
+    }
+    if (childDob && childDob > today) {
+      conflicts.push({ t: 'Child date of birth is in the future', d: `Child date of birth (${get(childId)}) is after today. A future date cannot be correct — correct it before filing.`, section: 'Family' });
+    }
+  }
+
+  // Inspected entry but no I-94 number: a lawful admission generates an I-94.
+  if (get('i485_last_entry') === 'yes' && !get('i485_i94_number')) {
+    conflicts.push({ t: 'Inspected entry but no I-94 number', d: 'The last entry was inspected and admitted, but no Form I-94 number was provided. A lawful admission generates an I-94 — provide the number or correct the manner of entry.', section: 'Immigration History' });
+  }
+
+  // Status expiry in the past while claiming status is maintained.
+  if (get('i485_status_maintained') === 'yes') {
+    if (i94Expiry && i94Expiry < today) {
+      conflicts.push({ t: 'I-94 expired but status is claimed maintained', d: `The I-94 authorized stay expired (${get('i485_i94_expiry')}) but status is claimed as maintained. An expired I-94 means the authorized stay ended — correct the status or provide the current status document.`, section: 'Immigration History' });
+    }
+    if (statusExpiry && statusExpiry < today) {
+      conflicts.push({ t: 'Current status expired but claimed maintained', d: `The current immigration status expired (${get('i485_current_status_expiry')}) but status is claimed as maintained. Correct the status or provide the current status document.`, section: 'Immigration History' });
+    }
+  }
+
+  // Passport expired: a document issue, not a hard blocker.
+  if (passportExpiry && passportExpiry < today) {
+    inferred.push({ t: 'Passport has expired', d: `The passport or travel document expired (${get('i485_passport_expiry')}). A valid passport is normally needed for the application — renew it or confirm the document is still accepted.`, section: 'Supporting Documents' });
+  }
+
+  // Asylum basis: the grant must be at least 1 year ago to adjust.
+  const basis = get('i485_basis');
+  if (basis === 'asylum') {
+    if (!asylumGrant) {
+      conflicts.push({ t: 'Asylum grant date is missing', d: 'Asylum was selected as the basis but no grant date was given. Asylum-based adjustment requires at least one year since the grant — provide the date.', section: 'Eligibility' });
+    } else if (asylumGrant <= today && yearsBetween(asylumGrant, today) < 1) {
+      conflicts.push({ t: 'Asylum grant is less than one year ago', d: `Asylum-based adjustment requires at least one year since the grant, but the grant date (${get('i485_asylum_grant_date')}) is less than one year ago. The applicant cannot adjust yet.`, section: 'Eligibility' });
+    }
+  }
+  // Refugee basis: admission must be at least 1 year ago to adjust.
+  if (basis === 'refugee') {
+    if (!refugeeAdmission) {
+      conflicts.push({ t: 'Refugee admission date is missing', d: 'Refugee was selected as the basis but no admission date was given. Refugee adjustment requires at least one year since admission — provide the date.', section: 'Eligibility' });
+    } else if (refugeeAdmission <= today && yearsBetween(refugeeAdmission, today) < 1) {
+      conflicts.push({ t: 'Refugee admission is less than one year ago', d: `Refugee adjustment requires at least one year since admission, but the admission date (${get('i485_refugee_admission_date')}) is less than one year ago. The applicant cannot adjust yet.`, section: 'Eligibility' });
+    }
+  }
+
+  // Visa available but the priority date is in the future: a future
+  // priority date cannot be current.
+  if (visa === 'yes' && priorityDate && priorityDate > today) {
+    conflicts.push({ t: 'Visa available but priority date is in the future', d: `An immigrant visa is claimed available, but the priority date (${get('i485_petition_priority_date')}) is in the future. A future priority date cannot be current — correct the date or the visa availability.`, section: 'Eligibility' });
+  }
+
+  // Employment date ranges: an inverted range is impossible.
+  for (const [fromId, toId, label] of [['i485_emp1_date_from', 'i485_emp1_date_to', 'Employment 1'], ['i485_emp2_date_from', 'i485_emp2_date_to', 'Employment 2'], ['i485_recent_date_from', 'i485_recent_date_to', 'Most recent employment'], ['i485_prior_date_from', 'i485_prior_date_to', 'Prior employment'], ['i485_org1_date_from', 'i485_org1_date_to', 'Organization 1'], ['i485_org2_date_from', 'i485_org2_date_to', 'Organization 2']] as const) {
+    const from = parseAnyDate(get(fromId));
+    const to = parseAnyDate(get(toId));
+    if (from && to && from > to) {
+      conflicts.push({ t: `${label} dates are inverted`, d: `${label} runs from ${get(fromId)} to ${get(toId)} — the start is after the end. Correct the dates.`, section: 'Employment' });
+    }
+  }
+
+  // In the US but no physical-address start date: completeness, not a conflict.
+  if (get('i485_in_us') === 'yes' && !get('i485_phys_date_first')) {
+    inferred.push({ t: 'Physical address start date missing', d: 'The applicant is in the U.S. but no date was given for when they first resided at their current physical address. Provide it — the form asks for it.', section: 'Personal Information' });
+  }
+
+  // Narrative preparation: draft explanations for every Part 8 "yes".
+  const draft = explanationDraftFinding('i485', answers);
+  if (draft) inferred.push(draft);
+
