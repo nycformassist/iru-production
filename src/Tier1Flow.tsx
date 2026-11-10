@@ -219,7 +219,14 @@ export default function Tier1Flow({ formKey, questions, steps, info, lang, asses
   if (qi >= visible.length) {
     const factRecord: FactRecord = buildFactRecord(answers);
     const basic = assess(answers, lang);
-    const withIntel = applyIntelligence(formKey, answers, basic);
+    // Premium gating (owner directive 2026-11-10): the intelligence layer
+    // is a Premium preparation feature. It applies ONLY when this browser
+    // holds a paid preparation token for the form (getFormTokens — the
+    // same prep-token store the prepared-PDF gate uses; a readiness-only
+    // token is refused 402 by the fill endpoint). A Readiness-only buyer
+    // gets the basic assessment — no contradiction intelligence, no
+    // narrative drafts, no adaptive screening.
+    const withIntel = applyIntelligence(formKey, answers, basic, { premium: hasPrepEntitlement(formKey) });
     const r: ScoredAssessment = scoreAssessment(withIntel, info.formNumber, [], factRecord);
     return <Tier1Report info={info} lang={lang} result={r} questions={questions} steps={steps} answers={answers} factRecord={factRecord} onExit={onExit} onFormprepCheckout={onFormprepCheckout} />;
   }
@@ -650,6 +657,23 @@ function tier1TokenFor(formKey: string): string | null {
     }
     return getStoredToken();
   } catch { return null; }
+}
+
+// Paid preparation entitlement for this form (Premium gate, owner
+// directive 2026-11-10). Reads the prep-token store — the same store
+// tier1TokenFor prefers and the fill endpoint enforces server-side.
+// A readiness-only buyer has a token in getReadinessTokens(), not here,
+// so the Premium intelligence does not apply to them. Stale prep tokens
+// are removed by verifyStoredEntitlements (App.tsx), so this store is
+// maintained; the fill endpoint's server-side 402 remains the
+// authoritative enforcement for the prepared PDF.
+function hasPrepEntitlement(formKey: string): boolean {
+  const codeMap: Record<string, string> = { i130: 'I-130', i90: 'I-90', n400: 'N-400', i765: 'I-765', i485: 'I-485', i589: 'I-589' };
+  const code = codeMap[formKey];
+  if (!code) return false;
+  try {
+    return Boolean(getFormTokens()[code]);
+  } catch { return false; }
 }
 
 // Generate completed form via Python endpoint

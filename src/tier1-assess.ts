@@ -280,6 +280,160 @@ export function assessI90(answers: Record<string, any>, lang: Tier1Lang): Assess
   return { blockers, warnings, complete, ready: blockers.length === 0 };
 }
 
+// --- Premium intelligence helpers (owner directive 2026-11-10) ---
+// Shared date parsing + narrative-draft assembly for the four expanded
+// forms (I-485, N-400, I-130, I-90), following the detectI765Intelligence
+// pattern: contradictions are CONFLICT blockers (ready=false), not soft
+// warnings. Narratives are assembled ONLY from the applicant's own
+// answers — never invented — and are marked DRAFT for applicant review.
+
+/** Tolerant date parse: YYYY-MM-DD, MM/DD/YYYY, MM/YYYY, YYYY-MM, YYYY. Returns null for "D/S", "present", "n/a", empty, or invalid. */
+function parseAnyDate(raw: any): Date | null {
+  if (raw == null) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+  const low = s.toLowerCase();
+  if (low === 'd/s' || low === 'ds' || low === 'present' || low === 'current' || low === 'n/a' || low === 'na') return null;
+  const mdy = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(s);
+  if (mdy) {
+    const d = new Date(Number(mdy[3]), Number(mdy[1]) - 1, Number(mdy[2]));
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  const my = /^(\d{1,2})\/(\d{4})$/.exec(s);
+  if (my) {
+    const d = new Date(Number(my[2]), Number(my[1]) - 1, 1);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  const ym = /^(\d{4})-(\d{1,2})$/.exec(s);
+  if (ym) {
+    const d = new Date(Number(ym[1]), Number(ym[2]) - 1, 1);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  const y = /^(\d{4})$/.exec(s);
+  if (y) {
+    const d = new Date(Number(y[1]), 0, 1);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/** Parse a range endpoint (MM/YYYY, full date, or "present" = today). */
+function parseRangeDate(raw: any, today: Date): Date | null {
+  if (raw == null) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+  if (s.toLowerCase() === 'present' || s.toLowerCase() === 'current') return new Date(today);
+  return parseAnyDate(s);
+}
+
+function daysBetween(a: Date, b: Date): number {
+  return Math.floor((b.getTime() - a.getTime()) / 86400000);
+}
+
+function yearsBetween(a: Date, b: Date): number {
+  return (b.getTime() - a.getTime()) / (365.25 * 86400000);
+}
+
+export interface ExplanationDraft {
+  formSection: string;      // e.g. "I-485 Part 8" / "N-400 Part 12"
+  questionId: string;
+  questionRef: string;      // e.g. "i485_adm_01" / "GMC Q3"
+  applicantAnswer: string;  // the applicant's own answer (e.g. "yes")
+  draftText: string;        // assembled ONLY from the applicant's answers; never invented
+  status: 'draft-needs-review';
+}
+
+// Narrative preparation (Premium, owner directive 2026-11-09/10):
+// for each "if yes, explain" answer, assemble a reviewable draft that
+// quotes the applicant's own disclosure and prompts them to supply the
+// date, place, and outcome in their own words. Nothing is invented:
+// a draft with no applicant-supplied details says so explicitly.
+// The applicant reviews and corrects every draft before finalization.
+export function buildExplanationDrafts(formKey: string, answers: Record<string, any>): ExplanationDraft[] {
+  const drafts: ExplanationDraft[] = [];
+  const get = (id: string) => answers[id];
+  if (formKey === 'i485') {
+    // Part 8 admissibility: every "yes" needs an explanation on the form.
+    for (const [id, val] of Object.entries(answers)) {
+      if (!/^i485_adm_\d+[a-z]?$/.test(id)) continue;
+      if (String(val).toLowerCase() !== 'yes') continue;
+      drafts.push({
+        formSection: 'I-485 Part 8 (Admissibility)',
+        questionId: id,
+        questionRef: id,
+        applicantAnswer: 'yes',
+        draftText: `DRAFT — review and correct before use. The applicant answered Yes to I-485 Part 8 admissibility question ${id}. Supply the date, place, and outcome in your own words for this disclosure. No facts have been added by IRU.`,
+        status: 'draft-needs-review',
+      });
+    }
+  } else if (formKey === 'n400') {
+    // Part 12 good moral character: every "yes" needs an explanation.
+    for (const [id, val] of Object.entries(answers)) {
+      if (!/^n400_gmc_\d+$/.test(id)) continue;
+      if (String(val).toLowerCase() !== 'yes') continue;
+      const num = Number(id.replace('n400_gmc_', '')) + 1;
+      drafts.push({
+        formSection: 'N-400 Part 12 (Good Moral Character)',
+        questionId: id,
+        questionRef: `GMC Q${num}`,
+        applicantAnswer: 'yes',
+        draftText: `DRAFT — review and correct before use. The applicant answered Yes to GMC question ${num} (N-400 Part 12). Supply the date, place, and outcome in your own words for this disclosure. No facts have been added by IRU.`,
+        status: 'draft-needs-review',
+      });
+    }
+  } else if (formKey === 'i130') {
+    if (get('i130_prior_denied') === 'yes') {
+      drafts.push({
+        formSection: 'I-130 Filing History',
+        questionId: 'i130_prior_denied',
+        questionRef: 'Prior petition denied or revoked',
+        applicantAnswer: 'yes',
+        draftText: `DRAFT — review and correct before use. The applicant disclosed a prior petition that was denied or revoked. Supply the prior petition's filing date, location, and result in your own words for review. No facts have been added by IRU.`,
+        status: 'draft-needs-review',
+      });
+    }
+    if (get('i130_ben_proceedings') === 'yes') {
+      drafts.push({
+        formSection: 'I-130 Beneficiary',
+        questionId: 'i130_ben_proceedings',
+        questionRef: 'Beneficiary in removal proceedings',
+        applicantAnswer: 'yes',
+        draftText: `DRAFT — review and correct before use. The applicant disclosed that the beneficiary is in removal proceedings. Supply the court, case status, and any relevant dates in your own words for review. No facts have been added by IRU.`,
+        status: 'draft-needs-review',
+      });
+    }
+  } else if (formKey === 'i90') {
+    if (get('i90_name_changed') === 'yes') {
+      const cardName = [get('i90_card_name_family'), get('i90_card_name_given')].filter(Boolean).join(' ');
+      drafts.push({
+        formSection: 'I-90 Biographical Information',
+        questionId: 'i90_name_changed',
+        questionRef: 'Name or biographical information changed',
+        applicantAnswer: 'yes',
+        draftText: `DRAFT — review and correct before use. The applicant disclosed a name or biographical change${cardName ? ` — the card shows "${cardName}"` : ''}. Confirm the current legal name and the reason for the change in your own words. No facts have been added by IRU.`,
+        status: 'draft-needs-review',
+      });
+    }
+  }
+  return drafts;
+}
+
+// Aggregated report finding for the narrative drafts (so the report
+// surfaces them without a new UI component). Returns null when there
+// are no drafts.
+function explanationDraftFinding(formKey: string, answers: Record<string, any>): Finding | null {
+  const drafts = buildExplanationDrafts(formKey, answers);
+  if (!drafts.length) return null;
+  const refs = drafts.map(d => d.questionRef).join('; ');
+  const section = formKey === 'i485' ? 'Admissibility' : formKey === 'n400' ? 'Good Moral Character' : formKey === 'i130' ? 'Filing History' : 'Filing Basis';
+  return {
+    t: `${drafts.length} explanation draft${drafts.length > 1 ? 's' : ''} prepared — review required`,
+    d: `Premium narrative preparation drafted explanations for: ${refs}. Each draft uses ONLY the applicant's own answers — no facts were added. The applicant must review, correct, and supply the date, place, and outcome for each before use.`,
+    section,
+  };
+}
+
 // --- Context-aware intelligence layer ---
 // Cross-answer inference and conflict detection.
 // This is what makes Tier 1 "think" rather than just capture.
@@ -711,3 +865,15 @@ export function scoreSectionWeighted(
   score = Math.max(0, score - (findings.warnings.length * 0.05));
   return Math.round(score * 100) / 100;
 }
+// Premium gating (owner directive 2026-11-10): the intelligence layer
+// (contradiction detection, narrative preparation, adaptive screening,
+// document intelligence, comprehensive readiness assessment) is a
+// PREMIUM PREPARATION feature. It applies ONLY when the applicant holds
+// a paid preparation entitlement for the form. A Readiness-only buyer
+// ($99.95) gets the basic assessment — no Premium intelligence — and a
+// free/basic or institutional flow gets none unless explicitly configured
+// for it. The caller (Tier1Flow) passes premium=false when the form has
+// no prep token. Default is true so existing callers/tests keep the
+// current behavior.
+  opts?: { premium?: boolean },
+  if (opts?.premium === false) return assessment;
