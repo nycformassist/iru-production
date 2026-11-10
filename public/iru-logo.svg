@@ -1,9 +1,33 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 392 96" role="img" aria-label="IRU — Immigration Readiness Utility">
   <title>IRU — Immigration Readiness Utility</title>
-  <!-- Mark: deep navy badge with a gold readiness check -->
-  <rect x="6" y="12" width="72" height="72" rx="16" fill="#0a2a5e"/>
-  <polyline points="22,48 34,60 60,32" fill="none" stroke="#f59e0b" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <defs>
+    <!-- Five-point star, centered at origin, outer r 4.5 -->
+    <polygon id="star" points="0,-4.5 1.06,-1.46 4.28,-1.39 1.71,0.56 2.65,3.64 0,1.8 -2.65,3.64 -1.71,0.56 -4.28,-1.39 -1.06,-1.46" fill="#ffffff"/>
+    <!-- Shield clip -->
+    <clipPath id="shieldClip">
+      <path d="M16,22 H68 V48 C68,66 56,78 42,86 C28,78 16,66 16,48 Z"/>
+    </clipPath>
+  </defs>
+  <!-- Eagle: heraldic spread-wing silhouette, wings raised in a V, in Old Glory blue -->
+  <polygon points="42,2 37,3 36,8 30,10 6,3 16,10 8,14 18,16 14,20 30,20 38,24 42,26 46,24 54,20 70,20 66,16 76,14 68,10 78,3 54,10 48,8 47,3" fill="#1e3a8a"/>
+  <!-- Shield: white base -->
+  <path d="M16,22 H68 V48 C68,66 56,78 42,86 C28,78 16,66 16,48 Z" fill="#ffffff"/>
+  <g clip-path="url(#shieldClip)">
+    <!-- Blue chief -->
+    <rect x="16" y="22" width="52" height="14" fill="#1e3a8a"/>
+    <!-- Red vertical stripes -->
+    <rect x="16" y="36" width="7.43" height="50" fill="#b22234"/>
+    <rect x="30.86" y="36" width="7.43" height="50" fill="#b22234"/>
+    <rect x="45.71" y="36" width="7.43" height="50" fill="#b22234"/>
+    <rect x="60.57" y="36" width="7.43" height="50" fill="#b22234"/>
+  </g>
+  <!-- Stars on the chief -->
+  <use href="#star" transform="translate(26,29)"/>
+  <use href="#star" transform="translate(42,29)"/>
+  <use href="#star" transform="translate(58,29)"/>
+  <!-- Shield outline -->
+  <path d="M16,22 H68 V48 C68,66 56,78 42,86 C28,78 16,66 16,48 Z" fill="none" stroke="#1e3a8a" stroke-width="2"/>
   <!-- Wordmark -->
-  <text x="94" y="54" font-family="Arial, Helvetica, sans-serif" font-size="46" font-weight="800" letter-spacing="1" fill="#0a2a5e">IRU</text>
-  <text x="95" y="78" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="600" letter-spacing="2" fill="#0a2a5e">IMMIGRATION READINESS UTILITY</text>
+  <text x="94" y="54" font-family="Arial, Helvetica, sans-serif" font-size="46" font-weight="800" letter-spacing="1" fill="#1e3a8a">IRU</text>
+  <text x="95" y="78" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="600" letter-spacing="2" fill="#b22234">IMMIGRATION READINESS UTILITY</text>
 </svg>

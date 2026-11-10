@@ -1,11 +1,14 @@
 /**
  * api/iru-logo.test.js — IRU app logo identity.
  *
- * Owner directive 2026-11-10: the SMRG logo is gone from the IRU app. The
- * app has its own identifying logo, "IRU — Immigration Readiness Utility",
- * in deep navy + gold. No green, no teal, no black. This test pins that:
- * the SMRG seal asset is gone, the new logo exists and names the app, and
- * no source file references the old seal.
+ * Owner directive 2026-11-10 (second logo direction): the logo must look
+ * MORE AMERICAN — red, white, and blue, with a shield and eagle (flag
+ * motif). The app has its own identifying logo, "IRU — Immigration
+ * Readiness Utility": a spread-wing eagle in Old Glory blue above a
+ * stars-and-stripes shield, with "IRU" in blue and the full name in red.
+ * No green, no teal, no black, no gold. This test pins that: the SMRG seal
+ * asset is gone, the new logo exists and names the app, and no source file
+ * references the old seal or the retired navy/gold mark.
  *
  * Run with: node --test api/iru-logo.test.js
  */
@@ -26,14 +29,19 @@ test('IRU logo asset exists and names the app', () => {
   const svg = read('public/iru-logo.svg');
   assert.match(svg, /IRU/, 'logo must say IRU');
   assert.match(svg, /IMMIGRATION READINESS UTILITY/, 'logo must say Immigration Readiness Utility');
-  assert.match(svg, /#0a2a5e/, 'logo uses deep navy');
-  assert.match(svg, /#f59e0b/, 'logo uses gold accent');
+  assert.match(svg, /#1e3a8a/, 'logo uses Old Glory blue');
+  assert.match(svg, /#b22234/, 'logo uses Old Glory red');
+  assert.match(svg, /#ffffff/, 'logo uses white');
+  assert.match(svg, /shield/i, 'logo is a shield');
+  assert.match(svg, /eagle/i, 'logo has an eagle');
+  assert.match(svg, /star/i, 'logo has stars');
+  assert.match(svg, /stripe/i, 'logo has stripes');
 });
 
-test('IRU logo has no green, teal, or black', () => {
+test('IRU logo has no green, teal, black, or gold', () => {
   const svg = read('public/iru-logo.svg').toLowerCase();
-  for (const banned of ['#00ff00', '#008000', '#14b8a6', '#0d9488', '#2dd4bf', '#5eead4', '#000000', '#000']) {
-    assert.doesNotMatch(svg, new RegExp(banned.replace('#', '#'), 'i'), `logo must not use ${banned}`);
+  for (const banned of ['#00ff00', '#008000', '#14b8a6', '#0d9488', '#2dd4bf', '#5eead4', '#000000', '#000', '#f59e0b', '#0a2a5e']) {
+    assert.doesNotMatch(svg, new RegExp(banned, 'i'), `logo must not use ${banned}`);
   }
 });
 
