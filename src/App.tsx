@@ -1897,11 +1897,9 @@ export default function App() {
             <button onClick={() => setStage('PACKAGES' as any)} className="px-5 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700">
               {t('gateSeeProducts', 'See products')}
             </button>
-            {gateHasPurchase && (
-              <button onClick={() => setStage('DASHBOARD' as any)} className="px-5 py-2.5 border-2 border-slate-300 text-slate-700 text-sm font-semibold rounded-xl">
-                {t('gateBackDashboard', 'Back to dashboard')}
-              </button>
-            )}
+            <button onClick={() => setStage('DASHBOARD' as any)} className="px-5 py-2.5 border-2 border-slate-300 text-slate-700 text-sm font-semibold rounded-xl">
+              {t('gateBackDashboard', 'Back to dashboard')}
+            </button>
             <button onClick={() => setStage('RECOVER' as any)} className="px-5 py-2.5 border-2 border-slate-300 text-slate-700 text-sm font-semibold rounded-xl">
               {t('gateRecover', 'Recover access')}
             </button>
