@@ -36,7 +36,7 @@
   "functions": {
     "api/fill.py": {
       "maxDuration": 60,
-      "includeFiles": "public/forms/**"
+      "includeFiles": "public/forms/**, api/build-mode.json"
     },
     "api/assessment-save.js": {
       "maxDuration": 10

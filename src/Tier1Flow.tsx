@@ -4,7 +4,10 @@ import { useState, useEffect } from 'react';
 import type { CSSProperties } from 'react';
 import { scoreAssessment, applyIntelligence, buildFactRecord, type ScoredAssessment, type FactRecord } from './tier1-assess';
 import PathwayGuidance from './components/PathwayGuidance';
+import PathwayStaffPanel from './components/PathwayStaffPanel';
 import PathwayCheckoutSummary from './components/PathwayCheckoutSummary';
+import { INSTITUTIONAL_MODE, getStaffDestination, markCaseReportSent } from './institutional';
+import { buildStaffReportHtml } from './reportEmail';
 import { FORMS, getActiveCatalog } from '../api/_lib/catalog.js';
 import { pricePurchase } from '../api/_lib/checkout-pricing.js';
 // Entitlement tokens live in localStorage (paywall.tsx). Do not read
@@ -125,11 +128,17 @@ interface Props {
   onExit: () => void;
   /** Pathway Add at completion: App performs the formprep checkout POST
    *  + Stripe redirect for these forms. Optional — without it the Add
-   *  button is inert. */
+   *  button is inert. Never passed in institutional mode (no consumer
+   *  purchase; the report shows the staff panel instead). */
   onFormprepCheckout?: (forms: string[]) => void;
+  /** Staff case context (institutional mode): the participant this
+   *  questionnaire belongs to, so the report and staff delivery name
+   *  them. Optional — consumer mode has no staff case. */
+  participantName?: string;
+  staffCaseId?: string;
 }
 
-export default function Tier1Flow({ formKey, questions, steps, info, lang, assess, onExit, onFormprepCheckout }: Props) {
+export default function Tier1Flow({ formKey, questions, steps, info, lang, assess, onExit, onFormprepCheckout, participantName, staffCaseId }: Props) {
   const [qi, setQi] = useState(0);
   const [answers, setAnswers] = useState<Record<string, any>>(() => {
     // Restore from localStorage on mount (returning session)
@@ -228,7 +237,7 @@ export default function Tier1Flow({ formKey, questions, steps, info, lang, asses
     // narrative drafts, no adaptive screening.
     const withIntel = applyIntelligence(formKey, answers, basic, { premium: hasPrepEntitlement(formKey) });
     const r: ScoredAssessment = scoreAssessment(withIntel, info.formNumber, [], factRecord);
-    return <Tier1Report info={info} lang={lang} result={r} questions={questions} steps={steps} answers={answers} factRecord={factRecord} onExit={onExit} onFormprepCheckout={onFormprepCheckout} />;
+    return <Tier1Report info={info} lang={lang} result={r} questions={questions} steps={steps} answers={answers} factRecord={factRecord} onExit={onExit} onFormprepCheckout={onFormprepCheckout} participantName={participantName} staffCaseId={staffCaseId} />;
   }
 
   const q = visible[qi];
@@ -386,8 +395,103 @@ function RepeatingGroupEditor({ q, lang, rgData, setRgData, rgEditing, setRgEdit
   );
 }
 
-function Tier1Report({ info, lang, result, questions, steps, answers, factRecord, onExit, onFormprepCheckout }: any) {
+function Tier1Report({ info, lang, result, questions, steps, answers, factRecord, onExit, onFormprepCheckout, participantName, staffCaseId }: any) {
   const r = result as ScoredAssessment;
+  const institutional = INSTITUTIONAL_MODE();
+  // ── Staff delivery (institutional only) ──────────────────────────────
+  // CONFIRMED SEND FLOW (owner, 2026-11-11): review → confirm →
+  // automatic Resend routing to the org's pre-configured staff email →
+  // on-screen "sent" confirmation. The review + confirm step STAYS;
+  // "automatic" is the ROUTING, not the send. The consumer never enters
+  // a staff email and never opens a mail app — the destination is the
+  // org's pre-configured receiving address (device org config set by
+  // staff, or the server org registry). TESTING: the destination is the
+  // owner's healthcarebyvalentine@gmail.com until an org account is
+  // created at sale/install time. The sent confirmation below is
+  // prominent and stays on screen; it is never auto-dismissed.
+  const staffDestination = institutional ? getStaffDestination() : null;
+  const orgSlug = staffDestination ? staffDestination.orgSlug : null;
+  const staffEmail = staffDestination ? staffDestination.staffEmail : '';
+  const orgDisplayName = staffDestination ? staffDestination.orgName : 'your organization';
+  const [sendConfirming, setSendConfirming] = useState(false);
+  const [sendBusy, setSendBusy] = useState(false);
+  const [sendResult, setSendResult] = useState<{ ok: boolean; message: string; sentAt?: string } | null>(null);
+  // Pathway staff panel (institutional only): staff suggestions are
+  // recorded on screen; dismissing hides the panel for this report.
+  const [showStaffPanel, setShowStaffPanel] = useState(true);
+  const [suggestedForms, setSuggestedForms] = useState<string[]>([]);
+
+  const reportHtmlForDelivery = () =>
+    buildStaffReportHtml({
+      formNumber: info.formNumber,
+      formTitle: info.title || info.formNumber,
+      participantName,
+      overallScore: r.overallScore || 0,
+      overallBand: r.overallBand || 'Incomplete',
+      executiveSummary: r.executiveSummary || '',
+      sections: r.sections,
+      blockers: r.blockers,
+      warnings: r.warnings,
+      complete: r.complete,
+      steps,
+      questions,
+      answers,
+      factRecord,
+      lang,
+    });
+
+  const openPrintWindow = () => {
+    const w = window.open('', '_blank');
+    if (!w) {
+      alert('Please allow pop-ups to print this report.');
+      return;
+    }
+    w.document.write(reportHtmlForDelivery());
+    w.document.close();
+    setTimeout(() => { w.print(); }, 500);
+  };
+
+  const sendReportToStaff = async () => {
+    // Fires ONLY after the applicant reviewed the report on screen and
+    // hit confirm. The destination is the org's pre-configured staff
+    // address — the applicant never typed it and no mail app opens.
+    if (!staffEmail) {
+      setSendResult({ ok: false, message: 'Staff delivery is not set up for this organization yet. Staff can configure the receiving email in the Staff Dashboard, or you can print this report.' });
+      return;
+    }
+    setSendBusy(true);
+    setSendResult(null);
+    try {
+      const res = await fetch('/api/send-report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          org: orgSlug || undefined,
+          staffEmail,
+          participantName: participantName || '',
+          formNumber: info.formNumber,
+          html: reportHtmlForDelivery(),
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setSendResult({ ok: false, message: (data && data.error) || 'Could not send the report. Please try again.' });
+        return;
+      }
+      if (staffCaseId) markCaseReportSent(staffCaseId, staffEmail);
+      setSendResult({
+        ok: true,
+        message: `Report sent to ${orgDisplayName} staff (${staffEmail}).`,
+        sentAt: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
+      });
+      setSendConfirming(false);
+    } catch {
+      setSendResult({ ok: false, message: 'Could not reach the email service. Please try again.' });
+    } finally {
+      setSendBusy(false);
+    }
+  };
+  // ── end staff delivery state ──
   // Pathway Add at completion: shows the checkout summary inline
   // (lines, discount/bundle, total) instead of the guidance panel.
   // onFormprepCheckout (from App) performs the formprep checkout POST
@@ -426,6 +530,11 @@ function Tier1Report({ info, lang, result, questions, steps, answers, factRecord
   return (
     <div style={{ maxWidth: 720, margin: '0 auto', padding: '1.5rem 1rem 4rem' }}>
       <h1>{info.formNumber} — {UI.applicantSummary[lang]}</h1>
+      {participantName && (
+        <p data-testid="report-participant" style={{ color: '#475569', margin: '0.25rem 0 0' }}>
+          {t({ EN: `Participant: ${participantName}` }, lang)}
+        </p>
+      )}
 
       {/* Executive summary + overall score */}
       <div style={{ padding: '1.25rem 1.5rem', borderRadius: 12, margin: '1rem 0', background: bandBg[r.overallBand] || '#f8fafc', border: '1px solid #e2e8f0' }}>
@@ -513,8 +622,30 @@ function Tier1Report({ info, lang, result, questions, steps, answers, factRecord
           <li>{t({ EN: 'Complete the form using the information provided above — organized by form section.' }, lang)}</li>
         </ol>
       </div>
-      {/* Pathway Assistant — related-form guidance at completion (before Generate) */}
-      {pathwayCheckout ? (
+      {/* Pathway Assistant — related-form guidance at completion (before Generate).
+          Institutional mode: the staff panel (no paywall, no pricing, no
+          purchase language) — staff sees the suggestion and decides whether
+          to suggest it to the participant. Consumer mode: the guidance
+          panel + checkout summary, unchanged. */}
+      {institutional ? (
+        showStaffPanel ? (
+          <>
+            <PathwayStaffPanel
+              currentForm={info.formNumber}
+              ownedForms={[info.formNumber]}
+              activeCatalog={getActiveCatalog()}
+              participantName={participantName}
+              onSuggest={(form) => setSuggestedForms((prev) => (prev.includes(form) ? prev : [...prev, form]))}
+              onDismiss={() => setShowStaffPanel(false)}
+            />
+            {suggestedForms.length > 0 && (
+              <p data-testid="pathway-suggested-note" style={{ color: '#047857', fontSize: '0.9rem' }}>
+                Suggested to participant: {suggestedForms.join(', ')}.
+              </p>
+            )}
+          </>
+        ) : null
+      ) : pathwayCheckout ? (
         <PathwayCheckoutSummary
           pricing={pathwayCheckout.pricing}
           selectedForm={pathwayCheckout.selectedForm}
@@ -634,6 +765,60 @@ function Tier1Report({ info, lang, result, questions, steps, answers, factRecord
           </button>
         )}
       </div>
+      {/* Delivery — confirmed send flow (institutional) + print (both modes).
+          Institutional: the report is already reviewed on screen; the
+          applicant confirms, then Resend routes it to the org's
+          pre-configured staff email, and a prominent SENT confirmation
+          appears here and stays on screen. The consumer never enters a
+          staff email and never opens a mail app. Print / Save as PDF is
+          the same report HTML opened in a clean print window. */}
+      <div style={{ ...secStyle, borderColor: '#1a56db' }}>
+        <h2>{t({ EN: 'Send or save this report' }, lang)}</h2>
+        {institutional && (
+          <>
+            <p style={{ lineHeight: 1.5 }}>
+              {staffDestination && staffDestination.isTestDefault
+                ? `Send this report to staff — test address ${staffEmail}. (Testing only: the organization's own staff email is set up when the organization is installed.)`
+                : `Send this report to ${orgDisplayName} staff — ${staffEmail}.`}
+            </p>
+            {sendResult && sendResult.ok ? (
+              <div data-testid="report-sent-confirmation" style={{ background: '#dcfce7', border: '2px solid #16a34a', borderRadius: 10, padding: '1rem 1.1rem', margin: '0.75rem 0' }}>
+                <div style={{ fontWeight: 700, fontSize: '1.15rem', color: '#166534' }}>✓ Report sent to staff</div>
+                <div style={{ color: '#166534', lineHeight: 1.5 }}>
+                  {sendResult.message}{sendResult.sentAt ? ` Sent at ${sendResult.sentAt}.` : ''}
+                </div>
+              </div>
+            ) : sendConfirming ? (
+              <div style={{ margin: '0.75rem 0' }}>
+                <p style={{ lineHeight: 1.5, fontWeight: 600 }}>
+                  {`Send this report to ${orgDisplayName} staff (${staffEmail})?`}
+                </p>
+                <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                  <button data-testid="report-send-confirm" onClick={sendReportToStaff} disabled={sendBusy} style={{ ...btnStyle, background: '#059669', color: '#fff', borderColor: '#059669' }}>
+                    {sendBusy ? 'Sending…' : 'Yes, send this report to staff'}
+                  </button>
+                  <button data-testid="report-send-cancel" onClick={() => setSendConfirming(false)} style={btnStyle}>Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <button data-testid="report-send-to-staff" onClick={() => { setSendResult(null); setSendConfirming(true); }} style={{ ...btnStyle, background: '#059669', color: '#fff', borderColor: '#059669' }}>
+                Send this report to staff
+              </button>
+            )}
+            {sendResult && !sendResult.ok && (
+              <div data-testid="report-send-error" style={{ background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: 10, padding: '0.75rem 1rem', margin: '0.75rem 0', color: '#991b1b' }}>
+                {sendResult.message}
+              </div>
+            )}
+          </>
+        )}
+        <div style={{ marginTop: institutional ? '0.75rem' : 0 }}>
+          <button data-testid="report-print" onClick={openPrintWindow} style={btnStyle}>Print / Save as PDF</button>
+          <p style={{ color: '#64748b', fontSize: '0.9rem', marginTop: '0.5rem' }}>
+            {t({ EN: 'Printing opens a clean copy of this report — choose Print or Save as PDF in the print dialog.' }, lang)}
+          </p>
+        </div>
+      </div>
       <p style={{ color: '#64748b', fontSize: '0.9rem' }}>
         <a href={info.instructionsUrl} target="_blank" rel="noopener" style={{ color: '#1a56db' }}>{UI.officialInstructions[lang]}</a> · {UI.notLegalAdvice[lang]}
       </p>
@@ -668,6 +853,9 @@ function tier1TokenFor(formKey: string): string | null {
 // maintained; the fill endpoint's server-side 402 remains the
 // authoritative enforcement for the prepared PDF.
 function hasPrepEntitlement(formKey: string): boolean {
+  // Institutional mode: the organization holds access, so the
+  // intelligence layer applies — there is no per-form consumer purchase.
+  if (INSTITUTIONAL_MODE()) return true;
   const codeMap: Record<string, string> = { i130: 'I-130', i90: 'I-90', n400: 'N-400', i765: 'I-765', i485: 'I-485', i589: 'I-589' };
   const code = codeMap[formKey];
   if (!code) return false;
@@ -696,7 +884,12 @@ async function generateCompletedForm(formKey: string, facts: Record<string, any>
       body: JSON.stringify({ facts, addresses: [], biographic: {} }),
     });
     if (res.status === 402) {
-      alert('A paid Form Preparation purchase for this form is required to generate its draft.');
+      // Institutional mode: there is no consumer purchase, so the
+      // consumer "paid Form Preparation purchase" message is wrong.
+      // A 402 here means the organization access was not recognized.
+      alert(INSTITUTIONAL_MODE()
+        ? 'This form could not be generated right now. Please try again, or ask staff to check the organization access.'
+        : 'A paid Form Preparation purchase for this form is required to generate its draft.');
       return;
     }
     if (!res.ok) throw new Error('Generation failed');

@@ -25,6 +25,7 @@ import { buildRepeatingFillPlan } from './_lib/repeating-fill.js';
 import { isNarrativeApproved } from './_lib/narrative.js';
 import { computeDraftSnapshotHash, snapshotShort } from './_lib/draftIntegrity.js';
 import { checkPaywallAgreement } from './_lib/paymentConfig.js';
+import { isInstitutionalServer } from './_lib/server-mode.js';
 import { assertPaidStoreAvailable } from './_lib/paymentStore.js';
 
 const limiter = createLimiter({ capacity: 5, windowMs: 10 * 60 * 1000 });
@@ -209,7 +210,11 @@ export default async function handler(req, res) {
   // Paywall flag agreement (see lib/paymentConfig.js): a declared
   // client flag that disagrees with the server flag refuses, so a
   // mismatched deployment can never silently gate (or ungate) delivery.
-  const agreement = checkPaywallAgreement(body);
+  // INSTITUTIONAL MODE: the organization holds access, so the consumer
+  // agreement check is skipped — the institutional client does not
+  // declare a consumer paywall flag.
+  const institutionalMode = isInstitutionalServer();
+  const agreement = institutionalMode ? { ok: true } : checkPaywallAgreement(body);
   if (!agreement.ok) {
     return res.status(503).json({ error: 'Paywall configuration mismatch. Please reload and try again.', reason: 'paywall-mismatch' });
   }
@@ -223,7 +228,9 @@ export default async function handler(req, res) {
   // not already have been delivered under it. Consumption is per-form
   // and happens exactly once, only after a successful generation (a
   // failed generation leaves the entitlement intact for recovery/retry).
-  const paywallOn = process.env.PAYWALL_ENABLED === 'true';
+  // INSTITUTIONAL MODE: the organization holds access — the consumer
+  // entitlement peek and consume are skipped.
+  const paywallOn = process.env.PAYWALL_ENABLED === 'true' && !institutionalMode;
   let entitlementToken = '';
   if (paywallOn) {
     // Fail closed: delivery decisions must read from a configured

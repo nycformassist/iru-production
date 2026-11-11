@@ -17,8 +17,8 @@ const CONFIGS: Record<string, { q: any; s: any; i: any; assess: any }> = {
   i765: { q: I765_QUESTIONS, s: I765_STEPS, i: I765_FORM_INFO, assess: assessI765 },
 };
 
-export default function Tier1FlowWrapper({ formKey, lang, onExit, onFormprepCheckout }: { formKey: string; lang: Tier1Lang; onExit: () => void; onFormprepCheckout?: (forms: string[]) => void }) {
+export default function Tier1FlowWrapper({ formKey, lang, onExit, onFormprepCheckout, participantName, staffCaseId }: { formKey: string; lang: Tier1Lang; onExit: () => void; onFormprepCheckout?: (forms: string[]) => void; participantName?: string; staffCaseId?: string }) {
   const cfg = CONFIGS[formKey];
   if (!cfg) return <div>Unknown form: {formKey}</div>;
-  return <Tier1Flow formKey={formKey} questions={cfg.q} steps={cfg.s} info={cfg.i} lang={lang} assess={cfg.assess} onExit={onExit} onFormprepCheckout={onFormprepCheckout} />;
+  return <Tier1Flow formKey={formKey} questions={cfg.q} steps={cfg.s} info={cfg.i} lang={lang} assess={cfg.assess} onExit={onExit} onFormprepCheckout={onFormprepCheckout} participantName={participantName} staffCaseId={staffCaseId} />;
 }

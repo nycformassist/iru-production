@@ -263,7 +263,13 @@ describe('language persistence (WS2)', () => {
     // iru_tier1_ (the documented 30-day Tier1 answer autosave — the one
     // namespaced applicant-data exception; any other applicant-data key
     // still fails this guard).
-    const allowedKeys = ['LANG_STORAGE_KEY', 'iru_entitlement_token', 'iru_evaluation_token', 'iru_form_tokens', 'iru_readiness_tokens', 'iru_entitlement_id', 'PENDING_PATHWAY_KEY', 'iru_client_key', 'iru_tier1_'];
+    // Institutional-mode keys (2026-11-11): iru_staff_cases (staff
+    // intake metadata only — participant name + form + status + sent
+    // record; NO immigration answers, those stay in the iru_tier1_
+    // autosave) and iru_org_config (the org's staff receiving email +
+    // org name, for per-org delivery routing). Both are staff-side
+    // configuration/intake, not applicant immigration data.
+    const allowedKeys = ['LANG_STORAGE_KEY', 'iru_entitlement_token', 'iru_evaluation_token', 'iru_form_tokens', 'iru_readiness_tokens', 'iru_entitlement_id', 'PENDING_PATHWAY_KEY', 'iru_client_key', 'iru_tier1_', 'iru_staff_cases', 'iru_org_config'];
     // Key constants defined in the file (indirect usage via helpers is OK
     // if the file defines only allowed key constants).
     const srcDir = join(HERE, '..', 'src');

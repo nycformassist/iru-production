@@ -152,7 +152,19 @@ class handler(BaseHTTPRequestHandler):
         # No token is hardcoded here; with the env var unset the bypass is inert.
         _bypass_token = os.environ.get('IRU_TEST_BYPASS_TOKEN')
         _test_bypass = bool(_bypass_token) and self.headers.get('x-test-bypass') == _bypass_token
-        if os.environ.get('PAYWALL_ENABLED') == 'true' and not _test_bypass:
+        # INSTITUTIONAL MODE: the organization holds access, so the
+        # consumer paid-access gate is skipped. Mode is read from
+        # api/build-mode.json (generated at build time from the branch
+        # ref; the `institutional` branch resolves to institutional).
+        # Fail closed: if the file is missing/unreadable, the gate
+        # stays enforced.
+        _institutional_mode = False
+        try:
+            with open(os.path.join(os.path.dirname(__file__), 'build-mode.json'), 'r', encoding='utf-8') as _f:
+                _institutional_mode = json.load(_f).get('mode') == 'institutional'
+        except Exception:
+            _institutional_mode = False
+        if os.environ.get('PAYWALL_ENABLED') == 'true' and not _test_bypass and not _institutional_mode:
             allowed, reason = _check_paid_access(
                 self.headers.get('x-entitlement-token'), form_id,
                 _entitlement_status_url(self.headers.get('host')))
