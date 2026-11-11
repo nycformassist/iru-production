@@ -36,13 +36,17 @@
   "functions": {
     "api/fill.py": {
       "maxDuration": 60,
-      "includeFiles": "public/forms/**, api/build-mode.json"
+      "includeFiles": ["public/forms/**", "api/build-mode.json"]
     },
     "api/assessment-save.js": {
-      "maxDuration": 10
+      "maxDuration": 10,
+      "includeFiles": ["api/build-mode.json"]
     },
     "api/assessment-resume.js": {
       "maxDuration": 10
+    },
+    "api/generate-form.js": {
+      "includeFiles": ["api/build-mode.json"]
     }
   },
   "buildCommand": "npm run build && bash scripts/bundle-form-engine.sh"
