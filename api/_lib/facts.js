@@ -33,6 +33,7 @@ export const FACT_STATUSES = [
 ];
 
 import { sanitizeNarrative } from './narrative.js';
+import { PERSON_ROLES } from './persons.js';
 
 export const FACT_RECORD_VERSION = 1;
 
@@ -78,6 +79,8 @@ export function createFactRecord(nowIso) {
     version: FACT_RECORD_VERSION,
     facts: {},          // factId -> Fact
     narrative: null,    // lib/narrative.js object when a narrative exists
+    groups: {},         // Phase 3 repeating groups: groupId -> { items: [{ itemId, fields, provenance, createdAt, updatedAt }] }
+    persons: {},        // Phase 3 repeating persons: personId -> { role, facts, provenance, createdAt, updatedAt }
     outputsStale: false,
     createdAt: nowIso || null,
     updatedAt: nowIso || null,
@@ -337,6 +340,8 @@ export function overlayConsumerState(freshRecord, priorRecord, options = {}, now
     confirmedFactIds: [],
     preservedFactIds: [],
     narrativePreserved: false,
+    groupsPreserved: [],
+    personsPreserved: [],
   };
   if (!freshRecord || !freshRecord.facts || !priorRecord || !priorRecord.facts) {
     return { record: freshRecord, ...report };
@@ -416,6 +421,37 @@ export function overlayConsumerState(freshRecord, priorRecord, options = {}, now
     freshRecord.outputsStale = true;
     freshRecord.updatedAt = now;
   }
+
+  // Rule 6 — Phase 3 repeating groups/persons survive a rebuild.
+  // buildFactRecord only rebuilds questionnaire facts, so a fresh
+  // record carries empty groups/persons; without this the entries a
+  // user added in PHASE3 would be dropped at interview completion
+  // (Carbon Pass 1 finding 2, compounding bug). Fresh items win on
+  // itemId/personId collision; prior items are appended, never lost.
+  if (priorRecord.groups || priorRecord.persons) {
+    if (!freshRecord.groups) freshRecord.groups = {};
+    if (!freshRecord.persons) freshRecord.persons = {};
+    for (const [groupId, group] of Object.entries(priorRecord.groups || {})) {
+      if (!group || !Array.isArray(group.items)) continue;
+      if (!freshRecord.groups[groupId]) freshRecord.groups[groupId] = { items: [] };
+      const seenIds = new Set(freshRecord.groups[groupId].items.map((i) => i && i.itemId));
+      let kept = false;
+      for (const item of group.items) {
+        if (!item || seenIds.has(item.itemId)) continue;
+        freshRecord.groups[groupId].items.push(JSON.parse(JSON.stringify(item)));
+        kept = true;
+      }
+      if (kept) report.groupsPreserved.push(groupId);
+    }
+    for (const [personId, person] of Object.entries(priorRecord.persons || {})) {
+      if (!person || typeof person !== 'object') continue;
+      if (!freshRecord.persons[personId]) {
+        freshRecord.persons[personId] = JSON.parse(JSON.stringify(person));
+        report.personsPreserved.push(personId);
+      }
+    }
+  }
+
   return { record: freshRecord, ...report };
 }
 
@@ -492,9 +528,77 @@ export function sanitizeFactRecord(raw) {
     };
   }
   record.narrative = sanitizeNarrative(raw.narrative);
+  // Phase 3 repeating groups/persons (Carbon Pass 1 finding 2): the
+  // previous version of this function dropped them entirely, so every
+  // repeating-group entry was silently discarded server-side. They are
+  // validated the same way facts are — string values only, capped in
+  // size and count — and carried on the canonical record.
+  record.groups = sanitizeGroups(raw.groups);
+  record.persons = sanitizePersons(raw.persons);
   record.outputsStale = !!raw.outputsStale;
   record.updatedAt = raw.updatedAt || null;
   return record;
+}
+
+/**
+ * Validate a client-supplied repeating-groups map.
+ * Shape: { [groupId]: { items: [{ itemId, fields: { [fieldId]: string } }] } }
+ * Anything malformed is dropped, never trusted as-is.
+ */
+function sanitizeGroups(groups) {
+  const out = {};
+  if (!groups || typeof groups !== 'object' || Array.isArray(groups)) return out;
+  for (const [groupId, group] of Object.entries(groups).slice(0, 20)) {
+    if (typeof groupId !== 'string' || !group || typeof group !== 'object') continue;
+    const items = Array.isArray(group.items) ? group.items : [];
+    const cleanItems = [];
+    for (const item of items.slice(0, 50)) {
+      if (!item || typeof item !== 'object') continue;
+      const fields = {};
+      const rawFields = item.fields && typeof item.fields === 'object' ? item.fields : {};
+      for (const [k, v] of Object.entries(rawFields).slice(0, 30)) {
+        if (typeof k !== 'string') continue;
+        fields[k] = typeof v === 'string' ? v.slice(0, 2000) : (v ?? null);
+      }
+      cleanItems.push({
+        itemId: typeof item.itemId === 'string' ? item.itemId.slice(0, 64) : `item_${cleanItems.length}`,
+        fields,
+        provenance: {},
+        createdAt: typeof item.createdAt === 'string' ? item.createdAt.slice(0, 32) : null,
+        updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt.slice(0, 32) : null,
+      });
+    }
+    out[groupId] = { items: cleanItems };
+  }
+  return out;
+}
+
+/**
+ * Validate a client-supplied repeating-persons map.
+ * Shape: { [personId]: { role, facts: { [factId]: string } } }
+ * Roles are restricted to the Phase 1 persons.js allowlist.
+ */
+function sanitizePersons(persons) {
+  const out = {};
+  if (!persons || typeof persons !== 'object' || Array.isArray(persons)) return out;
+  for (const [personId, person] of Object.entries(persons).slice(0, 50)) {
+    if (typeof personId !== 'string' || !person || typeof person !== 'object') continue;
+    if (typeof person.role !== 'string' || !PERSON_ROLES.includes(person.role)) continue;
+    const facts = {};
+    const rawFacts = person.facts && typeof person.facts === 'object' ? person.facts : {};
+    for (const [k, v] of Object.entries(rawFacts).slice(0, 30)) {
+      if (typeof k !== 'string') continue;
+      facts[k] = typeof v === 'string' ? v.slice(0, 2000) : (v ?? null);
+    }
+    out[personId] = {
+      role: person.role,
+      facts,
+      provenance: {},
+      createdAt: typeof person.createdAt === 'string' ? person.createdAt.slice(0, 32) : null,
+      updatedAt: typeof person.updatedAt === 'string' ? person.updatedAt.slice(0, 32) : null,
+    };
+  }
+  return out;
 }
 
 function sanitizeSourceRef(ref) {

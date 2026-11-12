@@ -139,11 +139,16 @@ interface Props {
 }
 
 export default function Tier1Flow({ formKey, questions, steps, info, lang, assess, onExit, onFormprepCheckout, participantName, staffCaseId }: Props) {
+  // Autosave key: scoped to the staff case when present, so starting a
+  // new case for another participant never pre-populates the previous
+  // participant's answers (Carbon Pass 1 finding 6). Consumer mode has
+  // no staff case, so it keeps the per-form key.
+  const storageKey = staffCaseId ? `iru_tier1_${staffCaseId}` : `iru_tier1_${formKey}`;
   const [qi, setQi] = useState(0);
   const [answers, setAnswers] = useState<Record<string, any>>(() => {
     // Restore from localStorage on mount (returning session)
     try {
-      const saved = localStorage.getItem(`iru_tier1_${formKey}`);
+      const saved = localStorage.getItem(storageKey);
       if (saved) {
         const parsed = JSON.parse(saved);
         // Only restore if saved within 30 days
@@ -158,7 +163,7 @@ export default function Tier1Flow({ formKey, questions, steps, info, lang, asses
   // Persist answers on change
   const persistAnswers = (newAnswers: Record<string, any>) => {
     try {
-      localStorage.setItem(`iru_tier1_${formKey}`, JSON.stringify({
+      localStorage.setItem(storageKey, JSON.stringify({
         answers: newAnswers,
         savedAt: Date.now(),
         formKey,
@@ -193,7 +198,7 @@ export default function Tier1Flow({ formKey, questions, steps, info, lang, asses
       const hashBuffer = await crypto.subtle.digest('SHA-256', data);
       const hashArray = Array.from(new Uint8Array(hashBuffer));
       const clientKeyHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-      const factRecord = buildFactRecord(answers);
+      const factRecord = buildFactRecord(answers, undefined, questions);
       // Persistence is gated server-side (any paid entitlement).
       const saveHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
       const saveTokenHeader = tier1TokenFor(formKey);
@@ -225,8 +230,23 @@ export default function Tier1Flow({ formKey, questions, steps, info, lang, asses
     return q.conditionalOn.operator === 'equals' ? av === q.conditionalOn.value : av !== q.conditionalOn.value;
   });
 
+  // Finding 16: keep the per-question input state in sync with the
+  // restored answers whenever the current question changes. textVal /
+  // radioVal used to start as '' on mount even when answers were
+  // restored from localStorage, so a cleared input snapped back to the
+  // saved value and Next on Q0 deleted the restored answer. This runs
+  // on mount too (qi = 0), so the first question is synced as well.
+  const currentQId = visible[qi]?.id;
+  useEffect(() => {
+    const cur = visible[qi];
+    if (!cur) return;
+    setTextVal(answers[cur.id] ?? '');
+    setRadioVal(answers[cur.id] ?? '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentQId]);
+
   if (qi >= visible.length) {
-    const factRecord: FactRecord = buildFactRecord(answers);
+    const factRecord: FactRecord = buildFactRecord(answers, undefined, questions);
     const basic = assess(answers, lang);
     // Premium gating (owner directive 2026-11-10): the intelligence layer
     // is a Premium preparation feature. It applies ONLY when this browser
@@ -272,10 +292,6 @@ export default function Tier1Flow({ formKey, questions, steps, info, lang, asses
   const goNext = () => { if (saveAnswer()) { loadQ(qi + 1); setQi(qi + 1); } };
   const goBack = () => { if (saveAnswer()) { loadQ(qi - 1); setQi(qi - 1); } };
 
-  // Init current question values on first render / question change
-  const curText = q.type === 'text' || q.type === 'date' ? (answers[q.id] || '') : textVal;
-  const curRadio = q.type === 'radio' || q.type === 'select' ? (answers[q.id] || '') : radioVal;
-
   return (
     <div style={{ maxWidth: 720, margin: '0 auto', padding: '1.5rem 1rem 4rem' }}>
       <div style={{ color: '#64748b', fontSize: '0.9rem', marginBottom: '0.75rem' }}>
@@ -290,14 +306,14 @@ export default function Tier1Flow({ formKey, questions, steps, info, lang, asses
         </h3>
         {q.helpText && <p style={{ color: '#64748b', fontSize: '0.9rem', margin: '0.5rem 0 1rem' }}>{t(q.helpText, lang)}</p>}
         {(q.type === 'text' || q.type === 'date') && (
-          <input data-testid={`question-input-${q.id}`} type={q.type} value={textVal || answers[q.id] || ''} onChange={e => setTextVal(e.target.value)}
+          <input data-testid={`question-input-${q.id}`} type={q.type} value={textVal} onChange={e => setTextVal(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') goNext(); }}
             style={{ width: '100%', padding: '0.7rem', fontSize: '1rem', border: '1px solid #e2e8f0', borderRadius: 8, boxSizing: 'border-box' }} />
         )}
         {(q.type === 'radio' || q.type === 'select') && (
           <div>{(q.options || []).map(o => (
             <label key={o.value} style={{ display: 'block', padding: '0.7rem 0.9rem', margin: '0.35rem 0', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, cursor: 'pointer' }}>
-              <input type="radio" name={'q_' + q.id} value={o.value} checked={(radioVal || answers[q.id] || '') === o.value}
+              <input type="radio" name={'q_' + q.id} value={o.value} checked={radioVal === o.value}
                 onChange={e => setRadioVal(e.target.value)} style={{ marginRight: '0.6rem' }} />
               {t(o.labels, lang)}
             </label>
@@ -421,24 +437,30 @@ function Tier1Report({ info, lang, result, questions, steps, answers, factRecord
   const [showStaffPanel, setShowStaffPanel] = useState(true);
   const [suggestedForms, setSuggestedForms] = useState<string[]>([]);
 
-  const reportHtmlForDelivery = () =>
-    buildStaffReportHtml({
-      formNumber: info.formNumber,
-      formTitle: info.title || info.formNumber,
-      participantName,
-      overallScore: r.overallScore || 0,
-      overallBand: r.overallBand || 'Incomplete',
-      executiveSummary: r.executiveSummary || '',
-      sections: r.sections,
-      blockers: r.blockers,
-      warnings: r.warnings,
-      complete: r.complete,
-      steps,
-      questions,
-      answers,
-      factRecord,
-      lang,
-    });
+  // Structured report input: ONE object feeds both delivery paths —
+  // the print window (rendered client-side by buildStaffReportHtml)
+  // and staff email (rendered SERVER-side from this same data by
+  // /api/send-report — the client never sends raw HTML or a recipient
+  // address; Carbon Pass 1, finding 1).
+  const reportInput = () => ({
+    formNumber: info.formNumber,
+    formTitle: info.title || info.formNumber,
+    participantName,
+    overallScore: r.overallScore || 0,
+    overallBand: r.overallBand || 'Incomplete',
+    executiveSummary: r.executiveSummary || '',
+    sections: r.sections,
+    blockers: r.blockers,
+    warnings: r.warnings,
+    complete: r.complete,
+    steps,
+    questions,
+    answers,
+    factRecord,
+    lang,
+  });
+
+  const reportHtmlForDelivery = () => buildStaffReportHtml(reportInput());
 
   const openPrintWindow = () => {
     const w = window.open('', '_blank');
@@ -448,13 +470,28 @@ function Tier1Report({ info, lang, result, questions, steps, answers, factRecord
     }
     w.document.write(reportHtmlForDelivery());
     w.document.close();
-    setTimeout(() => { w.print(); }, 500);
+    // Print once the popup has loaded (fonts/logo included) instead of
+    // racing them with a blind 500ms timer (Carbon Pass 1 finding 22).
+    // Fallback timer covers browsers where the load event is missed.
+    let printed = false;
+    const doPrint = () => {
+      if (printed) return;
+      printed = true;
+      w.print();
+    };
+    if (w.document.readyState === 'complete') doPrint();
+    else {
+      w.addEventListener('load', doPrint);
+      setTimeout(doPrint, 1500);
+    }
   };
 
   const sendReportToStaff = async () => {
     // Fires ONLY after the applicant reviewed the report on screen and
-    // hit confirm. The destination is the org's pre-configured staff
-    // address — the applicant never typed it and no mail app opens.
+    // hit confirm. The server resolves the recipient from its org
+    // registry and renders the email HTML from the structured report
+    // data — the applicant never typed an address, sent raw HTML, or
+    // opened a mail app.
     if (!staffEmail) {
       setSendResult({ ok: false, message: 'Staff delivery is not set up for this organization yet. Staff can configure the receiving email in the Staff Dashboard, or you can print this report.' });
       return;
@@ -467,10 +504,9 @@ function Tier1Report({ info, lang, result, questions, steps, answers, factRecord
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           org: orgSlug || undefined,
-          staffEmail,
           participantName: participantName || '',
           formNumber: info.formNumber,
-          html: reportHtmlForDelivery(),
+          report: reportInput(),
         }),
       });
       const data = await res.json().catch(() => null);
@@ -592,7 +628,7 @@ function Tier1Report({ info, lang, result, questions, steps, answers, factRecord
               <h3 style={{ margin: '1.25rem 0 0.5rem', fontSize: '1.05rem' }}>{t(step.title, lang)}</h3>
               {sqs.map((q: Tier1Question) => {
                 const ans = answers[q.id];
-                const fact = factRecord?.facts[q.id];
+                const fact = factRecord?.facts[q.factId || q.id];
                 let display: any = ans;
                 if (q.type === 'repeating_group' && Array.isArray(ans)) {
                   const schema = RG_SCHEMAS[q.groupId!] || [{ id: 'detail' }];

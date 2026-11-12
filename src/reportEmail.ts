@@ -2,11 +2,14 @@
  * src/reportEmail.ts — Staff report HTML builder (pure, no I/O).
  *
  * Renders a completed Tier 1 report as a standalone HTML document.
- * ONE builder serves TWO delivery paths (institutional staff delivery):
- *   1. Email to staff via Resend (POST /api/send-report) — the HTML is
- *      the email body.
- *   2. Print / Save as PDF — the same HTML is opened in a print window
- *      (window.open + print()), so the printed page matches the email.
+ * ONE builder serves the PRINT path (institutional staff delivery):
+ * the HTML is opened in a print window (window.open + print()), so
+ * the printed page matches the email. The EMAIL path renders
+ * server-side instead: the client sends the same structured input
+ * to POST /api/send-report, which renders its own HTML from it
+ * (api/send-report.js renderStaffReportHtml) — raw client HTML is
+ * never accepted as an email body (Carbon Pass 1, finding 1). The
+ * two renderers must stay in step (same sections, same escaping).
  *
  * All applicant-provided values are HTML-escaped. Nothing here is legal
  * advice and nothing determines eligibility — the disclaimer is part of

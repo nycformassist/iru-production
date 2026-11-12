@@ -21,6 +21,38 @@ export function serverPaywallOn(env = process.env) {
 }
 
 /**
+ * Stripe secret-key retrieval + live-key guard (Carbon Pass 1,
+ * finding 18). Every paid-path endpoint must use this — never read
+ * the Stripe env vars or check a key prefix inline, or the guards
+ * drift apart again (checkout blocked `sk_live`/`rk_live` while
+ * verify-session only blocked `sk_live_` and read a key checkout
+ * ignored). Source order is fixed: IRU_STRIPE_KEY first, then
+ * STRIPE_SECRET_KEY. This build is test-mode only: any live key
+ * (standard `sk_live*` or restricted `rk_live*`) is refused.
+ */
+export function getStripeSecretKey(env = process.env) {
+  return env.IRU_STRIPE_KEY || env.STRIPE_SECRET_KEY || '';
+}
+
+export function isLiveStripeKey(key) {
+  return typeof key === 'string'
+    && (key.startsWith('sk_live') || key.startsWith('rk_live'));
+}
+
+/**
+ * Returns { ok: true, secretKey } for a usable test-mode key, or
+ * { ok: false, reason } where reason is 'missing-key' or
+ * 'live-key-refused'. Callers map the failure to their own status
+ * code/message; the guard itself is identical everywhere.
+ */
+export function getTestStripeSecretKey(env = process.env) {
+  const secretKey = getStripeSecretKey(env);
+  if (!secretKey) return { ok: false, reason: 'missing-key' };
+  if (isLiveStripeKey(secretKey)) return { ok: false, reason: 'live-key-refused' };
+  return { ok: true, secretKey };
+}
+
+/**
  * Returns { ok: true, unknown?: true } or { ok: false, reason }.
  * `unknown: true` means the client did not declare a flag (old build).
  */

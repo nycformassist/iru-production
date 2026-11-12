@@ -53,5 +53,5 @@ I90_DISPOSITIONS = {
     **{f: "SYSTEM - Overflow/continuation (auto-populated)" for f in I90_OVERFLOW},
 }
 
-print(f"I-90: {len(I90_OVERFLOW)} overflow fields dispositioned as system")
-print(f"I-90: {sum(len(g['fields']) for g in I90_QUESTION_GROUPS.values())} question-mapped")
+# (Module import is silent: the summary prints that used to run here
+# on every cold-start import were removed, Carbon Pass 1 finding 21d.)

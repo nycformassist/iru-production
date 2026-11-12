@@ -71,4 +71,30 @@ describe('/api/recover — token reissue', () => {
     // 503 (no backend) — the store gate correctly precedes email validation.
     assert.equal(status, 503);
   });
+  it('returns 503 recovery-unavailable while email delivery is not wired (finding 14)', async () => {
+    const { handler } = await import('./recover.js');
+    // Ephemeral memory backend so the store gate passes and the
+    // recovery gate is the one that refuses.
+    const savedBackend = process.env.IRU_STORE_BACKEND;
+    const savedEphemeral = process.env.IRU_ALLOW_EPHEMERAL_STORE;
+    const savedRecovery = process.env.IRU_RECOVERY_EMAIL_ENABLED;
+    process.env.IRU_STORE_BACKEND = 'memory';
+    process.env.IRU_ALLOW_EPHEMERAL_STORE = 'true';
+    delete process.env.IRU_RECOVERY_EMAIL_ENABLED;
+    let status = 0;
+    let body = null;
+    const res = { status: (c) => { status = c; return { json: (o) => { body = o; } }; } };
+    try {
+      const { entitlementStore } = await import('./_lib/entitlement.js');
+      await handler({ method: 'POST', body: { email: 'buyer@example.com' }, headers: {} }, res, entitlementStore);
+    } finally {
+      if (savedBackend !== undefined) process.env.IRU_STORE_BACKEND = savedBackend; else delete process.env.IRU_STORE_BACKEND;
+      if (savedEphemeral !== undefined) process.env.IRU_ALLOW_EPHEMERAL_STORE = savedEphemeral; else delete process.env.IRU_ALLOW_EPHEMERAL_STORE;
+      if (savedRecovery !== undefined) process.env.IRU_RECOVERY_EMAIL_ENABLED = savedRecovery; else delete process.env.IRU_RECOVERY_EMAIL_ENABLED;
+    }
+    assert.equal(status, 503);
+    assert.equal(body && body.reason, 'recovery-unavailable');
+    // No token is ever returned by the gated endpoint.
+    assert.equal(body && body.token, undefined);
+  });
 });

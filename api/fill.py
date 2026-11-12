@@ -11,7 +11,7 @@ handlers exceeded it (16 functions). The form is selected by:
 Form keys: i765, i90, n400, i130, i485, i589. The legacy /api/fill-<key>
 URLs keep working via the rewrites; no client change was needed.
 """
-import json, fitz, os, sys
+import json, fitz, os, sys, traceback
 import urllib.request, urllib.error
 import urllib.parse
 sys.path.insert(0, os.path.dirname(__file__))  # _python is sibling
@@ -58,8 +58,8 @@ def _resolve_form(path, body):
 # this file is a standalone Vercel Python serverless function and
 # cannot import the JS entitlement store, so the bearer token is
 # verified by HTTP POST to the deployment's own /api/entitlement-status
-# endpoint (IRU_ENTITLEMENT_STATUS_URL override, else
-# https://<request host>/api/entitlement-status). Applied ONLY when
+# endpoint (IRU_ENTITLEMENT_STATUS_URL override, else the authoritative
+# app origin from IRU_APP_ORIGIN / VERCEL_URL). Applied ONLY when
 # PAYWALL_ENABLED === 'true'. FAIL CLOSED: a missing token, an
 # unpaid/wrong-scope entitlement, or ANY verification failure denies
 # access with 402. Stdlib only (urllib), 3s timeout, no tokens or
@@ -67,13 +67,35 @@ def _resolve_form(path, body):
 # NOTE: this path is implemented but CANNOT be proven live from the
 # dev VM — it needs a Preview deploy plus a shared (non-in-memory)
 # entitlement store.
+# HOST HEADER (Carbon Pass 1, finding 13): the verification URL is
+# NEVER built from the request Host header — that header is
+# attacker-controlled, and the user's bearer token is sent to the
+# resulting URL, so a spoofed Host could exfiltrate the token or
+# point verification at a fake entitlement server that always says
+# "paid". The origin comes only from server-side env vars:
+# IRU_APP_ORIGIN (explicit, preferred — same var the JS payment
+# config uses) or Vercel's automatic VERCEL_URL (set by the platform
+# on every deployment, never by the client). If neither is set the
+# URL is None and verification fails closed (402).
 
-def _entitlement_status_url(host):
+# Maximum request body accepted (finding 12): an unbounded
+# content-length read allows memory-exhaustion DoS. 1 MiB is far
+# above any legitimate Tier 1 facts payload.
+MAX_BODY_BYTES = 1024 * 1024
+
+def _entitlement_status_url():
     override = os.environ.get('IRU_ENTITLEMENT_STATUS_URL')
     if override:
         return override
-    if host:
-        return 'https://%s/api/entitlement-status' % host
+    origin = os.environ.get('IRU_APP_ORIGIN')
+    if origin:
+        origin = origin.strip().rstrip('/')
+        if origin.startswith('https://') or origin.startswith('http://'):
+            return origin + '/api/entitlement-status'
+        return None
+    vercel_url = os.environ.get('VERCEL_URL')
+    if vercel_url:
+        return 'https://%s/api/entitlement-status' % vercel_url.strip().rstrip('/')
     return None
 
 def _fetch_entitlement_status(token, url):
@@ -126,6 +148,18 @@ def _check_paid_access(token, form_id, status_url):
 
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
+        # Bounded body read (finding 12): reject oversized
+        # content-length BEFORE reading anything into memory.
+        try:
+            _length = int(self.headers.get('content-length') or 0)
+        except (TypeError, ValueError):
+            _length = 0
+        if _length > MAX_BODY_BYTES:
+            self.send_response(413)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({'error': 'Request too large.'}).encode())
+            return
         try:
             length = int(self.headers.get('content-length', 0))
             raw = self.rfile.read(length) if length > 0 else b'{}'
@@ -167,13 +201,17 @@ class handler(BaseHTTPRequestHandler):
         if os.environ.get('PAYWALL_ENABLED') == 'true' and not _test_bypass and not _institutional_mode:
             allowed, reason = _check_paid_access(
                 self.headers.get('x-entitlement-token'), form_id,
-                _entitlement_status_url(self.headers.get('host')))
+                _entitlement_status_url())
             if not allowed:
                 self.send_response(402)
                 self.send_header('Content-Type', 'application/json')
                 self.end_headers()
                 self.wfile.write(json.dumps({'error': 'A paid entitlement covering this form is required.', 'reason': reason}).encode())
                 return
+        # Tempfile lifecycle (finding 12): the temp PDF is always
+        # unlinked, even when the binder or the fill raises — the
+        # finally below runs on every path out of this block.
+        tmp_path = None
         try:
             facts = body.get('facts', {})
             from _python.binder import apply_fill
@@ -190,7 +228,6 @@ class handler(BaseHTTPRequestHandler):
                 tmp_path = tmp.name
             filled, errors = apply_fill(template_path, tmp_path, plan)
             with open(tmp_path, 'rb') as f: pdf_bytes = f.read()
-            os.unlink(tmp_path)
             self.send_response(200)
             self.send_header('Content-Type', 'application/pdf')
             self.send_header('Content-Disposition', 'attachment; filename="%s"' % download_name)
@@ -198,8 +235,18 @@ class handler(BaseHTTPRequestHandler):
             self.send_header('X-Review-Items', str(len(review)))
             self.end_headers()
             self.wfile.write(pdf_bytes)
-        except Exception as e:
+        except Exception:
+            # Log the detail server-side only; the client gets a
+            # generic message — never str(e), which can leak file
+            # paths, library internals, or data fragments.
+            traceback.print_exc()
             self.send_response(500)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
-            self.wfile.write(json.dumps({"error": str(e)}).encode())
+            self.wfile.write(json.dumps({"error": "Form generation failed."}).encode())
+        finally:
+            if tmp_path:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass

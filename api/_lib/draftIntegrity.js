@@ -174,12 +174,20 @@ export function canonicalDraftSnapshot(record, entry) {
     }
     return out;
   }))].sort();
+  // Repeating groups/persons feed the I-589 draft (buildRepeatingFillPlan)
+  // and nothing else, so they bind that form's snapshot only: a child
+  // added after an I-765 draft was generated must not stale the I-765
+  // draft, but it must stale the I-589 draft (Carbon Pass 1 finding 2).
+  const repeating = entry.id === 'I-589'
+    ? { groups: clean.groups || {}, persons: clean.persons || {} }
+    : undefined;
   return {
     formId: entry.id,
     editionDate: entry.editionDate || null,
     fields,
     summaryFacts,
     documentSources,
+    ...(repeating ? { repeating } : {}),
     narrative: {
       present: !!clean.narrative,
       approved: isNarrativeApproved(clean.narrative),

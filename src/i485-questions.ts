@@ -2302,6 +2302,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_01",
+    labels: { EN: "Have you EVER violated the terms or conditions of your nonimmigrant status?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2313,6 +2314,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_02",
+    labels: { EN: "Have you EVER been granted voluntary departure by an immigration officer or an immigration judge but failed to depart within the allotted time?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2324,6 +2326,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_03",
+    labels: { EN: "Are you presently or have you EVER been in removal, exclusion, rescission, or deportation proceedings, including expedited removal proceedings?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2335,6 +2338,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_04",
+    labels: { EN: "Have you EVER been issued a final order of exclusion, deportation, or removal?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2346,6 +2350,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_05",
+    labels: { EN: "Have you EVER been a member of, involved in, or in any way associated with any organization, association, fund, foundation, party, club, society, or similar group in the United States or in any other location in the world?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2357,6 +2362,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_06",
+    labels: { EN: "Have you EVER had a prior final order of exclusion, deportation, or removal reinstated?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2368,6 +2374,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_07",
+    labels: { EN: "Have you EVER been arrested, cited, charged, or permitted to participate in a diversion program (including pre-trial diversion, deferred prosecution, deferred adjudication, or any withheld adjudication), or detained for any reason by any law enforcement official in any country including but not limited to any U.S. immigration official or any official of the U.S. armed forces or U.S. Coast Guard or by a similar official of a country other than the United States?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2379,6 +2386,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_08",
+    labels: { EN: "Have you EVER applied for any kind of relief or protection from removal, exclusion, or deportation?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2390,6 +2398,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_09",
+    labels: { EN: "Have you EVER been a J nonimmigrant exchange visitor who was subject to the two-year foreign residence requirement?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2401,6 +2410,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_10",
+    labels: { EN: "If you answered \"Yes\" to Item Number 19., have you complied with the foreign residence requirement?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2412,6 +2422,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_11",
+    labels: { EN: "If you answered \"Yes\" to Item Number 19. and \"No\" to Item Number 20., have you been granted a waiver or has Department of State issued a favorable waiver recommendation letter for you?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2423,6 +2434,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_12",
+    labels: { EN: "Have you EVER been ordered punished by a judge or had conditions imposed on you that restrained your liberty (such as a prison sentence, suspended sentence, house arrest, parole, alternative sentencing, drug or alcohol treatment, rehabilitative programs or classes, probation, or community service)?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2434,6 +2446,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_13",
+    labels: { EN: "Have you EVER violated (or attempted or conspired to violate) any controlled substance law or regulation of a state, the United States, or a foreign country?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2445,6 +2458,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_14",
+    labels: { EN: "Have you EVER trafficked in or benefited from, or knowingly aided, abetted, assisted, conspired or colluded in the illegal trafficking of any controlled substances, such as chemicals, illegal drugs, or narcotics?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2456,6 +2470,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_15",
+    labels: { EN: "Are you the spouse, son, or daughter of an alien who illicitly trafficked or aided (or otherwise abetted, assisted, conspired, or colluded) in the illicit trafficking of a controlled substance, such as chemicals, illegal drugs, or narcotics and you obtained, within the last 5 years, any financial or other benefit from this activity of your spouse or parent?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2467,6 +2482,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_16",
+    labels: { EN: "If your answer to Item Number 28. is \"Yes,\" did you know or should you have reasonably known that the financial or other benefit you obtained resulted from this activity of your spouse or parent?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2478,6 +2494,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_17",
+    labels: { EN: "Have you EVER engaged in prostitution or are you coming to the United States to engage in prostitution?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2489,6 +2506,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_18",
+    labels: { EN: "Have you EVER directly or indirectly procured or attempted to procure, or imported prostitutes or persons for the purpose of prostitution?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2500,6 +2518,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_19",
+    labels: { EN: "Have you EVER received any proceeds or money from prostitution?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2511,6 +2530,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_20",
+    labels: { EN: "Do you intend to engage in illegal gambling or any other form of commercialized vice, such as prostitution, bootlegging, or the sale of child pornography, while in the United States?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2522,6 +2542,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_21",
+    labels: { EN: "Have you EVER exercised immunity (diplomatic or otherwise) to avoid being prosecuted for a criminal offense in the United States?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2533,6 +2554,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_22",
+    labels: { EN: "Have you EVER served as a foreign government official?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2544,6 +2566,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_23",
+    labels: { EN: "If your answer to Item Number 35.a. is \"Yes,\" have you EVER been responsible for, enforced, or directly carried out violations of religious freedoms?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2555,6 +2578,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_24",
+    labels: { EN: "Have you EVER induced by force, fraud, or coercion (or otherwise been involved in) the trafficking of another person for commercial sex acts (sex trafficking)?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2566,6 +2590,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_25",
+    labels: { EN: "Have you EVER trafficked a person into involuntary servitude, peonage, debt bondage, or slavery? Trafficking includes recruiting, harboring, transporting, providing, or obtaining a person for labor or services through the use of force, fraud, or coercion." },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2577,6 +2602,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_26",
+    labels: { EN: "Have you EVER knowingly aided, abetted, assisted, conspired, or colluded with others in trafficking in persons for commercial sex acts or involuntary servitude, peonage, debt bondage, or slavery?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2588,6 +2614,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_27",
+    labels: { EN: "If your answer is \"Yes\" to Item Number 39., did you know or reasonably should have known that this benefit resulted from this activity of your spouse or parent?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2599,6 +2626,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_28",
+    labels: { EN: "Have you EVER engaged in money laundering or have you EVER knowingly aided, assisted, abetted, conspired, or colluded with others in money laundering or do you seek to enter the United States to engage in such activity?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2610,6 +2638,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_29",
+    labels: { EN: "Do you intend to engage in any activity whose purpose includes opposing, controlling, or overthrowing the U.S. Government by force, violence, or other unlawful means while in the United States?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2621,6 +2650,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_30",
+    labels: { EN: "Do you intend to engage in any other unlawful activity?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2632,6 +2662,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_31",
+    labels: { EN: "Have you EVER received any weapons training, paramilitary training, or other military-type training?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2643,6 +2674,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_32",
+    labels: { EN: "Have you EVER committed kidnapping, assassination, or hijacking or sabotage of a conveyance (including an aircraft, vessel, vehicle, or train)?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2654,6 +2686,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_33",
+    labels: { EN: "Have you EVER used a weapon or explosive or any dangerous device with the intent to endanger the safety of another person or people or cause damage to property?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2665,6 +2698,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_34",
+    labels: { EN: "Have you EVER threatened, attempted, conspired, prepared, or planned to do any of the things described in Item Numbers 43.b. - 43.c.?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2676,6 +2710,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_35",
+    labels: { EN: "Have you EVER incited, under circumstances indicating an intention to cause death or serious bodily harm/injury, any of the activities described in Item Numbers 43.b. - 43.c.?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2687,6 +2722,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_36",
+    labels: { EN: "Have you EVER recruited members or asked for money or things of value for a group or organization that did any of the activities described in Item Numbers 43.b. - 43.e.?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2698,6 +2734,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_37",
+    labels: { EN: "Have you EVER provided money, a thing of value, services or labor, or any other assistance or support for any of the activities described in Item Numbers 43.b. - 43.e.?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2709,6 +2746,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_38",
+    labels: { EN: "Have you EVER provided money, a thing of value, services or labor, or any other assistance or support for an individual, group, or organization who did any of the activities described in Item Numbers 43.b. - 43.e.?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2720,6 +2758,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_39",
+    labels: { EN: "Do you intend to engage in any of the activities listed in any part of Item Numbers 43.b. - 43.e.?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2731,6 +2770,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_40",
+    labels: { EN: "Do you intend to engage in any activity that could endanger the welfare, safety, or security of the United States?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2742,6 +2782,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_41",
+    labels: { EN: "Are you the spouse or child of an individual who EVER engaged in any of the activities listed in Item Numbers 43.b. - 43.i.?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2753,6 +2794,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_42",
+    labels: { EN: "Have you EVER sold, provided, or transported weapons, or assisted any person in selling, providing, or transporting weapons, which you knew or believed would be used against another person?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2764,6 +2806,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_43",
+    labels: { EN: "Have you EVER worked, volunteered, or otherwise served in any prison, jail, prison camp, detention facility, labor camp, or any other place where people were detained, or have you EVER directed or participated in any other activity that involved detaining people?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2775,6 +2818,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_44",
+    labels: { EN: "Have you EVER been a member of, assisted, or participated in any group, unit, or organization of any kind in which you or other persons used any type of weapon against any person or threatened to do so?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2786,6 +2830,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_45",
+    labels: { EN: "Have you EVER served in, been a member of, assisted (helped), or participated in any military or police unit?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2797,6 +2842,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_46",
+    labels: { EN: "Have you EVER served in, been a member of, assisted (helped), or participated in any armed group (a group that carries weapons), for example: paramilitary unit (a group of people who act like a military group, but are not part of the official military), self-defense unit, vigilante unit, rebel group, or guerrilla group?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2808,6 +2854,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_47",
+    labels: { EN: "Have you EVER been a member of, or in any way affiliated with, the Communist Party or any totalitarian party (in the United States or abroad)?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2819,6 +2866,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_48",
+    labels: { EN: "Have you EVER ordered, incited, called for, committed, assisted, helped with, or otherwise participated in torture?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2830,6 +2878,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_49",
+    labels: { EN: "Have you EVER ordered, incited, called for, committed, assisted, helped with, or otherwise participated in genocide?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2841,6 +2890,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_50",
+    labels: { EN: "Have you EVER ordered, incited, called for, committed, assisted, helped with, or otherwise participated in killing, or trying to kill, any person?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2852,6 +2902,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_51",
+    labels: { EN: "Have you EVER ordered, incited, called for, committed, assisted, helped with, or otherwise participated in intentionally and severely injuring or trying to injure any person?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2863,6 +2914,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_52",
+    labels: { EN: "Have you EVER recruited, enlisted, conscripted, or used any person under 15 years of age to take part in hostilities or to serve in or help an armed force or group, or attempted or worked with others to do so?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2874,6 +2926,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_53",
+    labels: { EN: "Have you EVER used any person under 15 years of age to take part in hostilities, for instance, participating in combat or providing services related to combat (such as sabotage or serving as a courier) or providing support services (such as transporting supplies), or attempted or worked with others to do so?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2885,6 +2938,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_54",
+    labels: { EN: "Have you EVER been denied admission to the United States?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2896,6 +2950,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_55",
+    labels: { EN: "Have you EVER been denied a visa to the United States?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2907,6 +2962,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_56",
+    labels: { EN: "Have you EVER worked in the United States without authorization?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2918,6 +2974,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_57",
+    labels: { EN: "Have you EVER committed a crime of any kind (even if you were not arrested, cited, charged with, or tried for that crime, or convicted)?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2929,6 +2986,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_58",
+    labels: { EN: "Have you EVER pled guilty to or been convicted of a crime or offense (even if the violation was subsequently expunged or sealed by a court, or if you were granted a pardon, amnesty, a rehabilitation decree, or other act of clemency)?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2940,6 +2998,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_59",
+    labels: { EN: "Are you the spouse, son, or daughter of an alien who engaged in the trafficking in persons and have received or obtained, within the last 5 years, any financial or other benefits from this activity of your spouse or your parent?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2951,6 +3010,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_60",
+    labels: { EN: "Have you ever received any means-tested public benefit?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2962,6 +3022,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_61",
+    labels: { EN: "Have you EVER failed or refused to attend or to remain in attendance at any removal proceeding filed against you on or after April 1, 1997?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2973,6 +3034,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_62",
+    labels: { EN: "Have you EVER submitted altered, fraudulent, or counterfeit documentation to any U.S. Government official to obtain or attempt to obtain any immigration benefit, including a visa or entry into the United States?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2984,6 +3046,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_63",
+    labels: { EN: "Have you EVER lied about, concealed, or misrepresented any information on an application or petition to obtain a visa, other documentation required for entry into the United States, admission to the United States, or any other kind of immigration benefit?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -2995,6 +3058,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_64",
+    labels: { EN: "Have you EVER falsely claimed to be a U.S. citizen (in writing or any other way)?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -3006,6 +3070,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_65",
+    labels: { EN: "Have you EVER been a stowaway on a vessel or aircraft arriving in the United States?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -3017,6 +3082,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_66",
+    labels: { EN: "Have you EVER knowingly encouraged, induced, assisted, abetted, or aided any alien to enter or to try to enter the United States illegally (alien smuggling)?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -3028,6 +3094,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_67",
+    labels: { EN: "Are you under a final order of civil penalty for violating INA section 274C for use of fraudulent documents?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -3039,6 +3106,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_68",
+    labels: { EN: "Have you EVER been excluded, deported, or removed from the United States or have you ever departed the United States on your own after having been ordered excluded, deported, or removed from the United States?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -3050,6 +3118,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_69",
+    labels: { EN: "Have you EVER entered the United States without being inspected and admitted or paroled?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -3061,6 +3130,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_70",
+    labels: { EN: "Since April 1, 1997, have you been unlawfully present in the United States? You were unlawfully present in the United States if you were present in the United States after the expiration of the period of stay authorized by the Department of Homeland Security (DHS) Secretary or were present in the United States without being admitted or paroled." },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -3072,6 +3142,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_71",
+    labels: { EN: "If you answered “Yes” to Item Number 74., was a severe form of trafficking in persons at least one central reason for your unlawful presence in the United States?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -3083,6 +3154,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_72",
+    labels: { EN: "Since April 1, 1997, have you EVER reentered or attempted to reenter the United States without being inspected and admitted or paroled after having been unlawfully present in the United States for more than one year in the aggregate on or after April 1, 1997? You were unlawfully present in the United States for more than one year in the aggregate if you count all of the days during all of your stays that you were present in the United States after the expiration of the period of stay authorized by the DHS Secretary or were present in the United States without being admitted or paroled." },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -3094,6 +3166,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_73",
+    labels: { EN: "Since April 1, 1997, have you EVER reentered or attempted to reenter the United States without being inspected and admitted or paroled after having been deported, excluded, or removed from the United States?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -3105,6 +3178,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_74",
+    labels: { EN: "Do you plan to practice polygamy in the United States?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -3116,6 +3190,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_75",
+    labels: { EN: "Are you accompanying an alien who is inadmissible and who has been certified by a medical officer as helpless from sickness, mental or physical disability, or infancy, and who requires your protection or guardianship, as described in INA section 232(c)?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -3127,6 +3202,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_76",
+    labels: { EN: "Have you EVER assisted in detaining, retaining, or withholding custody of a U.S. citizen child outside the United States from a person who has been granted custody of the child?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -3138,6 +3214,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_77",
+    labels: { EN: "Have you EVER voted in violation of any Federal, state, or local constitutional provision, statute, ordinance, or regulation in the United States?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -3149,6 +3226,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_78",
+    labels: { EN: "Have you EVER renounced U.S. citizenship to avoid being taxed by the United States?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -3160,6 +3238,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_79",
+    labels: { EN: "Have you EVER applied for exemption or discharge from training or service in the U.S. armed forces or in the U.S. National Security Training Corps on the ground that you are an alien?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -3171,6 +3250,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_80",
+    labels: { EN: "Have you EVER been relieved or discharged from such training or service on the ground that you are an alien?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -3182,6 +3262,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_81",
+    labels: { EN: "Have you EVER been convicted of desertion from the U.S. armed forces?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -3193,6 +3274,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_82",
+    labels: { EN: "Have you EVER left or remained outside the United States to avoid or evade training or service in the U.S. armed forces in time of war or a period declared by the President to be a national emergency?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -3204,6 +3286,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_83",
+    labels: { EN: "Do you intend to engage in any activity that violates or evades any law relating to espionage (including spying) or sabotage in the United States?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],
@@ -3215,6 +3298,7 @@ export const I485_QUESTIONS = [
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_84",
+    labels: { EN: "Do you intend to engage in any activity in the United States that violates or evades any law prohibiting the export from the United States of goods, technology, or sensitive information?" },
     options: [
       { value: "yes", labels: { EN: "Yes" } },
       { value: "no", labels: { EN: "No" } }],

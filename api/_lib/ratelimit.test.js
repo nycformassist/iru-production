@@ -32,11 +32,30 @@ describe('createLimiter', () => {
       resolve();
     }, 10));
   });
+
+  it('caps buckets at MAX_BUCKETS with oldest-first eviction', () => {
+    const l = createLimiter({ capacity: 1, windowMs: 60000 });
+    l._reset();
+    for (let i = 0; i < 5100; i++) l.check(`ip-${i}`);
+    assert.ok(l._size() <= 5000, `buckets capped, got ${l._size()}`);
+    // The newest keys still work; the oldest were evicted (fresh bucket).
+    assert.equal(l.check('ip-5099').allowed, false); // already consumed
+    assert.equal(l.check('ip-0').allowed, true); // evicted → fresh bucket
+  });
 });
 
 describe('clientIp', () => {
-  it('prefers x-forwarded-for first entry', () => {
-    assert.equal(clientIp({ headers: { 'x-forwarded-for': '1.2.3.4, 5.6.7.8' } }), '1.2.3.4');
+  it('prefers x-vercel-forwarded-for (set by the Vercel edge, not the client)', () => {
+    assert.equal(
+      clientIp({ headers: { 'x-vercel-forwarded-for': '1.2.3.4', 'x-forwarded-for': '9.9.9.9, 5.6.7.8' } }),
+      '1.2.3.4',
+    );
+  });
+  it('takes the rightmost x-forwarded-for entry (leftmost is sender-controlled)', () => {
+    assert.equal(clientIp({ headers: { 'x-forwarded-for': '1.2.3.4, 5.6.7.8' } }), '5.6.7.8');
+  });
+  it('a single x-forwarded-for entry is used as-is', () => {
+    assert.equal(clientIp({ headers: { 'x-forwarded-for': '1.2.3.4' } }), '1.2.3.4');
   });
   it('falls back to socket address', () => {
     assert.equal(clientIp({ headers: {}, socket: { remoteAddress: '9.9.9.9' } }), '9.9.9.9');

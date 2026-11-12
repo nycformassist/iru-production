@@ -29,10 +29,8 @@ def _semantic_to_fact(semantic):
         'unit': 'current_unit',
         'in_care_of': 'current_care_of',
     }
-    # Form-specific prefixes
-    if 'n400' == 'i765':
-        if semantic == 'a_number': return 'i765_a_number'
-        if semantic == 'date_of_birth': return 'i765_dob'
+    # Form-specific prefixes (none: the dead "if 'n400' == 'i765':"
+    # branch below could never be true and was removed, finding 23).
     return mapping.get(semantic, semantic)
 
 def build_n400_full_plan(facts, addresses=None, biographic=None):
@@ -101,8 +99,9 @@ def build_n400_full_plan(facts, addresses=None, biographic=None):
                 plan.append((yf, "Yes", "checkbox", fid))
             elif val in ("no", "n", "false", "0"):
                 plan.append((nf, "Yes", "checkbox", fid))
-    except Exception:
-        pass
+    except Exception as _e:
+        print("[n400_full_binder] " + _e.__class__.__name__ + " in n400 GMC pairs: " + str(_e), file=sys.stderr)
+
     try:
         with open(os.path.join(_base, "n400_p9_ui_mapping.json")) as f:
             p9_map = json.load(f)
@@ -119,8 +118,9 @@ def build_n400_full_plan(facts, addresses=None, biographic=None):
                     plan.append((fields[0], "Yes", "checkbox", fid))
                 elif val in ("no", "n", "false", "0"):
                     plan.append((fields[1], "Yes", "checkbox", fid))
-    except Exception:
-        pass
+    except Exception as _e:
+        print("[n400_full_binder] " + _e.__class__.__name__ + " in n400 Part 9 pairs: " + str(_e), file=sys.stderr)
+
     # N-400: 14 new radio questions (2026-11-04 expansion) - yes/no checkbox pairs
     try:
         with open(os.path.join(_base, "n400_radio_pairs.json")) as f:
@@ -137,8 +137,9 @@ def build_n400_full_plan(facts, addresses=None, biographic=None):
                 plan.append((yf, "Yes", "checkbox", fid))
             elif val in no_vals:
                 plan.append((nf, "Yes", "checkbox", fid))
-    except Exception:
-        pass
+    except Exception as _e:
+        print("[n400_full_binder] " + _e.__class__.__name__ + " in n400 radio pairs: " + str(_e), file=sys.stderr)
+
 
     # Deduplicate by field name (generated + detailed may overlap)
     seen = set()
@@ -163,7 +164,8 @@ def build_n400_full_plan(facts, addresses=None, biographic=None):
                         seen.add(f)
                         deduped_plan.append((f, v, k, fid))
                 review.extend(r_review)
-    except Exception:
-        pass  # Repeating groups optional
+    except Exception as _e:
+        print("[n400_full_binder] " + _e.__class__.__name__ + " in n400 repeating groups: " + str(_e), file=sys.stderr)
+  # Repeating groups optional
     
     return deduped_plan, review

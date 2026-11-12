@@ -9,6 +9,7 @@ import pg from 'pg';
 import crypto from 'crypto';
 import { entitlementStore } from './_lib/entitlement.js';
 import { isInstitutionalServer } from './_lib/server-mode.js';
+import { withDurableStore } from './_lib/withStore.js';
 
 const { Pool } = pg;
 let pool = null;
@@ -24,7 +25,7 @@ function getPool() {
     return pool;
 }
 
-export default async function handler(req, res, store = entitlementStore) {
+async function handler(req, res, store = entitlementStore) {
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
     // Persistence gate (owner directive 2026-11-05): when the paywall
     // is on, saving an assessment requires a paid entitlement — any
@@ -87,3 +88,8 @@ export default async function handler(req, res, store = entitlementStore) {
         return res.status(500).json({ error: 'Save failed' });
     }
 }
+
+// Raw handler for unit tests (singleton default). Vercel serves the
+// durable-wrapped default: load → restore → run → save (CAS).
+export { handler };
+export default withDurableStore(handler);

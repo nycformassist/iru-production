@@ -1,14 +1,16 @@
 // api/recover.js — Buyer token recovery via email (Phase 2, D1).
 //
-// A buyer who lost their access token submits the email used at purchase.
-// The server looks up the recovery identity (email SHA-256 hash only),
-// invalidates the old token, and returns a fresh one. The token travels
-// in a POST body (never a URL) to keep it out of logs.
-//
-// Rate-limited: token guessing is throttled per source IP.
-// Delivery of the token to the buyer's email is stubbed
-// (see _lib/recoveryDelivery.js) until a provider is wired — the token
-// is returned in the response so the client can store it immediately.
+// DISABLED until email delivery is wired (Carbon Pass 1, finding 14):
+// returning a freshly minted bearer token in the response of an
+// unauthenticated email lookup lets anyone who knows a buyer's email
+// hijack their paid entitlement and lock the buyer out. This endpoint
+// therefore returns 503 'recovery-unavailable' unless BOTH conditions
+// hold: (a) an email provider is wired in lib/recoveryDelivery.js
+// (today it is a stub that always reports 'not-configured'), and
+// (b) the owner explicitly enables it with IRU_RECOVERY_EMAIL_ENABLED
+// ='true'. When enabled, the token is delivered ONLY by email — it is
+// never returned in the HTTP response. No token is minted, invalidated,
+// or looked up while the endpoint is gated.
 //
 // Commerce/case separation: this endpoint touches commerce records only.
 // It never reads or writes immigration case data.
@@ -34,6 +36,12 @@ export async function handler(req, res, store = entitlementStore) {
   if (!storeGate.ok) {
     return res.status(503).json({ error: 'Recovery is not configured.' });
   }
+  // Recovery is unavailable until email delivery is wired AND
+  // explicitly enabled. Never mint, invalidate, or return a token
+  // from an unauthenticated email lookup (finding 14).
+  if (process.env.IRU_RECOVERY_EMAIL_ENABLED !== 'true') {
+    return res.status(503).json({ error: 'Recovery is unavailable.', reason: 'recovery-unavailable' });
+  }
   const { email } = req.body || {};
   if (!email || typeof email !== 'string' || !email.includes('@')) {
     return res.status(400).json({ error: 'A valid email address is required.' });
@@ -44,10 +52,18 @@ export async function handler(req, res, store = entitlementStore) {
     // so an attacker cannot enumerate purchases by email.
     return res.status(404).json({ error: 'No purchase found for that email.' });
   }
-  // Attempt delivery (stubbed until a provider is wired); the client
-  // stores the token from this response regardless.
-  try { await deliverRecoveryToken({ email, token: result.token }); } catch { /* stub */ }
-  return res.status(200).json({ ok: true, token: result.token });
+  // Deliver the token by email ONLY. It is never returned in the
+  // response: an unauthenticated caller must not receive a bearer
+  // token for an email address they merely typed in.
+  try {
+    const delivered = await deliverRecoveryToken({ email, token: result.token });
+    if (!delivered || delivered.ok !== true) {
+      return res.status(503).json({ error: 'Recovery is unavailable.', reason: 'recovery-unavailable' });
+    }
+  } catch {
+    return res.status(503).json({ error: 'Recovery is unavailable.', reason: 'recovery-unavailable' });
+  }
+  return res.status(200).json({ ok: true, delivered: true });
 }
 
 export default withDurableStore(handler);

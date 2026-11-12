@@ -151,54 +151,87 @@ export const REPEATING_SETS_589 = {
     },
   },
 
-  // Part A.III Q3 — Education (20 fields in #subform[4])
+  // Part A.III Q3 — Education (12 fields in #subform[4])
+  // VERIFIED against public/forms/i-589.pdf with PyMuPDF (Carbon Pass 1
+  // finding 9): TextField13 in #subform[4] runs 0..57 only. Q3 occupies
+  // 28..39 — two schools x 6 slots (3 columns x 2 rows each: Name of
+  // School / Type of School / Location). The old 28..47 range (4 schools)
+  // collided with employment at 40..47. maxInline is 2; further schools
+  // go to Supplement B overflow text.
   education: {
     groupId: 'education',
     section: 'Part A.III Q3 Education',
     pdfBase: 'form1[0].#subform[4]',
-    maxInline: 4,
+    maxInline: 2,
     overflowTo: 'supplement_b',
     generateFields: (base) => {
       const fields = [];
-      // TextField13[28-47]: 4 schools × 5 fields
-      for (let i = 0; i < 4; i++) {
-        const o = 28 + (i * 5);
-        fields.push(
-          { pdfSuffix: `TextField13[${o}]`, fieldId: 'school_name', label: `School ${i+1} name`, itemIndex: i },
-          { pdfSuffix: `TextField13[${o+1}]`, fieldId: 'school_city', label: `School ${i+1} city`, itemIndex: i },
-          { pdfSuffix: `TextField13[${o+2}]`, fieldId: 'school_country', label: `School ${i+1} country`, itemIndex: i },
-          { pdfSuffix: `TextField13[${o+3}]`, fieldId: 'degree', label: `School ${i+1} degree`, itemIndex: i },
-          { pdfSuffix: `TextField13[${o+4}]`, fieldId: 'field_of_study', label: `School ${i+1} field`, itemIndex: i },
-        );
+      // Per school: [name, degree, field_of_study, city, country] ->
+      // TextField13 slots [col1 row1, col1 row2, col2 row1, col3 row1,
+      // col3 row2]. Col2 row2 (31 / 38) has no matching abstract field.
+      const slots = [
+        [28, 29, 30, 32, 33],
+        [34, 37, 35, 36, 39],
+      ];
+      const fieldIds = ['school_name', 'degree', 'field_of_study', 'school_city', 'school_country'];
+      for (let i = 0; i < 2; i++) {
+        fieldIds.forEach((fieldId, j) => {
+          fields.push(
+            { pdfSuffix: `TextField13[${slots[i][j]}]`, fieldId, label: `School ${i+1} ${fieldId.replace(/_/g, ' ')}`, itemIndex: i },
+          );
+        });
       }
       return fields;
     },
   },
 
-  // Part A.III Q4 — Employment (12 fields in #subform[4])
+  // Part A.III Q4 — Employment (6 fields in #subform[4])
+  // VERIFIED with PyMuPDF: Q4 occupies TextField13[40..45] only —
+  // employer 1 rows y512/y530 (name/address + occupation, two lines
+  // each) and employer 2 row y548 (one line each). The old 40..51 range
+  // (3 employers) collided with education at 40..47 and family at
+  // 46..51. maxInline is 2; further employers go to Supplement B.
   employment: {
     groupId: 'employment',
     section: 'Part A.III Q4 Employment',
     pdfBase: 'form1[0].#subform[4]',
-    maxInline: 3,
+    maxInline: 2,
     overflowTo: 'supplement_b',
     generateFields: (base) => {
       const fields = [];
-      // TextField13[40-51]: 3 employers × 4 fields
-      for (let i = 0; i < 3; i++) {
-        const o = 40 + (i * 4);
-        fields.push(
-          { pdfSuffix: `TextField13[${o}]`, fieldId: 'employer_name', label: `Employer ${i+1} name`, itemIndex: i },
-          { pdfSuffix: `TextField13[${o+1}]`, fieldId: 'occupation', label: `Employer ${i+1} occupation`, itemIndex: i },
-          { pdfSuffix: `TextField13[${o+2}]`, fieldId: 'employer_city', label: `Employer ${i+1} city`, itemIndex: i },
-          { pdfSuffix: `TextField13[${o+3}]`, fieldId: 'employer_country', label: `Employer ${i+1} country`, itemIndex: i },
-        );
+      // Employer 1: name 40, city 41, occupation 42, country 43.
+      // Employer 2: name 44, occupation 45 (city/country overflow).
+      const slots = [
+        [40, 41, 42, 43],
+        [44, 45],
+      ];
+      const fieldIds = [
+        ['employer_name', 'employer_city', 'occupation', 'employer_country'],
+        ['employer_name', 'occupation'],
+      ];
+      for (let i = 0; i < 2; i++) {
+        fieldIds[i].forEach((fieldId, j) => {
+          fields.push(
+            { pdfSuffix: `TextField13[${slots[i][j]}]`, fieldId, label: `Employer ${i+1} ${fieldId.replace(/_/g, ' ')}`, itemIndex: i },
+          );
+        });
       }
       return fields;
     },
   },
 
-  // Part A.III Q5 — Parents and siblings (24 fields, via persons)
+  // Part A.III Q5 — Parents and siblings (12 TextField13 + 6 TextField35)
+  // VERIFIED with PyMuPDF: Q5 occupies TextField13[46..57] — six rows
+  // (Mother, Father, 4x Sibling) x 2 columns (Full Name | City/Town and
+  // Country of Birth) — plus TextField35[0..5] (Current Location, one
+  // per row) and a Deceased checkbox per row. The old 46..69 range
+  // (6 members x 4 fields) ran past the end of the field (58..69 do not
+  // exist) and collided with employment at 46..51. maxInline is 6.
+  // Inline slots: family_name -> Full Name; city -> Current Location
+  // (TextField35, matching the UI label "City where they live").
+  // relationship / country have no inline PDF column (the row label IS
+  // the relationship; there is no birth-country column for a current
+  // location) — they travel in the Supplement B overflow text.
   family_members: {
     groupId: 'family',
     section: 'Part A.III Q5 Parents/Siblings',
@@ -207,14 +240,13 @@ export const REPEATING_SETS_589 = {
     overflowTo: 'supplement_b',
     generateFields: (base) => {
       const fields = [];
-      // TextField13[46-69]: 6 members × 4 fields
+      // Row order on the form: Mother, Father, Sibling, Sibling,
+      // Sibling, Sibling.
+      const nameSlots = [46, 47, 48, 52, 54, 56];
       for (let i = 0; i < 6; i++) {
-        const o = 46 + (i * 4);
         fields.push(
-          { pdfSuffix: `TextField13[${o}]`, fieldId: 'family_name', label: `Family ${i+1} name`, itemIndex: i },
-          { pdfSuffix: `TextField13[${o+1}]`, fieldId: 'relationship', label: `Family ${i+1} relationship`, itemIndex: i },
-          { pdfSuffix: `TextField13[${o+2}]`, fieldId: 'city', label: `Family ${i+1} city`, itemIndex: i },
-          { pdfSuffix: `TextField13[${o+3}]`, fieldId: 'country', label: `Family ${i+1} country`, itemIndex: i },
+          { pdfSuffix: `TextField13[${nameSlots[i]}]`, fieldId: 'family_name', label: `Family ${i+1} name`, itemIndex: i },
+          { pdfSuffix: `TextField35[${i}]`, fieldId: 'city', label: `Family ${i+1} current location (city)`, itemIndex: i },
         );
       }
       return fields;

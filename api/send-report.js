@@ -28,38 +28,189 @@
  *   address returns Resend's rejection, which this endpoint surfaces
  *   (it does not rewrite it into a false success).
  *
- * PER-ORG ROUTING (owner correction 2026-11-11): the recipient is the
- * org's pre-configured staff email, resolved in this order:
- *   1. api/_lib/org-staff.js registry (authoritative — a listed org's
- *      staff email wins and the client cannot choose the recipient).
- *   2. The client-provided staffEmail (the device-side org config staff
- *      set in the Staff Dashboard, or the test default).
- * TESTING: the staff email is the owner's healthcarebyvalentine@gmail.com.
- * At sale/install the owner creates the org's account with its real
- * staff email; no real org staff address is configured during testing.
+ * PER-ORG ROUTING (owner correction 2026-11-11, hardened Carbon Pass 1
+ * finding 1): the recipient comes ONLY from the server-side
+ * api/_lib/org-staff.js registry. The request MUST name an org slug
+ * listed there; an omitted or unlisted org is rejected with 400.
+ * A client-supplied staffEmail is NEVER read — it cannot choose the
+ * recipient. TESTING: only the "test" org is listed, routing to the
+ * owner's healthcarebyvalentine@gmail.com. At sale/install the owner
+ * creates the org's account with its real staff email; no real org
+ * staff address is configured during testing.
+ *
+ * SERVER-SIDE RENDERING (finding 1): the client sends STRUCTURED
+ * report data (`body.report` — scores, sections, findings, steps,
+ * questions, answers) and this endpoint renders the email HTML
+ * itself, HTML-escaping every applicant-supplied value. Raw HTML
+ * from the client is NEVER accepted: a `body.html` field, if present,
+ * is ignored. The client-side builder in src/reportEmail.ts renders
+ * the same content for the print path; the two renderers must stay
+ * in step (same sections, same escaping).
  *
  * ABUSE GUARDS: per-IP rate limit (5 sends / 10 min, shared limiter
- * instance for this endpoint only), strict email validation, HTML size
- * cap (200KB), single recipient only. The key and the HTML body are
- * never logged.
+ * instance for this endpoint only), strict org-registry resolution,
+ * structured-report size cap (200KB), single recipient only. The key
+ * and the report content are never logged.
  */
-import { createLimiter } from './_lib/ratelimit.js';
+import { createLimiter, clientIp } from './_lib/ratelimit.js';
 import { resolveOrgStaffEmail } from './_lib/org-staff.js';
 
 const sendLimiter = createLimiter({ capacity: 5, windowMs: 10 * 60 * 1000 });
 
 const KNOWN_FORMS = new Set(['N-400', 'I-130', 'I-485', 'I-90', 'I-589', 'I-765']);
-const MAX_HTML_BYTES = 200 * 1024;
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const MAX_REPORT_BYTES = 200 * 1024;
 // Browser UA header (see module doc): clears Cloudflare 1010 blocks
 // that hit default (non-browser) HTTP clients on Resend's API.
 const BROWSER_UA =
   'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36';
 
-function clientIp(req) {
-  const fwd = req.headers && req.headers['x-forwarded-for'];
-  if (typeof fwd === 'string' && fwd) return fwd.split(',')[0].trim();
-  return (req.socket && req.socket.remoteAddress) || 'unknown';
+// ── Server-side report rendering ───────────────────────────────────────
+// Mirrors src/reportEmail.ts buildStaffReportHtml (the print path).
+// Every applicant-supplied value is escaped; no client HTML is ever
+// interpolated. Field caps keep a hostile structured payload bounded.
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function str(v, max = 500) {
+  return typeof v === 'string' ? v.slice(0, max) : '';
+}
+
+function num(v, fallback = 0) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function labelText(map, lang) {
+  if (typeof map === 'string') return map;
+  if (!map || typeof map !== 'object') return '';
+  return map[lang] || map.EN || '';
+}
+
+const RG_SCHEMA_FIELDS = {
+  residences: ['street', 'city', 'state', 'from', 'to'],
+  children: ['name', 'dob', 'country'],
+  employment: ['employer', 'title', 'from', 'to'],
+  education: ['school', 'from', 'to'],
+  trips: ['destination', 'departure', 'return'],
+};
+
+function displayAnswer(q, ans, lang) {
+  if (q.type === 'repeating_group' && Array.isArray(ans)) {
+    const fields = RG_SCHEMA_FIELDS[q.groupId || ''] || ['detail'];
+    const items = ans
+      .slice(0, 50)
+      .map((e) => fields.map((f) => (e && typeof e === 'object' ? e[f] : undefined)).filter(Boolean).join(' · '))
+      .filter(Boolean);
+    if (!items.length) return '';
+    return `<ol style="margin:0.25rem 0;padding-left:1.25rem;">${items.map((s) => `<li>${escapeHtml(String(s).slice(0, 500))}</li>`).join('')}</ol>`;
+  }
+  if ((q.type === 'radio' || q.type === 'select') && Array.isArray(q.options)) {
+    const opt = q.options.find((o) => o && o.value === ans);
+    return escapeHtml(opt ? labelText(opt.labels, lang) : ans);
+  }
+  if (typeof ans === 'string') return escapeHtml(ans.slice(0, 2000));
+  if (typeof ans === 'number' || typeof ans === 'boolean') return escapeHtml(String(ans));
+  return '';
+}
+
+function itemList(items, color, icon) {
+  if (!Array.isArray(items) || !items.length) return '';
+  return items
+    .slice(0, 100)
+    .map(
+      (it) =>
+        `<div style="margin:0.5rem 0;"><strong style="color:${color};">${icon} ${escapeHtml(str(it && it.t, 500))}</strong>` +
+        (it && it.d ? `<div style="line-height:1.6;">${escapeHtml(str(it.d, 2000))}</div>` : '') +
+        `</div>`,
+    )
+    .join('');
+}
+
+export function renderStaffReportHtml(report) {
+  const r = report && typeof report === 'object' ? report : {};
+  const lang = str(r.lang, 10) || 'EN';
+  const formNumber = str(r.formNumber, 20);
+  const formTitle = str(r.formTitle, 200);
+  const participant = str(r.participantName, 200).trim();
+  const pct = Math.round(Math.min(1, Math.max(0, num(r.overallScore, 0))) * 100);
+  const dateStr = new Date().toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
+
+  let infoHtml = '';
+  const steps = Array.isArray(r.steps) ? r.steps.slice(0, 100) : [];
+  const questions = Array.isArray(r.questions) ? r.questions.slice(0, 1000) : [];
+  const answers = r.answers && typeof r.answers === 'object' ? r.answers : {};
+  const facts = r.factRecord && typeof r.factRecord === 'object'
+    && r.factRecord.facts && typeof r.factRecord.facts === 'object'
+    ? r.factRecord.facts : {};
+  for (const step of steps) {
+    if (!step || typeof step !== 'object') continue;
+    const stepTitle = labelText(step.title, lang);
+    const sqs = questions.filter((q) => q && typeof q === 'object' && q.step === step.id && answers[q.id] !== undefined);
+    if (!sqs.length) continue;
+    const rows = sqs
+      .map((q) => {
+        const display = displayAnswer(q, answers[q.id], lang);
+        if (!display) return '';
+        const short = (q.shortLabels && typeof q.shortLabels === 'object' && q.shortLabels[lang])
+          || q.shortLabel || labelText(q.labels, lang);
+        const fact = facts[q.id] && typeof facts[q.id] === 'object' ? facts[q.id] : null;
+        const badge =
+          fact && fact.status === 'corrected'
+            ? ` <span style="font-size:0.75rem;background:#fef3c7;color:#b45309;padding:0.1rem 0.4rem;border-radius:999;">Corrected (${Array.isArray(fact.corrections) ? fact.corrections.length : 0}x)</span>`
+            : fact && fact.status === 'conflicted'
+              ? ` <span style="font-size:0.75rem;background:#fee2e2;color:#dc2626;padding:0.1rem 0.4rem;border-radius:999;">Conflicted</span>`
+              : '';
+        return `<div style="margin:0.4rem 0;"><div style="font-weight:600;">${escapeHtml(str(short, 500))}${badge}</div><div>${display}</div></div>`;
+      })
+      .filter(Boolean)
+      .join('');
+    if (!rows) continue;
+    infoHtml += `<h3 style="margin:1.25rem 0 0.5rem;font-size:1.05rem;">${escapeHtml(str(stepTitle, 500))}</h3>${rows}`;
+  }
+
+  const sectionsHtml = Array.isArray(r.sections) && r.sections.length
+    ? `<h2 style="font-size:1.15rem;margin:1.5rem 0 0.5rem;">Readiness by section</h2>` +
+      r.sections.slice(0, 100)
+        .map(
+          (s) =>
+            `<div style="display:flex;justify-content:space-between;padding:0.4rem 0;border-bottom:1px solid #f1f5f9;">` +
+            `<span>${escapeHtml(str(s && s.section, 200))}</span><span>${Math.round(Math.min(1, Math.max(0, num(s && s.score, 0))) * 100)}% — ${escapeHtml(str(s && s.band, 100))}</span></div>`,
+        )
+        .join('')
+    : '';
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>IRU ${escapeHtml(formNumber)} — Readiness Report</title></head>` +
+    `<body style="font-family:Georgia,serif;color:#1a1a1a;max-width:680px;margin:0 auto;padding:1.5rem;line-height:1.6;">` +
+    `<div style="border-bottom:2px solid #1a56db;padding-bottom:0.75rem;margin-bottom:1rem;">` +
+    `<div style="font-size:1.4rem;font-weight:700;">IRU — Immigration Readiness Utility</div>` +
+    `<div style="color:#64748b;">${escapeHtml(formNumber)} — ${escapeHtml(formTitle)}</div>` +
+    (participant ? `<div>Participant: <strong>${escapeHtml(participant)}</strong></div>` : '') +
+    `<div style="color:#64748b;font-size:0.9rem;">${escapeHtml(dateStr)}</div></div>` +
+    `<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:1.25rem 1.5rem;margin:1rem 0;">` +
+    `<div style="font-size:1.75rem;font-weight:700;">${pct}% — ${escapeHtml(str(r.overallBand, 100) || 'Incomplete')}</div>` +
+    `<p style="margin:0.5rem 0 0;">${escapeHtml(str(r.executiveSummary, 5000))}</p></div>` +
+    sectionsHtml +
+    (Array.isArray(r.blockers) && r.blockers.length ? `<h2 style="font-size:1.15rem;margin:1.5rem 0 0.5rem;">What needs attention</h2>${itemList(r.blockers, '#dc2626', '❌')}` : '') +
+    (Array.isArray(r.warnings) && r.warnings.length ? `<h2 style="font-size:1.15rem;margin:1.5rem 0 0.5rem;">Worth reviewing</h2>${itemList(r.warnings, '#b45309', '⚠️')}` : '') +
+    (Array.isArray(r.complete) && r.complete.length ? `<h2 style="font-size:1.15rem;margin:1.5rem 0 0.5rem;">What looks good</h2>${itemList(r.complete, '#15803d', '✅')}` : '') +
+    (infoHtml ? `<h2 style="font-size:1.15rem;margin:1.5rem 0 0.5rem;">Information provided</h2><p style="color:#64748b;">Everything below was collected during the questionnaire, organized by form section. Staff can use this directly to complete the official form — no need to re-ask.</p>${infoHtml}` : '') +
+    `<h2 style="font-size:1.15rem;margin:1.5rem 0 0.5rem;">Staff next steps</h2><ol style="line-height:1.6;">` +
+    `<li>Print this summary or keep it open as a reference.</li>` +
+    `<li>Download the official ${escapeHtml(formNumber)} PDF and complete the form using the information above — organized by form section.</li></ol>` +
+    `<p style="color:#64748b;font-size:0.9rem;border-top:1px solid #e2e8f0;padding-top:0.75rem;margin-top:1.5rem;">` +
+    `This report is a preparation aid, not legal advice. It does not determine eligibility. Prepared with IRU — Immigration Readiness Utility.</p>` +
+    `</body></html>`;
 }
 
 export default async function handler(req, res) {
@@ -83,29 +234,43 @@ export default async function handler(req, res) {
 
   const body = req.body && typeof req.body === 'object' ? req.body : {};
   const org = typeof body.org === 'string' ? body.org.trim().toLowerCase() : '';
-  // Per-org routing: the server registry wins when the org is listed
-  // (the client cannot choose the recipient); otherwise the
-  // client-provided address is the device-side org config / test default.
-  const registryEmail = resolveOrgStaffEmail(org);
-  const providedEmail = typeof body.staffEmail === 'string' ? body.staffEmail.trim() : '';
-  const staffEmail = registryEmail || providedEmail;
-  const html = typeof body.html === 'string' ? body.html : '';
-  const formNumber = typeof body.formNumber === 'string' ? body.formNumber.trim() : '';
-  const participantName = typeof body.participantName === 'string' ? body.participantName.trim().slice(0, 200) : '';
-
-  if (!EMAIL_RE.test(staffEmail)) {
-    return res.status(400).json({ error: 'No staff delivery is configured for this organization. Staff can configure the receiving email in the Staff Dashboard.' });
+  // Strict registry resolution (finding 1): the org MUST be listed
+  // server-side. An omitted or unlisted org is rejected — the client
+  // cannot supply a recipient address, and there is no fallback.
+  const staffEmail = resolveOrgStaffEmail(org);
+  if (!staffEmail) {
+    return res.status(400).json({ error: 'No staff delivery is configured for this organization.' });
   }
-  if (!html || Buffer.byteLength(html, 'utf8') > MAX_HTML_BYTES) {
+  // Structured report data only. Client HTML is never read or used.
+  const report = body.report && typeof body.report === 'object' ? body.report : null;
+  if (!report) {
+    return res.status(400).json({ error: 'Report content is missing.' });
+  }
+  let reportSize = 0;
+  try {
+    reportSize = Buffer.byteLength(JSON.stringify(report), 'utf8');
+  } catch {
+    return res.status(400).json({ error: 'Report content is invalid.' });
+  }
+  if (reportSize > MAX_REPORT_BYTES) {
     return res.status(400).json({ error: 'Report content is missing or too large.' });
   }
-  if (formNumber && !KNOWN_FORMS.has(formNumber)) {
+  const formNumber = typeof body.formNumber === 'string'
+    ? body.formNumber.trim()
+    : (typeof report.formNumber === 'string' ? report.formNumber.trim() : '');
+  if (!KNOWN_FORMS.has(formNumber)) {
     return res.status(400).json({ error: 'Unknown form number.' });
   }
+  const participantName = typeof body.participantName === 'string'
+    ? body.participantName.trim().slice(0, 200)
+    : (typeof report.participantName === 'string' ? report.participantName.trim().slice(0, 200) : '');
+
+  // The server renders the email HTML from the structured report.
+  const html = renderStaffReportHtml({ ...report, formNumber, participantName });
 
   const subject = participantName
-    ? `IRU ${formNumber || 'readiness'} report — ${participantName}`
-    : `IRU ${formNumber || 'readiness'} report`;
+    ? `IRU ${formNumber} report — ${participantName}`
+    : `IRU ${formNumber} report`;
 
   let upstream;
   try {

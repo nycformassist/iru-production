@@ -43,10 +43,20 @@
       "includeFiles": "api/build-mode.json"
     },
     "api/assessment-resume.js": {
-      "maxDuration": 10
+      "maxDuration": 10,
+      "includeFiles": "api/build-mode.json"
+    },
+    "api/analyze.js": {
+      "includeFiles": "api/build-mode.json"
+    },
+    "api/review-image.js": {
+      "includeFiles": "api/build-mode.json"
     },
     "api/generate-form.js": {
-      "includeFiles": "api/build-mode.json"
+      "includeFiles": "api/build-mode.json,forms/templates/**"
+    },
+    "api/blank-form.js": {
+      "includeFiles": "forms/templates/**"
     }
   },
   "buildCommand": "npm run build && bash scripts/bundle-form-engine.sh"

@@ -11,7 +11,41 @@ Output: fill_plan [(field_name, value, kind)] and review_queue [flag dicts].
 The review queue is the selective human-review surface that travels with the
 consolidated IRU report.
 """
+import re
+
 AUTO_FILL_CONFIDENCE = 0.7
+
+_HEIGHT_RE = re.compile(r"""^\s*(\d+)\s*(?:'|ft|feet|-|,)?\s*(\d*)\s*(?:"|in|inches|”)?\s*$""")
+
+def _parse_height(value):
+    """Parse a height answer into (feet, inches|None).
+
+    Accepts 5'8", 5'8, 5 ft 8 in, 5 feet 8 inches, 5-8, 5.8, and a bare
+    number: <= 8 is feet alone; 9+ is total inches (68 -> 5'8"). Returns
+    (None, None) when the value cannot be parsed.
+    """
+    if value is None:
+        return None, None
+    if isinstance(value, (list, tuple)):
+        value = " ".join(str(v) for v in value)
+    s = str(value).strip().lower().replace("’", "'").replace("”", '"')
+    if re.fullmatch(r"\d+\.\d+", s):
+        feet_s, inches_s = s.split(".")
+        return int(feet_s), int(inches_s)
+    m = _HEIGHT_RE.match(s)
+    if not m:
+        return None, None
+    feet_s, inches_s = m.group(1), m.group(2)
+    if not inches_s:
+        n = int(feet_s)
+        if n > 8:
+            return n // 12, n % 12
+        return n, None
+    feet, inches = int(feet_s), int(inches_s)
+    if inches >= 12:
+        feet += inches // 12
+        inches = inches % 12
+    return feet, inches
 
 def bind(registry, facts):
     fill_plan, review_queue = [], []
@@ -45,6 +79,10 @@ def bind(registry, facts):
         kind = spec["kind"]
         if kind == "text":
             fill_plan.append((spec["field"], value, "text", fact_id))
+        elif kind == "combobox":
+            # Comboboxes (e.g. height feet/inches) take a plain string
+            # value; apply_fill sets field_value the same as text.
+            fill_plan.append((spec["field"], str(value), "text", fact_id))
         elif kind == "checkbox_group":
             field = spec["mapping"].get(value)
             if field:
@@ -52,6 +90,49 @@ def bind(registry, facts):
             else:
                 review_queue.append({"fact": fact_id, "reason": "unmappable-value",
                     "detail": f"Value '{value}' has no checkbox mapping."})
+        elif kind == "checkbox_multi":
+            # Select-all-that-apply: value may be a list or a
+            # comma-separated string. Each selected value checks its box.
+            values = value if isinstance(value, list) else str(value).split(",")
+            checked = False
+            for v in values:
+                v = v.strip() if isinstance(v, str) else v
+                field = spec["mapping"].get(v)
+                if field:
+                    fill_plan.append((field, True, "checkbox", fact_id))
+                    checked = True
+            if not checked:
+                review_queue.append({"fact": fact_id, "reason": "unmappable-value",
+                    "detail": f"Value '{value}' has no checkbox mapping."})
+        elif kind == "weight_digits":
+            # Weight in pounds split across the spec's digit fields
+            # (hundreds/tens/ones), e.g. "165" -> "1", "6", "5".
+            digits = "".join(ch for ch in str(value) if ch.isdigit())
+            if not digits:
+                review_queue.append({"fact": fact_id, "reason": "unmappable-value",
+                    "detail": f"Value '{value}' is not a weight in pounds."})
+            else:
+                digits = digits[-3:].rjust(3, "0")
+                for d, fld in zip(digits, spec["fields"]):
+                    fill_plan.append((fld, d, "text", fact_id))
+        elif kind == "height":
+            # Single height answer ("5'8\"") split across the spec's
+            # [feet, inches] combobox fields (Carbon Pass 1 finding 20).
+            feet, inches = _parse_height(value)
+            if feet is None:
+                review_queue.append({"fact": fact_id, "reason": "unmappable-value",
+                    "detail": f"Value '{value}' is not a parseable height."})
+            else:
+                fields = spec.get("fields", [])
+                if len(fields) >= 1:
+                    fill_plan.append((fields[0], str(feet), "text", fact_id))
+                if len(fields) >= 2 and inches is not None:
+                    fill_plan.append((fields[1], str(inches), "text", fact_id))
+        else:
+            # Unknown kinds used to fall through silently and the fact
+            # was never filled. Surface it for human review instead.
+            review_queue.append({"fact": fact_id, "reason": "unsupported-kind",
+                "detail": f"Kind '{kind}' is not supported by the binder."})
     return fill_plan, review_queue
 
 

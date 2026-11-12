@@ -29,10 +29,8 @@ def _semantic_to_fact(semantic):
         'unit': 'current_unit',
         'in_care_of': 'current_care_of',
     }
-    # Form-specific prefixes
-    if 'i485' == 'i765':
-        if semantic == 'a_number': return 'i765_a_number'
-        if semantic == 'date_of_birth': return 'i765_dob'
+    # Form-specific prefixes (none: the dead "if 'i485' == 'i765':"
+    # branch below could never be true and was removed, finding 23).
     return mapping.get(semantic, semantic)
 
 def build_i485_full_plan(facts, addresses=None, biographic=None):
@@ -115,8 +113,9 @@ def build_i485_full_plan(facts, addresses=None, biographic=None):
                 plan.append((_yf, "Yes", "checkbox", _fid))
             elif _val in _no_vals:
                 plan.append((_nf, "Yes", "checkbox", _fid))
-    except Exception:
-        pass
+    except Exception as _e:
+        print("[i485_full_binder] " + _e.__class__.__name__ + " in i485 yes/no pairs: " + str(_e), file=sys.stderr)
+
 
     # I-485: Checkbox groups (marital status, ethnicity, race, eye/hair color, etc.)
     try:
@@ -146,8 +145,9 @@ def build_i485_full_plan(facts, addresses=None, biographic=None):
                         break
             if _field:
                 plan.append((_field, "Yes", "checkbox", _fid))
-    except Exception:
-        pass
+    except Exception as _e:
+        print("[i485_full_binder] " + _e.__class__.__name__ + " in i485 checkbox groups: " + str(_e), file=sys.stderr)
+
     # Deduplicate by field name (generated + detailed may overlap)
     seen = set()
     deduped_plan = []
@@ -173,7 +173,8 @@ def build_i485_full_plan(facts, addresses=None, biographic=None):
                         seen.add(f)
                         deduped_plan.append((f, v, k, fid))
                 review.extend(r_review)
-    except Exception:
-        pass
+    except Exception as _e:
+        print("[i485_full_binder] " + _e.__class__.__name__ + " in i485 repeating groups: " + str(_e), file=sys.stderr)
+
     
     return deduped_plan, review

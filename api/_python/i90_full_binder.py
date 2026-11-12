@@ -4,6 +4,7 @@ Implements the full 64 generated mappings (address + identity) plus form-specifi
 """
 import json
 import os
+import re
 import sys
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _HERE)
@@ -100,7 +101,15 @@ def build_i90_full_plan(facts, addresses=None, biographic=None):
         "i90_email": "form1[0].#subform[3].P5_Line5_EmailAddress[0]",
         "i90_contact_language": "form1[0].#subform[3].P5_Line1b_Language[0]",
         "i90_disability_detail": "form1[0].#subform[2].P4_Line1a_AccomodationRequested[0]",
-        "i90_weight": "form1[0].#subform[2].P3_Line9_HeightInches1[0]",
+        # Height (Carbon Pass 1 finding 19): feet/inches were collected
+        # by the questionnaire but never mapped. Both fields verified
+        # to exist in public/forms/i-90.pdf with PyMuPDF.
+        "i90_height_feet": "form1[0].#subform[2].P3_Line8_HeightFeet[0]",
+        "i90_height_inches": "form1[0].#subform[2].P3_Line8_HeightInches[0]",
+        # NOTE: i90_weight is NOT mapped here -- it is split across the
+        # three 1-digit weight boxes below (see the weight block after
+        # the main loop). Mapping "165" as one string into the first
+        # box truncated it and left boxes 2-3 blank.
     }
     for fid, field in _expansion_text.items():
         registry[f"exp_{fid}"] = {
@@ -199,6 +208,35 @@ def build_i90_full_plan(facts, addresses=None, biographic=None):
             p, r = bind(single, {fact_id: fact_dict})
             plan.extend(p)
             review.extend(r)
+
+    # Weight (Carbon Pass 1 finding 19): split i90_weight across the
+    # three 1-digit boxes P3_Line9_HeightInches1/2/3[0] (verified to
+    # exist in public/forms/i-90.pdf). "165" -> "1", "6", "5"; "65" ->
+    # "0", "6", "5". Conflict/low-confidence facts go to review, like
+    # the text branch above; an unparseable value is reviewed, not
+    # silently dropped.
+    _weight_fact = facts.get("i90_weight")
+    if _weight_fact:
+        if isinstance(_weight_fact, dict) and "value" in _weight_fact:
+            _wv, _wc, _ws = _weight_fact.get("value"), _weight_fact.get("confidence", 1.0), _weight_fact.get("status", "ok")
+        else:
+            _wv, _wc, _ws = _weight_fact, 1.0, "ok"
+        if _ws == "conflicted":
+            review.append({"fact": "i90_weight", "reason": "conflict", "detail": "Conflicting weight."})
+        elif _wc is not None and _wc < 0.7:
+            review.append({"fact": "i90_weight", "reason": "uncertain", "detail": f"Low confidence for i90_weight."})
+        else:
+            _digits = re.sub(r"\D", "", str(_wv or ""))
+            if _digits:
+                _digits = _digits[-3:].rjust(3, "0")
+                for _d, _fld in zip(_digits, [
+                    "form1[0].#subform[2].P3_Line9_HeightInches1[0]",
+                    "form1[0].#subform[2].P3_Line9_HeightInches2[0]",
+                    "form1[0].#subform[2].P3_Line9_HeightInches3[0]",
+                ]):
+                    plan.append((_fld, _d, "text", "i90_weight"))
+            else:
+                review.append({"fact": "i90_weight", "reason": "unmappable-value", "detail": f"Value '{_wv}' is not a weight in pounds."})
 
     # Deduplicate by field name (generated + detailed may overlap)
     seen = set()

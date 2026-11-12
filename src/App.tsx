@@ -286,8 +286,13 @@ const CHILD_FIELDS: RepeatingField[] = [
   { id: 'given_name', label: 'Given name', type: 'text', required: true },
   { id: 'middle_name', label: 'Middle name', type: 'text', required: false },
   { id: 'date_of_birth', label: 'Date of birth', type: 'date', required: false },
-  { id: 'country_of_birth', label: 'Country of birth', type: 'text', required: false },
-  { id: 'citizenship', label: 'Citizenship', type: 'text', required: false },
+  // IDs aligned with api/_lib/forms/repeating-589.js (Carbon Pass 1
+  // finding 9): the binder reads birth_city / nationality, and
+  // translates a 'sex' value into the Male/Female checkboxes — the
+  // previous country_of_birth / citizenship values never reached the PDF.
+  { id: 'birth_city', label: 'City of birth', type: 'text', required: false },
+  { id: 'nationality', label: 'Nationality', type: 'text', required: false },
+  { id: 'sex', label: 'Sex', type: 'select', options: ['Male', 'Female'], required: false },
 ];
 
 const RESIDENCES_FIELDS: RepeatingField[] = [
@@ -536,7 +541,10 @@ export default function App() {
   const [globalNotice, setGlobalNotice] = useState('');
   const photoInputRef = useRef<HTMLInputElement | null>(null);
   // Canonical fact record + form preparation (directives §4/§7/§8).
-  const [factRecord, setFactRecord] = useState<any>(null);
+  // Created up front, NOT at interview completion: PHASE3 repeating
+  // groups add entries into this record, and a null record silently
+  // discards every add (Carbon Pass 1 finding 2).
+  const [factRecord, setFactRecord] = useState<any>(() => createFactRecord(new Date().toISOString()));
   // PHASE3 repeating groups (4c): entry history, last address, children, residences,
   // education, employment, parents/siblings, supplement B.
   // Tracks which repeating step we're on: null = regular questions, otherwise group key.
@@ -971,7 +979,11 @@ export default function App() {
       setStage('PHASE4');
       setCurrentQ(0);
     } else if (stage === 'PHASE4') {
+      // Back from PHASE4 returns to the last repeating step, symmetric
+      // with forward navigation (Carbon Pass 1 finding 17) — landing on
+      // PHASE3 questions with repeatingStep null skipped all 8 groups.
       setStage('PHASE3');
+      setRepeatingStep('supplement_b');
       setCurrentQ(answers.has_prior_arrests === 'yes' ? PHASE_3_QUESTIONS.length - 1 : 0);
     } else if (currentQ > 0) {
       setCurrentQ(currentQ - 1);
@@ -1302,7 +1314,7 @@ export default function App() {
     setRequestId('');
     setIsNycCoverage(true);
     setResourceResult(null);
-    setFactRecord(null);
+    setFactRecord(createFactRecord(new Date().toISOString()));
     setSelectedFormId('');
     setFormError('');
     setFormAnswers({});
@@ -2070,8 +2082,17 @@ export default function App() {
         // Not entitled to the readiness assessment (or the token lapsed
         // between the gate check and this call): back to the product
         // list instead of landing on an empty PACKET.
-        setStage('PACKAGES');
-        return;
+        // Institutional mode has no PACKAGES stage (Carbon Pass 1
+        // finding 3): routing there lands on a blank white card. Stay
+        // in the assessment flow and show the packet's "review did not
+        // run" state instead.
+        if (INSTITUTIONAL_MODE()) {
+          setAiUnavailable(true);
+          setAssessment(null);
+        } else {
+          setStage('PACKAGES');
+          return;
+        }
       }
       if (error instanceof DOMException && error.name === 'AbortError') {
         console.error('AI request timed out after 90s');
@@ -2728,7 +2749,7 @@ export default function App() {
           <small>${ui.disclaimer}</small>
           ${requestId ? `<div style="margin-top:0.75rem;font-size:0.7rem;color:#94a3b8;">${escapeHtml(t('pktReference', 'Reference'))}: ${escapeHtml(requestId)}</div>` : ''}
           <div style="margin-top: 2rem; font-size: 0.75rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.1em;">
-            Sanctuary Architect 20345 | Powered by Parametric Insight Engine
+            IRU — Immigration Readiness Utility
           </div>
         </div>
       </body>
@@ -2745,7 +2766,18 @@ export default function App() {
     const html = generateHtml();
     printWindow.document.write(html);
     printWindow.document.close();
-    setTimeout(() => { printWindow.print(); }, 500);
+    // Print once the popup has loaded (fonts/logo included) instead of
+    // racing them on a blind 500ms timer (Carbon Pass 1 finding 22).
+    // The fallback timeout covers browsers that never fire load on a
+    // document.write popup; the flag keeps it to a single print().
+    let printed = false;
+    const doPrint = () => {
+      if (printed || printWindow.closed) return;
+      printed = true;
+      printWindow.print();
+    };
+    printWindow.addEventListener('load', doPrint);
+    setTimeout(doPrint, 2000);
   };
 
   const copyRawHtml = () => {
@@ -4724,7 +4756,7 @@ export default function App() {
         </div>
       )}
       <div className="mt-12 text-center text-xs text-slate-400 uppercase tracking-widest relative z-10">
-        Sanctuary Architect 20345 | Powered by Parametric Insight Engine
+        IRU — Immigration Readiness Utility
       </div>
     </div>
   );

@@ -27,6 +27,7 @@ import { computeDraftSnapshotHash, snapshotShort } from './_lib/draftIntegrity.j
 import { checkPaywallAgreement } from './_lib/paymentConfig.js';
 import { isInstitutionalServer } from './_lib/server-mode.js';
 import { assertPaidStoreAvailable } from './_lib/paymentStore.js';
+import { withDurableStore } from './_lib/withStore.js';
 
 const limiter = createLimiter({ capacity: 5, windowMs: 10 * 60 * 1000 });
 const MAX_BODY_BYTES = 256 * 1024;
@@ -190,7 +191,7 @@ export async function generateFormDraft({ formId, factRecord, lang = 'EN', expec
   return { pdfBytes, summary, plan, draftId, snapshotHash, generatedAt };
 }
 
-export default async function handler(req, res) {
+async function handler(req, res, store = entitlementStore) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -240,7 +241,7 @@ export default async function handler(req, res) {
       return res.status(503).json({ error: 'Form generation is not configured.' });
     }
     entitlementToken = (req.headers && req.headers['x-entitlement-token']) || body.entitlementToken || '';
-    const peek = entitlementStore.peekForForm(entitlementToken, body.formId);
+    const peek = store.peekForForm(entitlementToken, body.formId);
     if (!peek.ok) {
       return res.status(402).json({
         error: 'A paid entitlement covering this form is required to generate its draft, or that form has already been delivered.',
@@ -263,7 +264,7 @@ export default async function handler(req, res) {
       expectedSnapshotHash: typeof body.expectedSnapshotHash === 'string' ? body.expectedSnapshotHash : '',
     });
     if (paywallOn) {
-      const consumed = entitlementStore.consumeForForm(entitlementToken, body.formId);
+      const consumed = store.consumeForForm(entitlementToken, body.formId);
       if (!consumed.ok) {
         console.error(`[iru] entitlement consume failed after generation: ${consumed.reason}`);
         return res.status(409).json({ error: 'This entitlement could not be completed. Please contact support with your entitlement reference.' });
@@ -303,3 +304,8 @@ export default async function handler(req, res) {
 function safeParse(s) {
   try { return JSON.parse(s); } catch { return null; }
 }
+
+// Raw handler for unit tests (singleton default). Vercel serves the
+// durable-wrapped default: load → restore → run → save (CAS).
+export { handler };
+export default withDurableStore(handler);

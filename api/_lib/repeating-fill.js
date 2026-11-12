@@ -38,16 +38,36 @@ export function buildRepeatingFillPlan(record, entry) {
   }
 
   // Process each repeating set
+  // Supplement B overflow is aggregated across ALL groups first and
+  // chunked once at the end (Carbon Pass 1 finding 9): the old code let
+  // every overflowing group write its own chunks to TextField31[0],
+  // overwriting the previous group, and wrote chunk 2 to the
+  // nonexistent TextField31[2].
+  const supplementBSections = [];
   for (const setId of Object.keys(REPEATING_SETS_589)) {
     const set = REPEATING_SETS_589[setId];
     const mappings = expandRepeatingSet(setId);
-    
+
     // Get the data items for this group
     const items = getGroupItems(record, set.groupId);
     if (!items || items.length === 0) continue;
-    
+
     summary.groupsProcessed++;
-    
+
+    // The supplement_b set IS the Supplement B continuation text the
+    // user typed: fold it into the aggregated Supplement B text below
+    // instead of writing it inline — the same three fields also carry
+    // overflow, and whichever write came last used to win per field.
+    if (setId === 'supplement_b') {
+      for (const item of items) {
+        const itemFields = item.fields || item.facts || {};
+        for (const key of ['continuation_text_1', 'continuation_text_2', 'continuation_text_3']) {
+          const v = itemFields[key];
+          if (v && String(v).trim() !== '') supplementBSections.push(String(v).trim());
+        }
+      }
+      continue;
+    }
     // Split into inline and overflow
     const inlineItems = items.slice(0, set.maxInline);
     const overflowItems = items.slice(set.maxInline);
@@ -94,6 +114,13 @@ export function buildRepeatingFillPlan(record, entry) {
     // Handle overflow
     if (overflowItems.length > 0 && set.overflowTo) {
       summary.supplementsNeeded.add(set.overflowTo);
+      // Supplement B: collect this group's overflow text for the single
+      // aggregated write after the loop — never write per-group chunks.
+      if (set.overflowTo === 'supplement_b') {
+        const text = formatOverflowText(set, overflowItems, set.maxInline);
+        if (text) supplementBSections.push(text);
+        continue;
+      }
       const overflowMappings = getOverflowMappings(set, overflowItems.length, overflowItems);
       
       for (const mapping of overflowMappings) {
@@ -129,8 +156,59 @@ export function buildRepeatingFillPlan(record, entry) {
     }
   }
 
+  // Supplement B, aggregated: user-entered continuation text first,
+  // then every overflowing group's text, chunked once across the three
+  // real Supplement B fields — TextField31[0], TextField31[1] and
+  // TextField32[0] (verified with PyMuPDF; TextField31[2] does not
+  // exist). One write per field, so no group overwrites another.
+  if (supplementBSections.length > 0) {
+    const fullText = supplementBSections.filter(Boolean).join('\n\n');
+    const chunkFields = [
+      'form1[0].#subform[13].TextField31[0]',
+      'form1[0].#subform[13].TextField31[1]',
+      'form1[0].#subform[13].TextField32[0]',
+    ];
+    const chunkSize = 1000;
+    for (let i = 0; i < chunkFields.length; i++) {
+      const chunk = fullText.slice(i * chunkSize, (i + 1) * chunkSize);
+      if (chunk) {
+        overflow.push({
+          pdfField: chunkFields[i],
+          value: chunk,
+          label: `Supplement B continuation (part ${i + 1})`,
+          source: 'repeating-group-overflow',
+          groupId: 'supplement_b',
+          itemIndex: i,
+          supplement: 'supplement_b',
+        });
+      }
+    }
+  }
+
   summary.supplementsNeeded = Array.from(summary.supplementsNeeded);
   return { fill, overflow, summary };
+}
+
+/**
+ * Format overflow items of one group as structured Supplement B text.
+ * `offset` is the number of inline items, so the item numbers match
+ * the applicant's full list (e.g. residences #6, #7), not the overflow
+ * slice.
+ */
+function formatOverflowText(set, items, offset = 0) {
+  const overflowTexts = [];
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const fields = item.fields || item.facts || {};
+    const fieldStrs = Object.entries(fields)
+      .filter(([k, v]) => v && String(v).trim() !== '' && !k.startsWith('_'))
+      .map(([k, v]) => `${k}=${v}`)
+      .join(', ');
+    if (fieldStrs) {
+      overflowTexts.push(`${set.section} #${offset + i + 1}: ${fieldStrs}`);
+    }
+  }
+  return overflowTexts.join('\n\n');
 }
 
 /**
@@ -281,44 +359,12 @@ function getOverflowMappings(set, count, items = []) {
       });
     }
   } else {
-    // Supplement B overflow: Format all overflow items as structured text
-    // Supplement B (#subform[13]) has 3 free-text continuation fields.
-    // Unlike Supplement A (structured per-child), Supplement B is free-form,
-    // so we concatenate all overflow items with clear section labels.
-    // NO CAP: All overflow items are included; if they exceed the 3 fields,
-    // the text is distributed across them. No paper handoff.
-    const overflowTexts = [];
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i];
-      const fields = item.fields || item.facts || {};
-      // Format as "Section - Item N: field1=value1, field2=value2, ..."
-      const fieldStrs = Object.entries(fields)
-        .filter(([k, v]) => v && String(v).trim() !== '' && !k.startsWith('_'))
-        .map(([k, v]) => `${k}=${v}`)
-        .join(', ');
-      if (fieldStrs) {
-        overflowTexts.push(`${set.section} #${i + 1}: ${fieldStrs}`);
-      }
-    }
-    
-    const fullText = overflowTexts.join('\n\n');
-    // Distribute across the 3 Supplement B fields (approx 1000 chars each)
-    const chunkSize = 1000;
-    for (let i = 0; i < 3; i++) {
-      const chunk = fullText.slice(i * chunkSize, (i + 1) * chunkSize);
-      if (chunk) {
-        mappings.push({
-          pdfField: `form1[0].#subform[13].TextField31[${i}]`,
-          fieldId: `_supplement_b_chunk_${i}`,
-          label: `${set.section} overflow (part ${i + 1})`,
-          itemIndex: i,
-          _overflowText: chunk, // Special: use this text directly
-        });
-      }
-    }
-    // If still more text, it continues in the next chunk (no cap)
-    // The 3 fields hold ~3000 chars; for extreme cases, additional
-    // Supplement B pages would be needed (same complexity as Supplement A)
+    // Supplement B overflow is NOT mapped per-group here anymore: the
+    // old code wrote each group's chunks to TextField31[0..2]
+    // (TextField31[2] does not exist) and each group overwrote the
+    // last. buildRepeatingFillPlan aggregates all groups' overflow
+    // text via formatOverflowText() and chunks it once across
+    // TextField31[0], TextField31[1], TextField32[0]. Nothing to map.
   }
   return mappings;
 }

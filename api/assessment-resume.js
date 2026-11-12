@@ -8,6 +8,8 @@
 import pg from 'pg';
 import crypto from 'crypto';
 import { entitlementStore } from './_lib/entitlement.js';
+import { isInstitutionalServer } from './_lib/server-mode.js';
+import { withDurableStore } from './_lib/withStore.js';
 
 const { Pool } = pg;
 let pool = null;
@@ -23,14 +25,16 @@ function getPool() {
     return pool;
 }
 
-export default async function handler(req, res, store = entitlementStore) {
+async function handler(req, res, store = entitlementStore) {
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
     // Persistence gate (owner directive 2026-11-05): when the paywall
     // is on, resuming an assessment requires a paid entitlement — any
     // paid grant (persistence belongs to a paid case). Paywall off →
     // unchanged behavior. The save-token/clientKeyHash mechanics below
     // are unchanged for entitled calls. No consumption.
-    if (process.env.PAYWALL_ENABLED === 'true') {
+    // INSTITUTIONAL MODE: the organization holds access, so the consumer
+    // paid-access gate is skipped (same pattern as assessment-save.js).
+    if (process.env.PAYWALL_ENABLED === 'true' && !isInstitutionalServer()) {
         const token = (req.headers && req.headers['x-entitlement-token']) || '';
         const peek = store.peekByToken(token);
         if (!peek.ok) {
@@ -78,3 +82,8 @@ export default async function handler(req, res, store = entitlementStore) {
         return res.status(500).json({ error: 'Resume failed' });
     }
 }
+
+// Raw handler for unit tests (singleton default). Vercel serves the
+// durable-wrapped default: load → restore → run → save (CAS).
+export { handler };
+export default withDurableStore(handler);

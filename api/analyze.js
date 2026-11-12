@@ -23,6 +23,8 @@ import { sanitizeFactRecord } from "./_lib/facts.js";
 import { createLimiter, clientIp } from "./_lib/ratelimit.js";
 import { buildLimitedEvaluation } from "./_lib/evaluation.js";
 import { entitlementStore } from "./_lib/entitlement.js";
+import { isInstitutionalServer } from "./_lib/server-mode.js";
+import { withDurableStore } from "./_lib/withStore.js";
 
 const limiter = createLimiter({ capacity: 10, windowMs: 10 * 60 * 1000 });
 // The limited evaluation is a paid, one-shot deliverable: a stricter
@@ -78,7 +80,7 @@ const MAX_ATTEMPTS = 2;
 const RETRY_DELAY_MS = 400;
 const PERMANENT_STATUSES = new Set(['400', '401', '403', '404']);
 
-export default async function handler(req, res, store = entitlementStore) {
+async function handler(req, res, store = entitlementStore) {
   const startTime = Date.now();
   const requestId = Math.random().toString(36).slice(2, 8);
   if (req.method !== "POST") {
@@ -193,11 +195,11 @@ export default async function handler(req, res, store = entitlementStore) {
       res.setHeader("Retry-After", Math.ceil(eq.retryAfterMs / 1000));
       return res.status(429).json({ error: "Too many requests. Please try again later." });
     }
-    const paywallOn = process.env.PAYWALL_ENABLED === 'true';
+    const paywallOn = process.env.PAYWALL_ENABLED === 'true' && !isInstitutionalServer();
     let entitlementToken = '';
     if (paywallOn) {
       entitlementToken = (req.headers && req.headers['x-entitlement-token']) || rawBody.entitlementToken || '';
-      const peek = entitlementStore.peekForEvaluation(entitlementToken);
+      const peek = store.peekForEvaluation(entitlementToken);
       if (!peek.ok) {
         return res.status(402).json({
           error: 'A paid limited-evaluation entitlement is required, or it has already been used.',
@@ -207,7 +209,7 @@ export default async function handler(req, res, store = entitlementStore) {
     }
     const evaluation = buildLimitedEvaluation(min, lang);
     if (paywallOn) {
-      const consumed = entitlementStore.consumeByToken(entitlementToken);
+      const consumed = store.consumeByToken(entitlementToken);
       if (!consumed.ok) {
         console.error(`[iru] evaluation entitlement consume failed: ${consumed.reason}`);
         return res.status(409).json({ error: 'This entitlement could not be completed. Please contact support with your entitlement reference.' });
@@ -227,7 +229,10 @@ export default async function handler(req, res, store = entitlementStore) {
   // flow predates per-form routing), any paid 'readiness' entitlement
   // is accepted scope-agnostically. No consumption: the assessment
   // may be re-run while entitled. Paywall off → unchanged behavior.
-  if (process.env.PAYWALL_ENABLED === 'true') {
+  // INSTITUTIONAL MODE: the organization holds access, so the consumer
+  // paid-access gate is skipped (same pattern as assessment-save.js /
+  // generate-form.js).
+  if (process.env.PAYWALL_ENABLED === 'true' && !isInstitutionalServer()) {
     const fullToken = (req.headers && req.headers['x-entitlement-token'])
       || (rawBody && typeof rawBody === 'object' && typeof rawBody.entitlementToken === 'string' ? rawBody.entitlementToken : '')
       || '';
@@ -380,12 +385,17 @@ export default async function handler(req, res, store = entitlementStore) {
       // Never include: answers, imageReviews content, prompt, apiKey
     }));
     // Return explicit ai_unavailable status instead of fake assessment
-    send({ 
-      type: "error", 
+    send({
+      type: "error",
       status: "ai_unavailable",
       requestId,
-      assessment: fallbackAssessment(min, gapsForFallback, validatedReviews.reviews, lang) 
+      assessment: fallbackAssessment(min, gapsForFallback, validatedReviews.reviews, lang)
     });
     res.end();
   }
 }
+
+// Raw handler for unit tests (singleton default). Vercel serves the
+// durable-wrapped default: load → restore → run → save (CAS).
+export { handler };
+export default withDurableStore(handler);

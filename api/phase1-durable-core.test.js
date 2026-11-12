@@ -7,6 +7,7 @@ import { deliverRecoveryToken } from './_lib/recoveryDelivery.js';
 import { SKUS } from './_lib/pricing.js';
 import { newDb } from 'pg-mem';
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 
 // Phase 1: durable entitlement core — credit ledger, revocation,
 // recovery reissue, snapshot/restore round-trip, Postgres CAS backend,
@@ -128,6 +129,41 @@ describe('recovery reissue (T9, D3(b))', () => {
     const { entitlement } = store.create({ sku: SKUS.EVALUATION, amountCents: 100 });
     store.registerRecoveryIdentity({ entitlementId: entitlement.id, email: 'x@y.zz' });
     assert.equal(store.reissueToken({ email: 'x@y.zz' }).reason, 'not-paid');
+  });
+
+  it('multiple purchases under one email: no earlier entitlement is orphaned (finding 14)', () => {
+    const store = createEntitlementStore();
+    const first = store.create({
+      sku: SKUS.EVALUATION, amountCents: 100, currency: 'usd', scope: { kind: 'evaluation' },
+    });
+    store.attachSession(first.entitlement.id, 'sess_multi_1');
+    store.markPaidBySession('sess_multi_1', 'evt_multi_1');
+    const second = store.create({
+      sku: SKUS.EVALUATION, amountCents: 100, currency: 'usd', scope: { kind: 'evaluation' },
+    });
+    store.attachSession(second.entitlement.id, 'sess_multi_2');
+    store.markPaidBySession('sess_multi_2', 'evt_multi_2');
+    store.registerRecoveryIdentity({ entitlementId: first.entitlement.id, email: 'multi@example.com' });
+    store.registerRecoveryIdentity({ entitlementId: second.entitlement.id, email: 'multi@example.com' });
+
+    // Reissue targets the most recently registered paid entitlement…
+    const r = store.reissueToken({ email: 'multi@example.com' });
+    assert.equal(r.ok, true);
+    assert.equal(r.entitlementId, second.entitlement.id);
+    assert.ok(store.getByToken(r.token));
+    // …and the earlier purchase keeps its own (still live) token.
+    assert.ok(store.getByToken(first.token));
+    // A legacy single-id snapshot restores into the list form and
+    // the entitlement under it is still reissuable.
+    const snap = store.snapshot();
+    const legacy = JSON.parse(JSON.stringify(snap));
+    const legacyHash = createHash('sha256').update('legacy@example.com').digest('hex');
+    legacy.recoveryIdentities = [[legacyHash, second.entitlement.id]];
+    const restored = createEntitlementStore();
+    restored.restore(legacy);
+    const rr = restored.reissueToken({ email: 'legacy@example.com' });
+    assert.equal(rr.ok, true);
+    assert.equal(rr.entitlementId, second.entitlement.id);
   });
 
   it('delivery interface is provider-independent and stubbed until wired', async () => {

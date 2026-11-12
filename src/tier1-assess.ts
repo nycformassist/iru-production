@@ -1265,19 +1265,37 @@ export interface FactRecord {
   facts: Record<string, Tier1Fact>;
 }
 
-// Build a fact record from raw answers, tracking corrections
+// Build a fact record from raw answers, tracking corrections.
+// `answers` is keyed by question `id` (the assessment functions read
+// answers by `id`). When `questions` is provided, each answer is stored
+// under its `factId` (falling back to `id`) — the Python binders and
+// `projectForForm` look facts up by `factId`, so keying by `id` left
+// N-400 / I-130 / I-485 / I-90 fields blank on the generated PDF
+// (Carbon Pass 1 finding 5, verified 2026-11-11). The `id` field of each
+// fact is the factId too. Callers that omit `questions` keep the old
+// behaviour (facts keyed by the answer key).
+// NOTE: there is deliberately NO n400_p9_* carve-out keeping those keyed
+// by `id`: no assessment function reads `n400_p9_*` keys, and the N-400
+// binder maps by factId (`n400_p9_ui_mapping.json`), so the Part 9
+// answers must also be translated to their factIds to fill.
 export function buildFactRecord(
   answers: Record<string, any>,
   prior?: FactRecord,
+  questions?: { id: string; factId?: string }[],
 ): FactRecord {
   const facts: Record<string, Tier1Fact> = {};
   const now = Date.now();
+  const factKey = new Map<string, string>();
+  if (questions) {
+    for (const q of questions) factKey.set(q.id, q.factId || q.id);
+  }
   for (const [id, value] of Object.entries(answers)) {
-    const prev = prior?.facts[id];
+    const key = factKey.get(id) || id;
+    const prev = prior?.facts[key];
     if (prev && JSON.stringify(prev.value) !== JSON.stringify(value)) {
       // Correction: applicant changed their answer
-      facts[id] = {
-        id, value,
+      facts[key] = {
+        id: key, value,
         source: 'corrected',
         confidence: 0.9,  // Corrected answers slightly less confident
         status: 'corrected',
@@ -1285,10 +1303,10 @@ export function buildFactRecord(
         updatedAt: now,
       };
     } else if (prev) {
-      facts[id] = prev;  // Unchanged, preserve provenance
+      facts[key] = prev;  // Unchanged, preserve provenance
     } else {
-      facts[id] = {
-        id, value,
+      facts[key] = {
+        id: key, value,
         source: 'applicant-typed',
         confidence: 1.0,
         status: 'provided',

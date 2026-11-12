@@ -122,6 +122,10 @@ export const I765_STEPS = [
 
 export const I765_FORM_INFO = {
   formNumber: 'I-765',
-  title: { EN: 'Application for Employment Authorization', ES: 'Solicitud de autorización de empleo', ZH: '就业授权申请', HT: 'Demann Otorizasyon Travay', AR: 'طلب تصريح العمل' },
-  downloadUrl: 'https://www.uscis.gov/i-765',
+  title: 'Application for Employment Authorization',
+  titles: { ES: 'Solicitud de autorización de empleo', ZH: '就业授权申请', HT: 'Demann Otorizasyon Travay', AR: 'طلب تصريح العمل' },
+  edition: '08/21/25',
+  pdfUrl: 'https://www.uscis.gov/sites/default/files/document/forms/i-765.pdf',
+  instructionsUrl: 'https://www.uscis.gov/sites/default/files/document/forms/i-765instr.pdf',
+  fillable: false,
 };

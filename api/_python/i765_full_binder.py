@@ -32,10 +32,10 @@ def _semantic_to_fact(semantic):
         'unit': 'current_unit',
         'in_care_of': 'current_care_of',
     }
-    # Form-specific prefixes
-    if 'i765' == 'i765':
-        if semantic == 'a_number': return 'i765_a_number'
-        if semantic == 'date_of_birth': return 'i765_dob'
+    # Form-specific prefixes (the "if 'i765' == 'i765':" wrapper was
+    # always true and was removed, finding 23; the body is unchanged).
+    if semantic == 'a_number': return 'i765_a_number'
+    if semantic == 'date_of_birth': return 'i765_dob'
     return mapping.get(semantic, semantic)
 
 def _raw_value(facts, fid):

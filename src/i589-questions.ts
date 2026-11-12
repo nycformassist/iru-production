@@ -162,6 +162,10 @@ export const I589_STEPS = [
 
 export const I589_FORM_INFO = {
   formNumber: 'I-589',
-  title: { EN: 'Application for Asylum and for Withholding of Removal', ES: 'Solicitud de asilo y de suspensión de expulsión', ZH: '庇护和暂缓递解申请', HT: 'Demann Azil ak pou Anpeche Depòtasyon', AR: 'طلب اللجوء ووقف الترحيل' },
-  downloadUrl: 'https://www.uscis.gov/i-589',
+  title: 'Application for Asylum and for Withholding of Removal',
+  titles: { ES: 'Solicitud de asilo y de suspensión de expulsión', ZH: '庇护和暂缓递解申请', HT: 'Demann Azil ak pou Anpeche Depòtasyon', AR: 'طلب اللجوء ووقف الترحيل' },
+  edition: '07/28/26',
+  pdfUrl: 'https://www.uscis.gov/sites/default/files/document/forms/i-589.pdf',
+  instructionsUrl: 'https://www.uscis.gov/sites/default/files/document/forms/i-589instr.pdf',
+  fillable: false,
 };

@@ -89,9 +89,12 @@ AUTO_REGISTRY = {
             "american_indian_alaska_native": F(3, "Pt3Line2_Race_AmericanIndianAlaskaNative[0]"),
             "native_hawaiian_pacific_islander": F(3, "Pt3Line2_Race_NativeHawaiianOtherPacificIslander[0]"),
         }},
-    # Height: single text answer; binder must parse feet/inches and set BOTH
-    # comboboxes below (Pt3Line3_HeightInches[0] currently unmapped).
-    "i130_petitioner_height": {"kind": "text", "field": F(3, "Pt3Line3_HeightFeet[0]")},
+    # Height: single text answer ("5'8\""); the binder parses feet/inches
+    # and sets BOTH comboboxes (Carbon Pass 1 finding 20). The old
+    # kind:"text" mapping wrote the raw "5'8\"" into the feet-only box.
+    "i130_petitioner_height": {
+        "kind": "height",
+        "fields": [F(3, "Pt3Line3_HeightFeet[0]"), F(3, "Pt3Line3_HeightInches[0]")]},
     # Weight: 3 digit fields — use weight_digits kind (see biographic.py binder)
     "i130_petitioner_weight": {
         "kind": "weight_digits",
@@ -422,6 +425,5 @@ PRIOR_PETITION_REGISTRY = {
     },
 }
 
-print(f"AUTO: {len(AUTO_REGISTRY)} fact mappings")
-print(f"Question groups defined: NAME, BIRTH, USCIS, RELATIONSHIP, MARITAL, PRIOR_PETITION")
-print("+ ADDRESS (101 fields) + BIOGRAPHIC (30 fields) from existing modules")
+# (Module import is silent: the summary prints that used to run here
+# on every cold-start import were removed, Carbon Pass 1 finding 21d.)

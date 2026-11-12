@@ -24,7 +24,10 @@ describe('App.tsx regression guards', () => {
     const body = app.slice(start, start + 1200);
     for (const needle of [
       'setAssessment(null)', 'setAiUnavailable(false)', 'setResourceResult(null)',
-      'setFactRecord(null)', 'setFormDraftStore(emptyFormDraftStore())',
+      // Carbon Pass 1 finding 2: factRecord is never null (PHASE3
+      // repeating groups need a live record); Start Over resets it to
+      // a fresh EMPTY record, not null.
+      'setFactRecord(createFactRecord(', 'setFormDraftStore(emptyFormDraftStore())',
       "setStage('LANG')", 'setAnswers({})',
     ]) {
       assert.ok(body.includes(needle), `handleStartOver must include ${needle}`);

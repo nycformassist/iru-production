@@ -288,11 +288,25 @@ describe('language persistence (WS2)', () => {
       const text = readFileSync(fp, 'utf8');
       for (const m of text.matchAll(/localStorage\.(getItem|setItem|removeItem)\(([^)]*)\)/g)) {
         const arg = m[2].trim();
+        // The storage key is the FIRST argument; setItem's second
+        // argument (the value) must not affect the key check.
+        const firstArg = arg.split(',')[0].trim();
         // Direct literal key, key constant, or a helper parameter (the
         // helpers in paywall.tsx take `key` and are called only with
         // the allowed constants defined in that file).
-        const isHelperParam = /^key(,|\))/.test(arg) || arg === 'key';
-        const ok = isHelperParam || allowedKeys.some((k) => arg.includes(k));
+        const isHelperParam = /^key(,|\))/.test(firstArg) || firstArg === 'key';
+        let ok = isHelperParam || allowedKeys.some((k) => firstArg.includes(k));
+        // A bare variable whose definition in this file builds the key
+        // from an allowed prefix (e.g. Tier1Flow's storageKey =
+        // `iru_tier1_${staffCaseId}` — Carbon Pass 1 finding 6 scopes
+        // the autosave per staff case, still inside the allowed
+        // iru_tier1_ namespace). Resolve the definition and check its
+        // literal prefix; a variable with no resolvable allowed prefix
+        // still fails.
+        if (!ok && /^[A-Za-z_$][\w$]*$/.test(firstArg)) {
+          const def = text.match(new RegExp(`(?:const|let|var)\\s+${firstArg}\\s*=\\s*([^;]+)`));
+          if (def) ok = allowedKeys.some((k) => def[1].includes(k));
+        }
         assert.ok(ok, `${f}: localStorage used with non-allowed key: ${m[0]}`);
       }
       // If a file uses the helper-param pattern, verify it defines only

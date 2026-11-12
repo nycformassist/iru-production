@@ -21,6 +21,8 @@ import { createLimiter, clientIp } from "./_lib/ratelimit.js";
 import { EVIDENCE_KEYS } from "./_lib/evidence.js";
 import { sanitizeVisionReview, resolveReviewAssociation } from "./_lib/vision.js";
 import { entitlementStore } from "./_lib/entitlement.js";
+import { isInstitutionalServer } from "./_lib/server-mode.js";
+import { withDurableStore } from "./_lib/withStore.js";
 
 // Re-exported for tests and for /api/analyze (shared validation contract).
 export { sanitizeVisionReview };
@@ -100,7 +102,7 @@ function withTimeout(promise, ms) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-export default async function handler(req, res, store = entitlementStore) {
+async function handler(req, res, store = entitlementStore) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -131,7 +133,10 @@ export default async function handler(req, res, store = entitlementStore) {
   // for that form, or a readiness grant for it); otherwise any paid
   // 'forms'/'readiness' entitlement is accepted scope-agnostically.
   // Paywall off → unchanged behavior. No consumption.
-  if (process.env.PAYWALL_ENABLED === 'true') {
+  // INSTITUTIONAL MODE: the organization holds access, so the consumer
+  // paid-access gate is skipped (same pattern as assessment-save.js /
+  // generate-form.js).
+  if (process.env.PAYWALL_ENABLED === 'true' && !isInstitutionalServer()) {
     const reviewToken = (req.headers && req.headers['x-entitlement-token']) || '';
     let reviewPeek;
     if (typeof body.formId === 'string' && body.formId) {
@@ -253,6 +258,11 @@ export default async function handler(req, res, store = entitlementStore) {
   // NOTE: no finally-block retention — the image existed only in request
   // memory. See PRIVACY_REVIEW.md for provider-side retention limits.
 }
+
+// Raw handler for unit tests (singleton default). Vercel serves the
+// durable-wrapped default: load → restore → run → save (CAS).
+export { handler };
+export default withDurableStore(handler);
 
 /** Magic-byte signatures for the allowed image types. Never throws. */
 function imageSignatureMatches(bytes, mimeType) {

@@ -421,6 +421,20 @@ describe('fail-closed configuration', () => {
     assert.equal(mod.resolveAppOrigin({ IRU_APP_ORIGIN: 'https://iru.example.org' }).ok, true);
   });
 
+  it('centralized Stripe key guard (finding 18): test keys pass, sk_live/rk_live refused, missing refused', async () => {
+    const mod = await import('./_lib/paymentConfig.js');
+    assert.equal(mod.getTestStripeSecretKey({ IRU_STRIPE_KEY: 'sk_test_abc' }).ok, true);
+    assert.equal(mod.getTestStripeSecretKey({ IRU_STRIPE_KEY: 'rk_test_abc' }).ok, true);
+    assert.equal(mod.getTestStripeSecretKey({ STRIPE_SECRET_KEY: 'sk_test_xyz' }).ok, true);
+    assert.equal(mod.getTestStripeSecretKey({ IRU_STRIPE_KEY: 'sk_live_abc' }).reason, 'live-key-refused');
+    assert.equal(mod.getTestStripeSecretKey({ IRU_STRIPE_KEY: 'sk_live' }).reason, 'live-key-refused');
+    assert.equal(mod.getTestStripeSecretKey({ IRU_STRIPE_KEY: 'rk_live_abc' }).reason, 'live-key-refused');
+    assert.equal(mod.getTestStripeSecretKey({ STRIPE_SECRET_KEY: 'rk_live_abc' }).reason, 'live-key-refused');
+    assert.equal(mod.getTestStripeSecretKey({}).reason, 'missing-key');
+    // IRU_STRIPE_KEY wins over STRIPE_SECRET_KEY.
+    assert.equal(mod.getTestStripeSecretKey({ IRU_STRIPE_KEY: 'sk_test_a', STRIPE_SECRET_KEY: 'sk_live_b' }).ok, true);
+  });
+
   it('the real Stripe path never calls Stripe when the origin is unset (no localhost fallback)', async () => {
     const savedGateway = globalThis.__IRU_STRIPE_GATEWAY__;
     const savedOrigin = process.env.IRU_APP_ORIGIN;

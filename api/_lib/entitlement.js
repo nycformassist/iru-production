@@ -68,9 +68,13 @@ export function createEntitlementStore(now = () => Date.now()) {
   // amountCents, entitlementId, createdAt }.
   const ledger = [];
   // Recovery identities (Phase 1, D3(b)): email SHA-256 hash ->
-  // entitlement id. No raw emails at rest. The reissue flow looks up
-  // by hash; token delivery is a provider-independent interface
-  // (stubbed until Resend/another provider is wired).
+  // LIST of entitlement ids, oldest first. No raw emails at rest.
+  // A list, not a single id (Carbon Pass 1, finding 14): a buyer
+  // who makes multiple purchases with the same email must keep
+  // every entitlement recoverable — overwriting orphaned earlier
+  // ones. The reissue flow looks up by hash; token delivery is a
+  // provider-independent interface (stubbed until Resend/another
+  // provider is wired).
   const recoveryIdentities = new Map();
 
   /** Raw record read: no lazy-expiry flip (callers decide the semantics). */
@@ -403,35 +407,47 @@ export function createEntitlementStore(now = () => Date.now()) {
     /**
      * Register an email hash for no-password recovery (D3(b)). Called
      * at checkout time when the buyer optionally provides an email.
-     * Only the SHA-256 hash is kept — no raw emails at rest.
+     * Only the SHA-256 hash is kept — no raw emails at rest. Appends
+     * to the per-email list: a second purchase under the same email
+     * must not orphan the first (finding 14).
      */
     registerRecoveryIdentity({ entitlementId, email }) {
       if (!entitlementId || !email || typeof email !== 'string') return { ok: false };
       const emailHash = createHash('sha256').update(email.trim().toLowerCase()).digest('hex');
-      recoveryIdentities.set(emailHash, entitlementId);
+      const ids = recoveryIdentities.get(emailHash) || [];
+      if (!ids.includes(entitlementId)) ids.push(entitlementId);
+      recoveryIdentities.set(emailHash, ids);
       return { ok: true };
     },
 
     /**
      * Reissue a lost token via email hash (T9). Invalidates the old
-     * token and returns a fresh one-time raw token. Delivery of the
-     * token to the buyer is a provider-independent interface
+     * token and returns a fresh one-time raw token. When several
+     * entitlements share one email, the most recently registered
+     * PAID, non-revoked one is reissued. Delivery of the token to
+     * the buyer is a provider-independent interface
      * (see lib/recoveryDelivery.js — stubbed until a provider is wired).
      */
     reissueToken({ email }) {
       if (!email || typeof email !== 'string') return { ok: false, reason: 'invalid-email' };
       const emailHash = createHash('sha256').update(email.trim().toLowerCase()).digest('hex');
-      const entitlementId = recoveryIdentities.get(emailHash);
-      if (!entitlementId) return { ok: false, reason: 'unknown-identity' };
-      const ent = byId.get(entitlementId);
-      if (!ent || ent.paidAt == null) return { ok: false, reason: 'not-paid' };
-      if (ent.state === 'REVOKED') return { ok: false, reason: 'revoked' };
-      // Invalidate the old token, issue a fresh one.
-      byTokenHash.delete(ent.tokenHash);
-      const token = randomBytes(24).toString('base64url');
-      ent.tokenHash = hashToken(token);
-      byTokenHash.set(ent.tokenHash, ent.id);
-      return { ok: true, token, entitlementId: ent.id };
+      const entitlementIds = recoveryIdentities.get(emailHash);
+      if (!entitlementIds || entitlementIds.length === 0) return { ok: false, reason: 'unknown-identity' };
+      // Most recent first: a buyer with several purchases recovers
+      // the latest one; earlier ones stay recoverable via their own
+      // reissue once this one is resolved (they are never orphaned).
+      for (let i = entitlementIds.length - 1; i >= 0; i--) {
+        const ent = byId.get(entitlementIds[i]);
+        if (!ent || ent.paidAt == null) continue;
+        if (ent.state === 'REVOKED') continue;
+        // Invalidate the old token, issue a fresh one.
+        byTokenHash.delete(ent.tokenHash);
+        const token = randomBytes(24).toString('base64url');
+        ent.tokenHash = hashToken(token);
+        byTokenHash.set(ent.tokenHash, ent.id);
+        return { ok: true, token, entitlementId: ent.id };
+      }
+      return { ok: false, reason: 'not-paid' };
     },
 
     /** Durable, observable payment exceptions (copies, newest last). */
@@ -496,7 +512,11 @@ export function createEntitlementStore(now = () => Date.now()) {
       for (const e of snap.processedEvents || []) processedEvents.add(e);
       for (const e of snap.exceptions || []) exceptions.push({ ...e });
       for (const [k, v] of snap.intents || []) intents.set(k, { ...v });
-      for (const [k, v] of snap.recoveryIdentities || []) recoveryIdentities.set(k, v);
+      // Recovery identities are lists of entitlement ids; accept a
+      // legacy single-id string (pre-finding-14 snapshots) by wrapping it.
+      for (const [k, v] of snap.recoveryIdentities || []) {
+        recoveryIdentities.set(k, Array.isArray(v) ? [...v] : [v]);
+      }
     },
 
     hasProcessedEvent(eventId) {

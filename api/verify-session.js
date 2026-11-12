@@ -13,12 +13,9 @@ import { entitlementStore } from './_lib/entitlement.js';
 import { withDurableStore } from './_lib/withStore.js';
 import { createLimiter, clientIp } from './_lib/ratelimit.js';
 import { assertPaidStoreAvailable } from './_lib/paymentStore.js';
+import { getTestStripeSecretKey } from './_lib/paymentConfig.js';
 
 const limiter = createLimiter({ capacity: 10, windowMs: 10 * 60 * 1000 });
-
-function getSecretKey() {
-  return process.env.IRU_STRIPE_KEY || process.env.STRIPE_SECRET_KEY || '';
-}
 
 async function stripeGetSession(secretKey, sessionId) {
   const resp = await fetch(`https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(sessionId)}`, {
@@ -41,10 +38,15 @@ async function handler(req, res, store = entitlementStore) {
   if (!storeGate.ok) {
     return res.status(503).json({ error: 'Verification is not configured.' });
   }
-  const secretKey = getSecretKey();
-  if (!secretKey || secretKey.startsWith('sk_live_')) {
+  // Centralized Stripe key guard (lib/paymentConfig.js): identical
+  // retrieval + live-key rejection as checkout.js (blocks sk_live*
+  // AND rk_live*; falls back to STRIPE_SECRET_KEY the same way).
+  // Test-mode only — a live or missing key means "not configured".
+  const keyGate = getTestStripeSecretKey();
+  if (!keyGate.ok) {
     return res.status(503).json({ error: 'Verification is not configured.' });
   }
+  const secretKey = keyGate.secretKey;
   const body = typeof req.body === 'string' ? safeParse(req.body) : (req.body || {});
   const sessionId = body && typeof body.sessionId === 'string' ? body.sessionId.trim() : '';
   if (!sessionId || !sessionId.startsWith('cs_')) {

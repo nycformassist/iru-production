@@ -76,7 +76,7 @@ test('send-report: missing RESEND_API_KEY returns 503 not-configured (never send
     const res = mockRes();
     await sendReport(mockReq({
       ip: '10.0.0.3',
-      body: { org: 'test', staffEmail: 'healthcarebyvalentine@gmail.com', formNumber: 'I-589', html: '<p>report</p>' },
+      body: { org: 'test', formNumber: 'I-589', report: { formNumber: 'I-589', executiveSummary: 'summary' } },
     }), res);
     assert.equal(res.statusCode, 503);
     assert.equal(res.body.reason, 'not-configured');
@@ -85,13 +85,28 @@ test('send-report: missing RESEND_API_KEY returns 503 not-configured (never send
   }
 });
 
-test('send-report: invalid staff email is rejected (unlisted org, so the client address is used)', async () => {
+test('send-report: unlisted org is rejected — no client-supplied recipient fallback', async () => {
   process.env.RESEND_API_KEY = 're_test_key';
   try {
     const res = mockRes();
     await sendReport(mockReq({
       ip: '10.0.0.4',
-      body: { org: 'some-future-org', staffEmail: 'not-an-email', formNumber: 'I-589', html: '<p>report</p>' },
+      body: { org: 'some-future-org', staffEmail: 'attacker@example.com', formNumber: 'I-589', report: { formNumber: 'I-589', executiveSummary: 'x' } },
+    }), res);
+    assert.equal(res.statusCode, 400);
+    assert.match(res.body.error, /No staff delivery is configured/);
+  } finally {
+    delete process.env.RESEND_API_KEY;
+  }
+});
+
+test('send-report: omitted org is rejected', async () => {
+  process.env.RESEND_API_KEY = 're_test_key';
+  try {
+    const res = mockRes();
+    await sendReport(mockReq({
+      ip: '10.0.0.4b',
+      body: { formNumber: 'I-589', report: { formNumber: 'I-589', executiveSummary: 'x' } },
     }), res);
     assert.equal(res.statusCode, 400);
   } finally {
@@ -105,7 +120,7 @@ test('send-report: missing report content is rejected', async () => {
     const res = mockRes();
     await sendReport(mockReq({
       ip: '10.0.0.5',
-      body: { org: 'test', staffEmail: 'healthcarebyvalentine@gmail.com', formNumber: 'I-589', html: '' },
+      body: { org: 'test', formNumber: 'I-589' },
     }), res);
     assert.equal(res.statusCode, 400);
   } finally {
@@ -119,7 +134,7 @@ test('send-report: unknown form number is rejected', async () => {
     const res = mockRes();
     await sendReport(mockReq({
       ip: '10.0.0.6',
-      body: { org: 'test', staffEmail: 'healthcarebyvalentine@gmail.com', formNumber: 'I-999', html: '<p>report</p>' },
+      body: { org: 'test', formNumber: 'I-999', report: { formNumber: 'I-999', executiveSummary: 'x' } },
     }), res);
     assert.equal(res.statusCode, 400);
   } finally {
@@ -127,7 +142,7 @@ test('send-report: unknown form number is rejected', async () => {
   }
 });
 
-test('send-report: registry org resolves server-side and Resend is called with the test address + browser UA', async () => {
+test('send-report: registry org resolves server-side and Resend is called with the test address + server-rendered HTML', async () => {
   process.env.RESEND_API_KEY = 're_test_key';
   const calls = [];
   const realFetch = globalThis.fetch;
@@ -137,7 +152,9 @@ test('send-report: registry org resolves server-side and Resend is called with t
   };
   try {
     const res = mockRes();
-    // Client supplies a WRONG address; the registry (org=test) must win.
+    // Client supplies a WRONG address and raw HTML with an injection
+    // attempt; the registry must win and the HTML must be rendered
+    // server-side from structured data with everything escaped.
     await sendReport(mockReq({
       ip: '10.0.0.7',
       body: {
@@ -145,7 +162,17 @@ test('send-report: registry org resolves server-side and Resend is called with t
         staffEmail: 'attacker@example.com',
         participantName: 'Maria G.',
         formNumber: 'I-589',
-        html: '<p>report</p>',
+        html: '<p>report</p><script>alert(1)</script>',
+        report: {
+          formNumber: 'I-589',
+          formTitle: 'Application for Asylum',
+          participantName: 'Maria G.',
+          overallScore: 0.8,
+          overallBand: 'Strong',
+          executiveSummary: '<script>alert(1)</script> Mostly ready.',
+          sections: [{ section: 'Identity', score: 0.9, band: 'Strong' }],
+          blockers: [{ t: 'Missing <b>doc</b>', d: 'Provide it.' }],
+        },
       },
     }), res);
     assert.equal(res.statusCode, 200);
@@ -159,7 +186,12 @@ test('send-report: registry org resolves server-side and Resend is called with t
     assert.equal(sent.from, 'IRU Intake <intake@smrgconsulting.com>');
     assert.match(sent.subject, /I-589/);
     assert.match(sent.subject, /Maria G\./);
-    assert.equal(sent.html, '<p>report</p>');
+    // Client HTML is ignored; the server rendered the structured report.
+    assert.doesNotMatch(sent.html, /<p>report<\/p>/);
+    assert.doesNotMatch(sent.html, /<script>/);
+    assert.match(sent.html, /&lt;script&gt;alert\(1\)&lt;\/script&gt; Mostly ready\./);
+    assert.match(sent.html, /Missing &lt;b&gt;doc&lt;\/b&gt;/);
+    assert.match(sent.html, /80% — Strong/);
     // Browser User-Agent header (Cloudflare 1010 lesson).
     assert.match(calls[0].opts.headers['User-Agent'], /Mozilla\/5\.0/);
     assert.equal(calls[0].opts.headers.Authorization, 'Bearer re_test_key');
@@ -169,7 +201,7 @@ test('send-report: registry org resolves server-side and Resend is called with t
   }
 });
 
-test('send-report: unlisted org falls back to the client-provided (device-configured) staff email', async () => {
+test('send-report: unlisted org is rejected even with a valid client staff email (no fallback)', async () => {
   process.env.RESEND_API_KEY = 're_test_key';
   const calls = [];
   const realFetch = globalThis.fetch;
@@ -185,12 +217,11 @@ test('send-report: unlisted org falls back to the client-provided (device-config
         org: 'some-future-org',
         staffEmail: 'healthcarebyvalentine@gmail.com',
         formNumber: 'I-765',
-        html: '<p>report</p>',
+        report: { formNumber: 'I-765', executiveSummary: 'x' },
       },
     }), res);
-    assert.equal(res.statusCode, 200);
-    const sent = JSON.parse(calls[0].opts.body);
-    assert.deepEqual(sent.to, ['healthcarebyvalentine@gmail.com']);
+    assert.equal(res.statusCode, 400);
+    assert.equal(calls.length, 0);
   } finally {
     globalThis.fetch = realFetch;
     delete process.env.RESEND_API_KEY;
@@ -209,7 +240,7 @@ test('send-report: Resend rejection is surfaced, not rewritten into a false succ
     const res = mockRes();
     await sendReport(mockReq({
       ip: '10.0.0.9',
-      body: { org: 'test', staffEmail: 'healthcarebyvalentine@gmail.com', formNumber: 'I-589', html: '<p>report</p>' },
+      body: { org: 'test', formNumber: 'I-589', report: { formNumber: 'I-589', executiveSummary: 'x' } },
     }), res);
     assert.equal(res.statusCode, 502);
     assert.match(res.body.error, /testing emails/);
@@ -231,7 +262,7 @@ test('send-report: per-IP rate limit blocks the 6th send in 10 minutes', async (
       const res = mockRes();
       await sendReport(mockReq({
         ip,
-        body: { org: 'test', staffEmail: 'healthcarebyvalentine@gmail.com', formNumber: 'I-589', html: '<p>report</p>' },
+        body: { org: 'test', formNumber: 'I-589', report: { formNumber: 'I-589', executiveSummary: 'x' } },
       }), res);
       statuses.push(res.statusCode);
     }

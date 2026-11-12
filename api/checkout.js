@@ -34,7 +34,7 @@ import { entitlementStore } from './_lib/entitlement.js';
 import { withDurableStore } from './_lib/withStore.js';
 import { createLimiter, clientIp } from './_lib/ratelimit.js';
 import { SKUS } from './_lib/pricing.js';
-import { resolveAppOrigin, checkPaywallAgreement } from './_lib/paymentConfig.js';
+import { resolveAppOrigin, checkPaywallAgreement, getTestStripeSecretKey } from './_lib/paymentConfig.js';
 import { assertPaidStoreAvailable } from './_lib/paymentStore.js';
 import { pricePurchase, priceReadiness, FORMPREP_SKU, READINESS_SKU } from './_lib/checkout-pricing.js';
 
@@ -145,15 +145,18 @@ async function handler(req, res, store = entitlementStore) {
     return res.status(413).json({ error: 'Request too large.' });
   }
 
-  const secretKey = process.env.IRU_STRIPE_KEY || '';
-  if (!secretKey) {
+  // Centralized Stripe key guard (lib/paymentConfig.js): identical
+  // retrieval + live-key rejection as verify-session.js. Test-mode only.
+  const keyGate = getTestStripeSecretKey();
+  if (!keyGate.ok && keyGate.reason === 'missing-key') {
     return res.status(503).json({ error: 'Checkout is not configured.' });
   }
-  if (secretKey.startsWith('sk_live') || secretKey.startsWith('rk_live')) {
+  if (!keyGate.ok) {
     // Owner gate: live payments require separate explicit authorization.
     console.error('[iru] checkout refused: live-mode Stripe key present in a test-mode-only build');
     return res.status(500).json({ error: 'Live payments are not authorized in this build.' });
   }
+  const secretKey = keyGate.secretKey;
 
   const body = typeof req.body === 'string' ? safeParse(req.body) : (req.body || {});
   if (!body) return res.status(400).json({ error: 'Invalid submission.' });
