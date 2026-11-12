@@ -997,6 +997,27 @@ export function RecoverFlow({ lang, onNavigate }: Props) {
       const data = await resp.json().catch(() => null);
       if (!resp.ok || !data || !data.token) throw new Error('not-found');
       setStoredToken(data.token);
+      // FIX (finding 4, DTC Carbon 2026-11-12): recovery used to write
+      // only iru_entitlement_token, leaving iru_form_tokens empty — a
+      // recovered Premium buyer was silently downgraded to
+      // Readiness-only because hasPrepEntitlement reads the per-form
+      // map. Hydrate the per-form prep tokens from the entitlement's
+      // scope so Premium works on this device. Hydration is best-effort:
+      // the recovery itself already succeeded.
+      try {
+        const statusResp = await fetch('/api/entitlement-status', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: data.token }),
+        });
+        const status = await statusResp.json().catch(() => null);
+        const scope = status && status.entitlement && status.entitlement.scope;
+        if (statusResp.ok && scope && scope.kind === 'forms' && Array.isArray(scope.forms)) {
+          for (const formId of scope.forms) {
+            if (typeof formId === 'string' && formId) setFormToken(formId, data.token);
+          }
+        }
+      } catch { /* hydration failed — generic token still recovered */ }
       setDone(true);
     } catch {
       setError(pt('recoverFail', lang));

@@ -2,7 +2,7 @@
 // Supports EN/ES/ZH/HT/AR via the labels map on each question.
 import { useState, useEffect } from 'react';
 import type { CSSProperties } from 'react';
-import { scoreAssessment, applyIntelligence, buildFactRecord, type ScoredAssessment, type FactRecord } from './tier1-assess';
+import { scoreAssessment, applyIntelligence, buildFactRecord, buildExplanationDrafts, markConflicts, type ScoredAssessment, type FactRecord, type ExplanationDraft } from './tier1-assess';
 import PathwayGuidance from './components/PathwayGuidance';
 import PathwayCheckoutSummary from './components/PathwayCheckoutSummary';
 import { FORMS, getActiveCatalog } from '../api/_lib/catalog.js';
@@ -161,7 +161,19 @@ export default function Tier1Flow({ formKey, questions, steps, info, lang, asses
   useEffect(() => {
     persistAnswers(answers);
   }, [answers]);
-  const [rgData, setRgData] = useState<Record<string, any[]>>({});
+  // FIX (finding 12, DTC Carbon 2026-11-12): hydrate the repeating-group
+  // editor from restored answers on mount. The old `{}` meant a
+  // returning session's entries were invisible in the editor while the
+  // stale arrays stayed in `answers` and fed stale intelligence.
+  const [rgData, setRgData] = useState<Record<string, any[]>>(() => {
+    const init: Record<string, any[]> = {};
+    for (const q of questions) {
+      if (q.type === 'repeating_group' && q.groupId && Array.isArray(answers[q.id])) {
+        init[q.groupId] = answers[q.id];
+      }
+    }
+    return init;
+  });
   const [rgEditing, setRgEditing] = useState<number | null>(null);
   const [textVal, setTextVal] = useState('');
   const [radioVal, setRadioVal] = useState('');
@@ -226,9 +238,21 @@ export default function Tier1Flow({ formKey, questions, steps, info, lang, asses
     // token is refused 402 by the fill endpoint). A Readiness-only buyer
     // gets the basic assessment — no contradiction intelligence, no
     // narrative drafts, no adaptive screening.
-    const withIntel = applyIntelligence(formKey, answers, basic, { premium: hasPrepEntitlement(formKey) });
-    const r: ScoredAssessment = scoreAssessment(withIntel, info.formNumber, [], factRecord);
-    return <Tier1Report info={info} lang={lang} result={r} questions={questions} steps={steps} answers={answers} factRecord={factRecord} onExit={onExit} onFormprepCheckout={onFormprepCheckout} />;
+    const isPremium = hasPrepEntitlement(formKey);
+    const withIntel = applyIntelligence(formKey, answers, basic, { premium: isPremium });
+    // FIX (finding 13): mark the facts behind CONFLICT blockers as
+    // conflicted BEFORE scoring, so the 'Conflicted' badges render and
+    // the confidence-weighted score reflects them.
+    const conflictFactIds = withIntel.blockers
+      .filter(b => b.t.startsWith('CONFLICT: '))
+      .flatMap(b => b.factIds || []);
+    const markedRecord = conflictFactIds.length > 0 ? markConflicts(factRecord, conflictFactIds) : factRecord;
+    const r: ScoredAssessment = scoreAssessment(withIntel, info.formNumber, [], markedRecord);
+    // FIX (finding 11): pass the individual explanation drafts to the
+    // report when Premium applies, so the applicant can actually review
+    // them instead of only seeing the summary warning.
+    const drafts: ExplanationDraft[] = isPremium ? buildExplanationDrafts(formKey, answers) : [];
+    return <Tier1Report info={info} lang={lang} result={r} questions={questions} steps={steps} answers={answers} factRecord={markedRecord} drafts={drafts} onExit={onExit} onFormprepCheckout={onFormprepCheckout} />;
   }
 
   const q = visible[qi];
@@ -239,7 +263,13 @@ export default function Tier1Flow({ formKey, questions, steps, info, lang, asses
     if (q.type === 'repeating_group') {
       const entries = rgData[q.groupId!] || [];
       if (q.required && entries.length === 0) { alert(UI.atLeastOne[lang]); return false; }
-      if (entries.length) setAnswers(a => ({ ...a, [q.id]: entries }));
+      // FIX (finding 12): deleting all entries must clear answers[q.id],
+      // or the stale array keeps feeding intelligence conflicts.
+      setAnswers(a => {
+        const n = { ...a };
+        if (entries.length) n[q.id] = entries; else delete n[q.id];
+        return n;
+      });
       return true;
     }
     const val = q.type === 'radio' || q.type === 'select' ? radioVal : textVal.trim();
@@ -386,7 +416,7 @@ function RepeatingGroupEditor({ q, lang, rgData, setRgData, rgEditing, setRgEdit
   );
 }
 
-function Tier1Report({ info, lang, result, questions, steps, answers, factRecord, onExit, onFormprepCheckout }: any) {
+function Tier1Report({ info, lang, result, questions, steps, answers, factRecord, drafts, onExit, onFormprepCheckout }: any) {
   const r = result as ScoredAssessment;
   // Pathway Add at completion: shows the checkout summary inline
   // (lines, discount/bundle, total) instead of the guidance panel.
@@ -465,6 +495,21 @@ function Tier1Report({ info, lang, result, questions, steps, answers, factRecord
       {r.warnings.length > 0 && (
         <div style={secStyle}><h2>{UI.worthReviewing[lang]}</h2>
           {r.warnings.map((w: any, i: number) => <div key={i}><p><strong style={{ color: '#b45309' }}>⚠️ {w.t}</strong></p><p style={narrStyle}>{w.d}</p></div>)}
+        </div>
+      )}
+      {/* FIX (finding 11, DTC Carbon 2026-11-12): render the individual
+          explanation drafts — before this fix only the summary warning
+          ("2 explanation drafts prepared") was shown and the applicant
+          never saw the draft text to review or copy. */}
+      {drafts && drafts.length > 0 && (
+        <div style={secStyle}><h2>Explanation drafts — review required</h2>
+          <p style={{ ...narrStyle, color: '#64748b' }}>Premium narrative preparation drafted the explanations below from your own answers only — no facts were added. Review, correct, and supply the date, place, and outcome for each before use.</p>
+          {drafts.map((d: ExplanationDraft, i: number) => (
+            <div key={i} style={{ margin: '1rem 0', padding: '0.75rem 1rem', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8 }}>
+              <p style={{ margin: '0 0 0.25rem', fontWeight: 600 }}>{d.formSection} — {d.questionRef}</p>
+              <p style={{ ...narrStyle, margin: 0 }}>{d.draftText}</p>
+            </div>
+          ))}
         </div>
       )}
       {r.complete.length > 0 && (
@@ -578,7 +623,7 @@ function Tier1Report({ info, lang, result, questions, steps, answers, factRecord
       )}
       <div style={{ display: 'flex', gap: '1rem', margin: '1.25rem 0' }}>
         <button onClick={onExit} style={btnStyle}>{UI.startOver[lang]}</button>
-        <a href={info.pdfUrl} target="_blank" rel="noopener"><button style={{ ...btnStyle, background: '#1a56db', color: '#fff', borderColor: '#1a56db' }}>{UI.downloadPdf[lang]} {info.formNumber}</button></a>
+        <a href={info.pdfUrl} target="_blank" rel="noopener noreferrer" style={{ ...btnStyle, background: '#1a56db', color: '#fff', borderColor: '#1a56db', textDecoration: 'none', display: 'inline-block' }}>{UI.downloadPdf[lang]} {info.formNumber}</a>
         {info.formNumber === 'I-130' && (
           <button
             data-testid="btn-generate"
@@ -635,7 +680,7 @@ function Tier1Report({ info, lang, result, questions, steps, answers, factRecord
         )}
       </div>
       <p style={{ color: '#64748b', fontSize: '0.9rem' }}>
-        <a href={info.instructionsUrl} target="_blank" rel="noopener" style={{ color: '#1a56db' }}>{UI.officialInstructions[lang]}</a> · {UI.notLegalAdvice[lang]}
+        <a href={info.instructionsUrl} target="_blank" rel="noopener noreferrer" style={{ color: '#1a56db' }}>{UI.officialInstructions[lang]}</a> · {UI.notLegalAdvice[lang]}
       </p>
     </div>
   );
@@ -667,12 +712,23 @@ function tier1TokenFor(formKey: string): string | null {
 // are removed by verifyStoredEntitlements (App.tsx), so this store is
 // maintained; the fill endpoint's server-side 402 remains the
 // authoritative enforcement for the prepared PDF.
+// FIX (finding 3, DTC Carbon 2026-11-12): a stored prep token must match
+// the expected entitlement-token structure — a 32-char base64url bearer
+// token issued by the server — not a bare Boolean. This rejects the
+// trivial DevTools forgery `{"I-485":"x"}`. It is a speed bump, not real
+// security: the authoritative check is the server-side 402 on the fill
+// endpoint, and the full fix (intelligence behind a server-side
+// endpoint) is a separate build.
+function isValidEntitlementToken(token: unknown): boolean {
+  return typeof token === 'string' && token.length >= 20 && /^[A-Za-z0-9_-]+$/.test(token);
+}
+
 function hasPrepEntitlement(formKey: string): boolean {
   const codeMap: Record<string, string> = { i130: 'I-130', i90: 'I-90', n400: 'N-400', i765: 'I-765', i485: 'I-485', i589: 'I-589' };
   const code = codeMap[formKey];
   if (!code) return false;
   try {
-    return Boolean(getFormTokens()[code]);
+    return isValidEntitlementToken(getFormTokens()[code]);
   } catch { return false; }
 }
 

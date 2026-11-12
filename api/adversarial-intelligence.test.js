@@ -31,7 +31,7 @@ const adversarialN400 = {
 
 describe('Adversarial N-400 intelligence', () => {
   const basic = assessN400(adversarialN400, 'EN');
-  const withIntel = applyIntelligence('n400', adversarialN400, basic);
+  const withIntel = applyIntelligence('n400', adversarialN400, basic, { premium: true });
   const scored = scoreAssessment(withIntel, 'N-400');
 
   it('catches trip duration contradiction (20mo trip, answered No to 6+ months)', () => {
@@ -105,7 +105,7 @@ describe('Adversarial I-765 intelligence', () => {
       i765_last_entry: '2020-01-01', i765_status: 'Pending', i765_current_status: 'Pending',
     };
     const basic = assessI765(answers, 'EN');
-    const withIntel = applyIntel765('i765', answers, basic);
+    const withIntel = applyIntel765('i765', answers, basic, { premium: true });
     const found = withIntel.warnings.some(w => w.t.includes('Asylum-based EAD timing'));
     assert.ok(found, 'Should infer 150/180-day clock for (c)(8)');
   });
@@ -144,7 +144,7 @@ describe('Adversarial I-765 intelligence', () => {
       i765_last_entry: isoDaysAgo(8), i765_status: 'entered without inspection', i765_current_status: 'pending',
     };
     const basic = assessI765(answers, 'EN');
-    const withIntel = applyIntel765('i765', answers, basic);
+    const withIntel = applyIntel765('i765', answers, basic, { premium: true });
     const found = withIntel.blockers.some(b => b.t.includes('(c)(8) clock cannot have reached 150 days'));
     assert.ok(found, 'Should flag (c)(8) + entry 8 days ago as a CONFLICT blocker');
     assert.equal(withIntel.ready, false, 'Contradictory dates must block ready=true');
@@ -159,7 +159,7 @@ describe('Adversarial I-765 intelligence', () => {
       i765_last_entry: isoDaysAgo(200), i765_status: 'Pending', i765_current_status: 'Pending',
     };
     const basic = assessI765(answers, 'EN');
-    const withIntel = applyIntel765('i765', answers, basic);
+    const withIntel = applyIntel765('i765', answers, basic, { premium: true });
     const found = withIntel.blockers.some(b => b.t.includes('150 days'));
     assert.equal(found, false, 'Entry 200 days ago can satisfy the 150-day clock');
   });
@@ -173,7 +173,7 @@ describe('Adversarial I-765 intelligence', () => {
       i765_last_entry: d.toISOString().slice(0, 10), i765_status: 'B-2', i765_current_status: 'Pending',
     };
     const basic = assessI765(answers, 'EN');
-    const withIntel = applyIntel765('i765', answers, basic);
+    const withIntel = applyIntel765('i765', answers, basic, { premium: true });
     const found = withIntel.blockers.some(b => b.t.includes('Last entry date is in the future'));
     assert.ok(found, 'Future entry date must be a blocker');
   });
@@ -185,7 +185,7 @@ describe('Adversarial I-765 intelligence', () => {
       i765_last_entry: isoDaysAgo(400), i765_status: 'B-2', i765_current_status: 'Pending',
     };
     const basic = assessI765(answers, 'EN');
-    const withIntel = applyIntel765('i765', answers, basic);
+    const withIntel = applyIntel765('i765', answers, basic, { premium: true });
     const found = withIntel.warnings.some(w => w.t.includes('Young renewal applicant'));
     assert.ok(found, 'An 8-year-old renewal applicant should be flagged for verification');
   });
