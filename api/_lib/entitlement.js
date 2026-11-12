@@ -440,14 +440,39 @@ export function createEntitlementStore(now = () => Date.now()) {
         const ent = byId.get(entitlementIds[i]);
         if (!ent || ent.paidAt == null) continue;
         if (ent.state === 'REVOKED') continue;
-        // Invalidate the old token, issue a fresh one.
+        // Invalidate the old token, issue a fresh one. The previous
+        // token hash is returned so a failed delivery can restore it
+        // (recover.js): a buyer must never lose access because the
+        // email carrying their new token never arrived.
+        const previousTokenHash = ent.tokenHash;
         byTokenHash.delete(ent.tokenHash);
         const token = randomBytes(24).toString('base64url');
         ent.tokenHash = hashToken(token);
         byTokenHash.set(ent.tokenHash, ent.id);
-        return { ok: true, token, entitlementId: ent.id };
+        return { ok: true, token, entitlementId: ent.id, previousTokenHash };
       }
       return { ok: false, reason: 'not-paid' };
+    },
+
+    /**
+     * Restore a previously invalidated token hash after a failed
+     * reissue delivery (recover.js). Re-points the entitlement at the
+     * old hash and drops the undelivered new one, so the buyer keeps
+     * access with the token they already hold. The hash is never a
+     * bearer token: it only restores an index entry the store itself
+     * created. Returns { ok: false } when the entitlement or the
+     * hash is unknown.
+     */
+    restoreToken({ entitlementId, tokenHash }) {
+      if (!entitlementId || !tokenHash || typeof tokenHash !== 'string') return { ok: false, reason: 'invalid-args' };
+      const ent = byId.get(entitlementId);
+      if (!ent) return { ok: false, reason: 'unknown-entitlement' };
+      // Already pointing at that hash: a no-op success.
+      if (ent.tokenHash === tokenHash) return { ok: true, restored: false };
+      byTokenHash.delete(ent.tokenHash);
+      ent.tokenHash = tokenHash;
+      byTokenHash.set(tokenHash, ent.id);
+      return { ok: true, restored: true };
     },
 
     /** Durable, observable payment exceptions (copies, newest last). */

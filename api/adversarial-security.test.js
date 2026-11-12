@@ -33,12 +33,13 @@
  *   an honest "recovery unavailable" message and never expects
  *   data.token. That is a React component; it is covered by the
  *   Preview walk, not by this server-side suite.
- * - Residual gap (reported, not asserted): with IRU_RECOVERY_EMAIL_
- *   ENABLED='true' but no provider wired, recover.js calls
- *   reissueToken() BEFORE delivery is attempted, so a failed delivery
- *   invalidates the victim's old token while the new one is never
- *   delivered. The endpoint still never returns a token (asserted
- *   below), but the enabled-path ordering can lock a buyer out.
+ * - FIXED (2026-11-12): with IRU_RECOVERY_EMAIL_ENABLED='true' but
+ *   no provider wired, recover.js used to call reissueToken() BEFORE
+ *   delivery, so a failed delivery invalidated the victim's old
+ *   token while the new one was never delivered. recover.js now
+ *   restores the previous token hash (store.restoreToken) whenever
+ *   delivery fails, and the flag-ON test below asserts the victim's
+ *   old token still resolves after the attempt.
  * - Residual gap (reported, not asserted): fill.py's
  *   _entitlement_status_url() does not reject credential-bearing
  *   IRU_APP_ORIGIN values, unlike the JS resolveAppOrigin(). The
@@ -287,17 +288,23 @@ describe('2. Recover — recover never hands a token to an unauthenticated calle
     assert.equal(store.peekByToken(token).ok, true);
   });
 
-  it('ATTACK: recovery flag ON but no email provider wired → 503, no token in the response', async () => {
+  it('ATTACK: recovery flag ON but no email provider wired → 503, no token in the response, victim keeps access', async () => {
     process.env.IRU_RECOVERY_EMAIL_ENABLED = 'true';
     try {
-      const { store } = paidVictimStore();
+      const { store, token } = paidVictimStore();
       const res = mockRes();
       await recoverHandler(mockReq({ body: { email: 'victim@example.com' } }), res, store);
       assert.equal(res.statusCode, 503);
       assert.equal(res.body.reason, 'recovery-unavailable');
       assert.equal('token' in res.body, false);
       // Enabling the flag alone must not leak a token: delivery is the
-      // gate, and the delivery stub reports not-configured.
+      // gate, and the delivery stub reports not-configured. And the
+      // failed delivery must not lock the victim out: the reissue is
+      // rolled back, so the token the victim already holds still
+      // resolves (before the fix this failed — getByToken went null
+      // and peekByToken reported unknown-token).
+      assert.ok(store.getByToken(token) !== null, 'victim token must survive a failed-delivery recovery attempt');
+      assert.equal(store.peekByToken(token).ok, true);
     } finally {
       delete process.env.IRU_RECOVERY_EMAIL_ENABLED;
     }
