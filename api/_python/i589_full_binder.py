@@ -12,8 +12,11 @@ not index order:
 - Every Part B / Part C yes/no pair: [0] = Yes, [1] = No.
 - Spouse "Is this person in the U.S.?" (PtAIILine15_CheckBox15):
   [0] = No, [1] = Yes (REVERSED — verified by word proximity).
-- Item 18 court proceedings: CheckBox3[0] = 18a never, [1] = 18b now,
-  [2] = 18c not now but has been.
+- Item 18 court proceedings: CheckBox3[0] = 18a never, [1] = 18c not
+  now but has been, [2] = 18b now. (Verified by widget-rect proximity
+  to the printed options AND by on_state(): [0]=A, [1]=C, [2]=B.
+  An earlier version of this binder had [1]/[2] swapped; the 2026-11-12
+  fix corrects it — "now" checks [2], "past" checks [1].)
 - Marital: [0] Single, [1] Married, [2] Divorced, [3] Widowed.
 - Sex checkboxes: [0] Male, [1] Female.
 
@@ -26,6 +29,7 @@ every narrative before finalization; nothing is invented here.
 """
 import json
 import os
+import re
 
 # Two homes, two import paths (same rule as the I-765 binder, whose
 # two copies diverge on this line): the worktree copy loads as
@@ -79,6 +83,39 @@ def _raw_value(facts, fid):
     if isinstance(v, dict):
         return v.get("value")
     return v
+
+
+# Date facts this binder writes, by fact id (Item G). No other Python
+# binder formats dates: the I-130 registries carry a declarative
+# "format": "dateMDY" that nothing consumes, and unified_deliverable
+# only strftime()s timestamps — so the formatter lives here, local to
+# this binder (shared helpers are out of scope for this fix).
+_DATE_FACTS = {
+    "i589_dob",
+    "i589_entry_date", "i589_entry2_date", "i589_entry3_date",
+    "i589_entry_status_expires", "i589_passport_expiry",
+    "i589_last_left_country_date",
+    "i589_spouse_dob", "i589_spouse_marriage_date",
+    "i589_spouse_last_entry_date", "i589_spouse_prev_arrival_date",
+    "i589_spouse_auth_stay_expiry",
+}
+# Per-child date keys in i589_children entries (Item G).
+_CHILD_DATE_KEYS = {"dob", "entry_date", "auth_exp"}
+
+_ISO_DATE_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
+
+
+def _format_date_mdy(value):
+    """'YYYY-MM-DD' -> 'MM/DD/YYYY', the JS TRANSFORMS.dateMDY
+    equivalent (api/_lib/formmap.js). Any value that is not a strict
+    ISO date (already MM/DD/YYYY, free text, None) passes through
+    unchanged — same as the JS side, no validation, no guessing."""
+    if value is None:
+        return value
+    m = _ISO_DATE_RE.match(str(value).strip())
+    if m:
+        return "%s/%s/%s" % (m.group(2), m.group(3), m.group(1))
+    return str(value)
 
 
 def _split_full_name(full_name):
@@ -304,7 +341,36 @@ def build_i589_full_plan(facts, addresses=None, biographic=None):
             "required": False,
             "generated": True,
         }
+    # ── ONE SOURCE OF TRUTH for Part A.III (Item C, 2026-11-12) ──
+    # The 92 i589_bg_* entries (last address, 5-year residences,
+    # education, employment, parents/siblings) are SKIPPED here.
+    # No questionnaire or API caller produces facts with those ids —
+    # the A.III data travels as repeating groups through the JS path
+    # (api/_lib/repeating-fill.js buildRepeatingFillPlan +
+    # api/_lib/forms/repeating-589.js) — so this iteration could never
+    # fire, and keeping it meant two mechanisms covering the same PDF
+    # fields. The JS repeating path is canonical for A.III; this
+    # registry file remains the REFERENCE / AUDIT artifact for the
+    # layout: its bg mappings were verified correct against the
+    # 07/28/26 template with PyMuPDF (widget-rect proximity to the
+    # printed table headers — interleaved rows 1-2, e.g. res1 =
+    # TextField13[8,10,12,14] + DateTimeField24/26), and the
+    # repeating-589.js mappings were corrected to match it on the same
+    # date. The repeating path CANNOT express the registry's shape
+    # directly (the registry is consumed only by this Python binder;
+    # the JS draft path never reads it), so unifying on the registry
+    # as the code-level mapper would need a cross-runtime registry
+    # consumer that does not exist — hence this direction, not that
+    # one. The 60 non-bg detailed entries below ARE still iterated:
+    # i589_entry_date is produced by the live questionnaire and fills
+    # DateTimeField2[0] only through this loop, and the entry-manner
+    # block below reads _detailed["i589_entry_status"] directly.
+    # The binder's dedup by field name (end of this function) is
+    # preserved, so no double-write is possible if both paths ever
+    # become active for the same field.
     for fact_id, full_name in _detailed.items():
+        if fact_id.startswith("i589_bg_"):
+            continue
         key = f"detailed_{fact_id}"
         if key not in registry:
             registry[key] = {
@@ -326,10 +392,29 @@ def build_i589_full_plan(facts, addresses=None, biographic=None):
             fact = fact_value
         else:
             fact = {"value": fact_value, "confidence": 1.0, "status": "ok"}
+        # Item G: date facts are written MM/DD/YYYY, never raw ISO.
+        if spec["fact"] in _DATE_FACTS:
+            fact = dict(fact)
+            fact["value"] = _format_date_mdy(fact.get("value"))
         single = {spec["fact"]: {"kind": "text", "field": spec["field"], "required": False}}
         p, r = bind(single, {spec["fact"]: fact})
         plan.extend(p)
         review.extend(r)
+
+    # Item C (continued): A.III facts supplied directly to this binder
+    # are NOT filled here — they go through the JS repeating-group
+    # path. Flag them instead of silently dropping them. (*_deceased
+    # is excluded: the _DECEASED block below DOES fill those boxes.)
+    _bg_supplied = [fid for fid in facts
+                    if fid.startswith("i589_bg_")
+                    and not fid.endswith("_deceased")
+                    and _raw_value(facts, fid)]
+    if _bg_supplied:
+        _shown = ", ".join(sorted(_bg_supplied)[:5])
+        if len(_bg_supplied) > 5:
+            _shown += ", ..."
+        review.append({"fact": "i589_bg_*", "reason": "repeating-path-only",
+                       "detail": f"{len(_bg_supplied)} Part A.III background fact(s) ({_shown}) were not filled by this binder: Part A.III fills through the JS repeating-group path (api/_lib/forms/repeating-589.js)."})
 
     # ── Checkbox groups ──
     # _check takes a short name (resolved via _name_map) or a full name.
@@ -368,26 +453,39 @@ def build_i589_full_plan(facts, addresses=None, biographic=None):
         review.append({"fact": "i589_marital_status", "reason": "unmappable-value",
                        "detail": f"Marital status '{_marital}' has no checkbox mapping."})
 
-    # Court proceedings (Item 18): yes -> 18b (now in proceedings).
-    # "No" cannot distinguish 18a (never) from 18c (not now, has been)
-    # from this answer alone, so it is flagged for review, never guessed.
-    _proc = _yes_no_value(_raw_value(facts, "i589_in_proceedings"))
-    if _proc == "yes":
-        _check("CheckBox3[1]", "i589_in_proceedings")
-    elif _proc == "no":
-        review.append({"fact": "i589_in_proceedings", "reason": "ambiguous",
-                       "detail": "Not currently in proceedings does not say whether the applicant was ever in proceedings (Item 18a vs 18c). Applicant must confirm."})
-    elif _raw_value(facts, "i589_in_proceedings"):
-        review.append({"fact": "i589_in_proceedings", "reason": "unmappable-value",
-                       "detail": "Proceedings answer is not a clear yes/no; confirm Item 18 with the applicant."})
+    # Court proceedings (Item 18). The precise answer is
+    # i589_court_status (never / now / past, from the questionnaire);
+    # it takes precedence when present. The coarse i589_in_proceedings
+    # yes/no is the fallback: "yes" -> 18b (now in proceedings);
+    # "no" cannot distinguish 18a (never) from 18c (not now, has
+    # been) from this answer alone, so it is flagged for review,
+    # never guessed. Box order (verified by rect proximity + on_state
+    # 2026-11-12): [0] = 18a never, [1] = 18c past, [2] = 18b now.
     _court = str(_raw_value(facts, "i589_court_status") or "").strip().lower()
     _court_map = {
         "never": "CheckBox3[0]",
-        "now": "CheckBox3[1]",
-        "past": "CheckBox3[2]",
+        "now": "CheckBox3[2]",
+        "past": "CheckBox3[1]",
     }
+    _proc = _yes_no_value(_raw_value(facts, "i589_in_proceedings"))
     if _court in _court_map:
         _check(_court_map[_court], "i589_court_status")
+        if ((_proc == "yes" and _court != "now")
+                or (_proc == "no" and _court == "now")):
+            review.append({"fact": "i589_court_status", "reason": "contradiction",
+                           "detail": f"Court status '{_court}' contradicts the in-proceedings answer '{_proc}'. The precise court-status answer was filled; confirm with the applicant."})
+    else:
+        if _court:
+            review.append({"fact": "i589_court_status", "reason": "unmappable-value",
+                           "detail": f"Court status '{_court}' has no checkbox mapping."})
+        if _proc == "yes":
+            _check("CheckBox3[2]", "i589_in_proceedings")
+        elif _proc == "no":
+            review.append({"fact": "i589_in_proceedings", "reason": "ambiguous",
+                           "detail": "Not currently in proceedings does not say whether the applicant was ever in proceedings (Item 18a vs 18c). Applicant must confirm."})
+        elif _raw_value(facts, "i589_in_proceedings"):
+            review.append({"fact": "i589_in_proceedings", "reason": "unmappable-value",
+                           "detail": "Proceedings answer is not a clear yes/no; confirm Item 18 with the applicant."})
 
     # Persecution grounds (Part B Q1): check all that apply.
     # The screening collects one ground; the value may also be a list.
@@ -474,7 +572,7 @@ def build_i589_full_plan(facts, addresses=None, biographic=None):
                 review.append({"fact": f"i589_children_{n}", "reason": "name-split",
                                "detail": f"Child {n} name split into given/family; verify the split is correct."})
             if entry.get("dob") and _full(fmap["dob"]):
-                plan.append((_full(fmap["dob"]), str(entry["dob"]), "text", f"i589_children_{n}_dob"))
+                plan.append((_full(fmap["dob"]), _format_date_mdy(entry["dob"]), "text", f"i589_children_{n}_dob"))
             if entry.get("country") and _full(fmap["birth"]):
                 # Country of birth fills the "City and Country of Birth"
                 # field with the country only; the city is missing.
@@ -489,7 +587,8 @@ def build_i589_full_plan(facts, addresses=None, biographic=None):
                                    ("status", "status"), ("current_status", "current"),
                                    ("auth_exp", "auth_exp"), ("location_if_not_us", "specify")):
                 if entry.get(key) and _full(fmap[field_key]):
-                    plan.append((_full(fmap[field_key]), str(entry[key]), "text",
+                    _val = _format_date_mdy(entry[key]) if key in _CHILD_DATE_KEYS else str(entry[key])
+                    plan.append((_full(fmap[field_key]), _val, "text",
                                  f"i589_children_{n}_{key}"))
             _csex = str(entry.get("sex") or "").strip().lower()
             if _csex in ("male", "m") and _full(fmap["sex_m"]):

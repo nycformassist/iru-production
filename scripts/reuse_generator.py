@@ -39,7 +39,16 @@ def generate_address_mappings(form):
             field_type = None
             if 'street' in short_lower or 'address' in short_lower:
                 field_type = 'street'
-            elif 'city' in short_lower or 'town' in short_lower:
+            elif (re.search(r'(^|_)city', short_lower)
+                    or re.search(r'[a-z]City', f['short'])
+                    or re.search(r'(^|_)town', short_lower)
+                    or re.search(r'[a-z]Town', f['short'])):
+                # Word-boundary match, NOT a plain substring: 'city'
+                # inside 'ethnicity' (P7_Line1_Ethnicity) is not a city
+                # field, but 'City' at a camelCase hump IS one
+                # (Pt1Line18_CurrentCityOrTown, PriorCity, RecentCity).
+                # Plain `'city' in short_lower` misclassified the N-400
+                # ethnicity checkboxes as city (2026-11-12).
                 field_type = 'city'
             elif 'state' in short_lower:
                 field_type = 'state'
@@ -55,6 +64,15 @@ def generate_address_mappings(form):
                 field_type = 'unit'
             elif 'care' in short_lower:
                 field_type = 'in_care_of'
+
+            # Text address components (street/city/state/zip/...) never
+            # live on a checkbox: a checkbox-typed field with such a
+            # semantic is a pattern misfire (e.g. the N-400 ethnicity
+            # checkboxes above). The only address semantic that belongs
+            # on a checkbox is 'unit' (the Apt/Ste/Flr triple — see
+            # address.py UNIT_MAP), so it is exempted here.
+            if field_type and field_type != 'unit' and f['type'] == 'CheckBox':
+                continue
 
             if field_type:
                 mappings.append({

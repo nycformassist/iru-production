@@ -201,30 +201,6 @@
    "confidence": "high"
   },
   {
-   "field": "Pt1Line18_PriorAddress_Unit[0]",
-   "full_name": "form1[0].#subform[3].Pt1Line18_PriorAddress_Unit[0]",
-   "type": "CheckBox",
-   "semantic": "street",
-   "source": "generated: address-component-pattern",
-   "confidence": "high"
-  },
-  {
-   "field": "Pt1Line18_PriorAddress_Unit[1]",
-   "full_name": "form1[0].#subform[3].Pt1Line18_PriorAddress_Unit[1]",
-   "type": "CheckBox",
-   "semantic": "street",
-   "source": "generated: address-component-pattern",
-   "confidence": "high"
-  },
-  {
-   "field": "Pt1Line18_PriorAddress_Unit[2]",
-   "full_name": "form1[0].#subform[3].Pt1Line18_PriorAddress_Unit[2]",
-   "type": "CheckBox",
-   "semantic": "street",
-   "source": "generated: address-component-pattern",
-   "confidence": "high"
-  },
-  {
    "field": "Pt1Line18_PriorCity[0]",
    "full_name": "form1[0].#subform[3].Pt1Line18_PriorCity[0]",
    "type": "Text",
@@ -749,22 +725,6 @@
    "full_name": "form1[0].#subform[11].Pt7Line3_Country[0]",
    "type": "Text",
    "semantic": "country",
-   "source": "generated: address-component-pattern",
-   "confidence": "high"
-  },
-  {
-   "field": "Pt7Line1_Ethnicity[0]",
-   "full_name": "form1[0].#subform[12].Pt7Line1_Ethnicity[0]",
-   "type": "CheckBox",
-   "semantic": "city",
-   "source": "generated: address-component-pattern",
-   "confidence": "high"
-  },
-  {
-   "field": "Pt7Line1_Ethnicity[1]",
-   "full_name": "form1[0].#subform[12].Pt7Line1_Ethnicity[1]",
-   "type": "CheckBox",
-   "semantic": "city",
    "source": "generated: address-component-pattern",
    "confidence": "high"
   },

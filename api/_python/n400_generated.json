@@ -17,22 +17,6 @@
    "confidence": "high"
   },
   {
-   "field": "P7_Line1_Ethnicity[0]",
-   "full_name": "form1[0].#subform[2].P7_Line1_Ethnicity[0]",
-   "type": "CheckBox",
-   "semantic": "city",
-   "source": "generated: address-component-pattern",
-   "confidence": "high"
-  },
-  {
-   "field": "P7_Line1_Ethnicity[1]",
-   "full_name": "form1[0].#subform[2].P7_Line1_Ethnicity[1]",
-   "type": "CheckBox",
-   "semantic": "city",
-   "source": "generated: address-component-pattern",
-   "confidence": "high"
-  },
-  {
    "field": "P4_Line3_CityTown3[0]",
    "full_name": "form1[0].#subform[2].P4_Line3_CityTown3[0]",
    "type": "Text",

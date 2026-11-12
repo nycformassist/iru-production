@@ -70,6 +70,15 @@ def _semantic_to_fact(semantic):
     return mapping.get(semantic, semantic)
 
 def build_n400_full_plan(facts, addresses=None, biographic=None):
+    # Item I — factId alias: the spouse-citizen question's factId was
+    # renamed from n400_spouse_is_usc to spouse_citizen (Carbon Pass 2,
+    # commit 344d697). Saved / in-flight factRecords still carry the
+    # old key, so accept BOTH: the old key resolves only when the new
+    # key is absent. The new key is never removed. Work on a copy so
+    # the caller's dict is not mutated.
+    facts = dict(facts or {})
+    if "spouse_citizen" not in facts and "n400_spouse_is_usc" in facts:
+        facts["spouse_citizen"] = facts["n400_spouse_is_usc"]
     registry = {}
     for m in _gen['address'] + _gen['identity']:
         fact_id = _semantic_to_fact(m['semantic'])
@@ -171,7 +180,14 @@ def build_n400_full_plan(facts, addresses=None, biographic=None):
             val = str(_get_fact_value(fid)).strip().lower()
             if not val:
                 continue
-            yf, nf = pair.get("yes_field"), pair.get("no_field")
+            # Polarity (M-8 class): 13/14 radio pairs are Y/N-reversed
+            # in the JSON vs the template (verified with PyMuPDF:
+            # yes_field on_state 'N', no_field on_state 'Y'), and this
+            # loop never applied _polarity() — a "yes" checked the No
+            # box. Resolve per pair like the GMC/P9 loops do. Pairs
+            # with non-Y/N on_states (e.g. gender M/F) are untouched:
+            # _polarity() swaps only on an exact Y/N reversal.
+            yf, nf = _polarity(pair.get("yes_field"), pair.get("no_field"))
             yes_vals = [v.lower() for v in pair.get("yes_values", ["yes", "y", "true", "1"])]
             no_vals = [v.lower() for v in pair.get("no_values", ["no", "n", "false", "0"])]
             if val in yes_vals:
@@ -181,6 +197,83 @@ def build_n400_full_plan(facts, addresses=None, biographic=None):
     except Exception as _e:
         print("[n400_full_binder] " + _e.__class__.__name__ + " in n400 radio pairs: " + str(_e), file=sys.stderr)
 
+
+    # Item A — biographic facts (Part 7): height / weight / eye color /
+    # hair color / race were collected by the questionnaire but never
+    # mapped, and flagged nothing. Uses the shared bind() kinds:
+    # "height" splits one answer ("5'8\"") across the feet/inches
+    # comboboxes; "weight_digits" splits pounds across the three
+    # 1-digit boxes ("165" -> "1","6","5"; "65" -> "0","6","5", same
+    # as the I-90 binder); "checkbox_group" / "checkbox_multi" check
+    # the matching box. Checkbox order was verified against the
+    # printed labels next to each widget in public/forms/n-400.pdf
+    # (rect proximity + on_state codes: eye BRO/BLU/GRN/HAZ/GRY/BLK/
+    # PNK/MAR/XXX, hair BAL/SDY/RED/WHI/GRY/BLN/BRO/BLK/XXX, race
+    # I/A/B/A/W). A collected biographic fact with no mapping (unknown
+    # value, unparseable height/weight, conflict, low confidence) goes
+    # to review via bind() instead of being silently dropped. Facts
+    # may also arrive via the biographic= argument; facts win.
+    _bio = {}
+    for _k in ("n400_height", "n400_weight", "n400_eye_color",
+               "n400_hair_color", "race"):
+        _v = facts.get(_k)
+        if _v is None and biographic:
+            _v = biographic.get(_k)
+        if _v is None:
+            continue
+        if isinstance(_v, dict) and "value" in _v:
+            _bv = _v.get("value")
+            _bd = dict(_v)
+        else:
+            _bv, _bd = _v, {"value": _v, "confidence": 1.0, "status": "ok"}
+        # Checkbox values compare exactly in bind(); normalize case.
+        if _k in ("n400_eye_color", "n400_hair_color", "race"):
+            if isinstance(_bv, str):
+                _bd["value"] = _bv.strip().lower()
+            elif isinstance(_bv, list):
+                _bd["value"] = [str(x).strip().lower() for x in _bv]
+        _bio[_k] = _bd
+    if _bio:
+        _bio_registry = {
+            "n400_height": {"kind": "height", "fields": [
+                _name_map["P7_Line3_HeightFeet[0]"],
+                _name_map["P7_Line3_HeightInches[0]"],
+            ], "required": False},
+            "n400_weight": {"kind": "weight_digits", "fields": [
+                _name_map["P7_Line4_Pounds1[0]"],
+                _name_map["P7_Line4_Pounds2[0]"],
+                _name_map["P7_Line4_Pounds3[0]"],
+            ], "required": False},
+            "n400_eye_color": {"kind": "checkbox_group", "mapping": {
+                "black": _name_map["P7_Line5_Eye[5]"],
+                "blue": _name_map["P7_Line5_Eye[1]"],
+                "brown": _name_map["P7_Line5_Eye[0]"],
+                "gray": _name_map["P7_Line5_Eye[4]"],
+                "green": _name_map["P7_Line5_Eye[2]"],
+                "hazel": _name_map["P7_Line5_Eye[3]"],
+                "other": _name_map["P7_Line5_Eye[8]"],
+            }, "required": False},
+            "n400_hair_color": {"kind": "checkbox_group", "mapping": {
+                "black": _name_map["P7_Line6_Hair[7]"],
+                "blond": _name_map["P7_Line6_Hair[5]"],
+                "brown": _name_map["P7_Line6_Hair[6]"],
+                "gray": _name_map["P7_Line6_Hair[4]"],
+                "red": _name_map["P7_Line6_Hair[2]"],
+                "white": _name_map["P7_Line6_Hair[3]"],
+                "bald": _name_map["P7_Line6_Hair[0]"],
+                "other": _name_map["P7_Line6_Hair[8]"],
+            }, "required": False},
+            "race": {"kind": "checkbox_multi", "mapping": {
+                "white": _name_map["P7_Line2_Race[4]"],
+                "black": _name_map["P7_Line2_Race[2]"],
+                "asian": _name_map["P7_Line2_Race[1]"],
+                "native": _name_map["P7_Line2_Race[0]"],
+                "pacific": _name_map["P7_Line2_Race[3]"],
+            }, "required": False},
+        }
+        _bp, _br = bind(_bio_registry, _bio)
+        plan.extend(_bp)
+        review.extend(_br)
 
     # Deduplicate by field name (generated + detailed may overlap)
     seen = set()

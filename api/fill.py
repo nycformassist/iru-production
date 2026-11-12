@@ -91,6 +91,14 @@ def _entitlement_status_url():
     if origin:
         origin = origin.strip().rstrip('/')
         if origin.startswith('https://') or origin.startswith('http://'):
+            # Credential-bearing origin fails closed, mirroring the JS
+            # resolveAppOrigin() in api/_lib/paymentConfig.js: a URL
+            # with a username/password is rejected outright — never
+            # stripped-and-proceeded-with, so no credential can leak
+            # into the verification request (2026-11-12 hardening).
+            parsed = urllib.parse.urlparse(origin)
+            if parsed.username or parsed.password:
+                return None
             return origin + '/api/entitlement-status'
         return None
     vercel_url = os.environ.get('VERCEL_URL')

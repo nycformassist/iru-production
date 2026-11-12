@@ -62,6 +62,19 @@ export const I589_QUESTIONS = [
     shortLabels: { ES: 'Número A', ZH: 'A号码', HT: 'Nimewo A', AR: 'رقم A' },
     helpText: { EN: 'Found on immigration documents. If you do not have one yet, leave blank.', ES: 'Se encuentra en documentos de inmigración.', ZH: '见于移民文件。如尚未获得，请留空。', HT: 'Yo jwenn li sou dokiman imigrasyon.', AR: 'موجود في مستندات الهجرة.' },
   },
+  {
+    id: 'i589_sex', step: 'personal', type: 'radio',
+    factId: 'i589_sex',
+    labels: { EN: 'What is your sex?', ES: '¿Cuál es su sexo?', ZH: '您的性别是什么？', HT: 'Ki sèks ou?', AR: 'ما هو جنسك؟' },
+    shortLabel: 'Sex',
+    shortLabels: { ES: 'Sexo', ZH: '性别', HT: 'Sèks', AR: 'الجنس' },
+    options: [
+      { value: 'male', labels: { EN: 'Male', ES: 'Masculino', ZH: '男', HT: 'Gason', AR: 'ذكر' } },
+      { value: 'female', labels: { EN: 'Female', ES: 'Femenino', ZH: '女', HT: 'Fi', AR: 'أنثى' } },
+    ],
+    helpText: { EN: 'Item 10 on the form asks for sex as Male or Female.', ES: 'El punto 10 del formulario pregunta por el sexo: masculino o femenino.', ZH: '表格第10项要求填写性别（男或女）。', HT: 'Pwen 10 sou fòm nan mande sèks ou: Gason oswa Fi.', AR: 'يسأل البند 10 من النموذج عن الجنس: ذكر أو أنثى.' },
+    required: true,
+  },
   // --- Asylum basis ---
   {
     id: 'i589_persecution_grounds', step: 'basis', type: 'select',
@@ -105,6 +118,31 @@ export const I589_QUESTIONS = [
       { value: 'divorced', labels: { EN: 'Divorced', ES: 'Divorciado/a', ZH: '离异', HT: 'Divòse', AR: 'مطلق' } },
       { value: 'widowed', labels: { EN: 'Widowed', ES: 'Viudo/a', ZH: '丧偶', HT: 'Vèf', AR: 'أرمل' } },
     ],
+  },
+  {
+    id: 'i589_spouse_sex', step: 'family', type: 'radio',
+    factId: 'i589_spouse_sex',
+    labels: { EN: "What is your spouse's sex?", ES: '¿Cuál es el sexo de su cónyuge?', ZH: '您配偶的性别是什么？', HT: 'Ki sèks mari/madanm ou?', AR: 'ما هو جنس الزوج/الزوجة؟' },
+    shortLabel: "Spouse's sex",
+    shortLabels: { ES: 'Sexo del cónyuge', ZH: '配偶性别', HT: 'Sèks mari/madanm', AR: 'جنس الزوج' },
+    options: [
+      { value: 'male', labels: { EN: 'Male', ES: 'Masculino', ZH: '男', HT: 'Gason', AR: 'ذكر' } },
+      { value: 'female', labels: { EN: 'Female', ES: 'Femenino', ZH: '女', HT: 'Fi', AR: 'أنثى' } },
+    ],
+    conditionalOn: { factId: 'i589_marital_status', operator: 'equals', value: 'married' },
+  },
+  {
+    id: 'i589_spouse_in_us', step: 'family', type: 'radio',
+    factId: 'i589_spouse_in_us',
+    labels: { EN: 'Is your spouse currently in the United States?', ES: '¿Está su cónyuge actualmente en los Estados Unidos?', ZH: '您的配偶目前在美国吗？', HT: 'Èske mari/madanm ou Ozetazini kounye a?', AR: 'هل الزوج/الزوجة موجود حاليًا في الولايات المتحدة؟' },
+    shortLabel: 'Spouse in the U.S.',
+    shortLabels: { ES: 'Cónyuge en EE. UU.', ZH: '配偶在美国', HT: 'Mari/madanm Ozetazini', AR: 'الزوج في الولايات المتحدة' },
+    options: [
+      { value: 'yes', labels: { EN: 'Yes', ES: 'Sí', ZH: '是', HT: 'Wi', AR: 'نعم' } },
+      { value: 'no', labels: { EN: 'No', ES: 'No', ZH: '否', HT: 'Non', AR: 'لا' } },
+    ],
+    helpText: { EN: 'If your spouse is not in the United States, the form asks where they are. Staff will follow up for that location.', ES: 'Si su cónyuge no está en los Estados Unidos, el formulario pregunta dónde está.', ZH: '如果您的配偶不在美国，表格会询问其所在地点。', HT: 'Si mari/madanm ou pa Ozetazini, fòm nan mande ki kote li ye.', AR: 'إذا لم يكن الزوج/الزوجة في الولايات المتحدة، يسأل النموذج عن مكان وجوده.' },
+    conditionalOn: { factId: 'i589_marital_status', operator: 'equals', value: 'married' },
   },
   {
     id: 'i589_has_children', step: 'family', type: 'radio',
@@ -152,6 +190,20 @@ export const I589_QUESTIONS = [
       { value: 'unsure', labels: { EN: 'Not sure', ES: 'No estoy seguro', ZH: '不确定', HT: 'Mwen pa sèten', AR: 'لست متأكدًا' } },
     ],
     helpText: { EN: 'If you are in proceedings, your asylum application is filed with the immigration court, not USCIS. Staff need to know this.', ES: 'Si está en proceso, su solicitud se presenta ante el tribunal de inmigración.', ZH: '如果您处于程序中，您的庇护申请将提交给移民法庭，而非USCIS。', HT: 'Si w nan pwosedi, demann azil ou depoze nan tribinal imigrasyon.', AR: 'إذا كنت في الإجراءات، يتم تقديم طلب اللجوء الخاص بك إلى محكمة الهجرة.' },
+  },
+  {
+    id: 'i589_court_status', step: 'history', type: 'radio',
+    factId: 'i589_court_status',
+    labels: { EN: 'Which of these applies to your Immigration Court proceedings?', ES: '¿Cuál de estas opciones se aplica a su proceso ante el Tribunal de Inmigración?', ZH: '以下哪一项适用于您的移民法庭程序？', HT: 'Kilès nan sa yo ki aplike pou pwosedi Tribinal Imigrasyon ou?', AR: 'أي من هذه ينطبق على إجراءات محكمة الهجرة الخاصة بك؟' },
+    shortLabel: 'Court proceedings history',
+    shortLabels: { ES: 'Historial del tribunal', ZH: '法庭程序历史', HT: 'Istorik tribinal', AR: 'سجل إجراءات المحكمة' },
+    options: [
+      { value: 'never', labels: { EN: 'I have never been in Immigration Court proceedings', ES: 'Nunca he estado en un proceso ante el Tribunal de Inmigración', ZH: '我从未处于移民法庭程序中', HT: 'Mwen pa janm nan pwosedi Tribinal Imigrasyon', AR: 'لم أكن أبدًا في إجراءات محكمة الهجرة' } },
+      { value: 'now', labels: { EN: 'I am now in Immigration Court proceedings', ES: 'Actualmente estoy en un proceso ante el Tribunal de Inmigración', ZH: '我目前处于移民法庭程序中', HT: 'Mwen nan pwosedi Tribinal Imigrasyon kounye a', AR: 'أنا حاليًا في إجراءات محكمة الهجرة' } },
+      { value: 'past', labels: { EN: 'I am not now in proceedings, but I have been in the past', ES: 'Actualmente no estoy en proceso, pero lo he estado en el pasado', ZH: '我目前不在程序中，但过去曾经处于程序中', HT: 'Mwen pa nan pwosedi kounye a, men mwen te nan pwosedi nan pase', AR: 'لست في الإجراءات حاليًا، لكنني كنت فيها في الماضي' } },
+    ],
+    helpText: { EN: 'Item 18 on the form has three choices. If you are not currently in proceedings, it still matters whether you ever were before.', ES: 'El punto 18 del formulario tiene tres opciones. Si no está actualmente en proceso, aún importa si alguna vez lo estuvo.', ZH: '表格第18项有三个选项。如果您目前不在程序中，过去是否曾经处于程序中仍然重要。', HT: 'Pwen 18 sou fòm nan gen twa chwa. Si w pa nan pwosedi kounye a, li enpòtan toujou pou konnen si w te janm nan pwosedi anvan.', AR: 'يحتوي البند 18 من النموذج على ثلاثة خيارات. إذا لم تكن في الإجراءات حاليًا، فلا يزال من المهم ما إذا كنت فيها من قبل.' },
+    conditionalOn: { factId: 'i589_in_proceedings', operator: 'not_equals', value: 'yes' },
   },
 ];
 

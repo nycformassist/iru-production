@@ -1,5 +1,26 @@
 [
  {
+  "base": "P11_Line17A",
+  "fields": [
+   "P11_Line17A[0]",
+   "P11_Line17A[1]"
+  ]
+ },
+ {
+  "base": "P11_Line17B",
+  "fields": [
+   "P11_Line17B[0]",
+   "P11_Line17B[1]"
+  ]
+ },
+ {
+  "base": "P11_Line17C",
+  "fields": [
+   "P11_Line17C[0]",
+   "P11_Line17C[1]"
+  ]
+ },
+ {
   "base": "P9_5a",
   "fields": [
    "P9_5a[0]",

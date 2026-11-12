@@ -30,6 +30,8 @@ import {
   handleChildDelete,
 } from '../src/repeatingAdapters.ts';
 
+import { I589_QUESTIONS } from '../src/i589-questions.ts';
+
 import { createFactRecord } from './_lib/facts.js';
 import { generateFormDraft } from './generate-form.js';
 import { GROUP_DEFINITIONS } from './_lib/groups.js';
@@ -344,7 +346,7 @@ test('QUESTIONNAIRE FLOW: residences, education, employment, family via UI adapt
   console.log('✓ Residences, education, employment, family, supplement B: UI → factRecord → PDF verified');
 });
 
-test('QUESTIONNAIRE FLOW: last address all 12 fields populate', async () => {
+test('QUESTIONNAIRE FLOW: last address fills the real Q1 row-1 boxes', async () => {
   let factRecord = createFactRecord(new Date().toISOString());
   factRecord.facts.family_name = { value: 'AddrTest', source: 'answer', status: 'reported' };
 
@@ -366,15 +368,20 @@ test('QUESTIONNAIRE FLOW: last address all 12 fields populate', async () => {
 
   const result = await generateFormDraft({ formId: 'I-589', factRecord });
 
+  // CORRECTED 2026-11-12: Q1 is TWO rows × 4 columns (street / city /
+  // department / country) + From/To dates. Row 1 = TextField13[0,2,4,6]
+  // + From DateTimeField21[0] / To DateTimeField20[0]. The old test
+  // asserted [0..7] as 8 fields of one address (city in [1], region in
+  // [2], country in [3], postal in [4]...) — [1] is row 2's STREET box.
+  // postal_code / address_line_2 / district / address_notes have NO box
+  // in this table, so they must not land in any row's boxes.
   const checks = [
     ['form1[0].#subform[4].TextField13[0]', '123 Full Street', 'street'],
-    ['form1[0].#subform[4].TextField13[1]', 'FullCity', 'city'],
-    ['form1[0].#subform[4].TextField13[2]', 'FullRegion', 'region'],
-    ['form1[0].#subform[4].TextField13[3]', 'FullCountry', 'country'],
-    ['form1[0].#subform[4].TextField13[4]', '12345', 'postal_code'],
-    ['form1[0].#subform[4].TextField13[5]', 'Apt 4B', 'address_line_2'],
-    ['form1[0].#subform[4].TextField13[6]', 'FullDistrict', 'district'],
-    ['form1[0].#subform[4].TextField13[7]', 'Near the park', 'address_notes'],
+    ['form1[0].#subform[4].TextField13[2]', 'FullCity', 'city'],
+    ['form1[0].#subform[4].TextField13[4]', 'FullRegion', 'region'],
+    ['form1[0].#subform[4].TextField13[6]', 'FullCountry', 'country'],
+    ['form1[0].#subform[4].DateTimeField21[0]', '01/01/2020', 'from date'],
+    ['form1[0].#subform[4].DateTimeField20[0]', '12/31/2022', 'to date'],
   ];
 
   for (const [fieldName, expected, label] of checks) {
@@ -382,5 +389,82 @@ test('QUESTIONNAIRE FLOW: last address all 12 fields populate', async () => {
     assert.strictEqual(actual, expected, `last address ${label}`);
   }
 
-  console.log('✓ Last address: all 12 fields mapped, 8 text fields verified in PDF');
+  // Row 2 stays empty, and the box-less fields appear nowhere.
+  for (const [fieldName, label] of [
+    ['form1[0].#subform[4].TextField13[1]', 'row 2 street'],
+    ['form1[0].#subform[4].TextField13[3]', 'row 2 city'],
+    ['form1[0].#subform[4].TextField13[5]', 'row 2 region'],
+    ['form1[0].#subform[4].TextField13[7]', 'row 2 country'],
+  ]) {
+    const actual = await getFieldText(result.pdfBytes, fieldName);
+    assert.ok(!actual, `last address ${label} must stay empty`);
+  }
+
+  console.log('✓ Last address: Q1 row-1 boxes verified in PDF (2-row table)');
+});
+
+test('I-589 QUESTIONS: sex / court status / spouse sex / spouse in U.S. exist with binder-matching values', () => {
+  // Item B (2026-11-12): the four facts the Python binder reads but no
+  // question produced. The option values must match the binder exactly
+  // (api/_python/i589_full_binder.py): sex male/female, court
+  // never/now/past, spouse sex male/female, spouse in U.S. yes/no.
+  const byId = Object.fromEntries(I589_QUESTIONS.map((q) => [q.id, q]));
+  const optionValues = (q) => (q.options || []).map((o) => o.value);
+
+  const sex = byId.i589_sex;
+  assert.ok(sex, 'i589_sex question exists');
+  assert.strictEqual(sex.factId, 'i589_sex');
+  assert.strictEqual(sex.step, 'personal');
+  assert.deepStrictEqual(optionValues(sex), ['male', 'female']);
+
+  const court = byId.i589_court_status;
+  assert.ok(court, 'i589_court_status question exists');
+  assert.strictEqual(court.factId, 'i589_court_status');
+  assert.strictEqual(court.step, 'history');
+  assert.deepStrictEqual(optionValues(court), ['never', 'now', 'past']);
+  assert.deepStrictEqual(
+    court.conditionalOn,
+    { factId: 'i589_in_proceedings', operator: 'not_equals', value: 'yes' },
+    'court status is asked unless the applicant is in proceedings (then it is "now")',
+  );
+
+  const spouseSex = byId.i589_spouse_sex;
+  assert.ok(spouseSex, 'i589_spouse_sex question exists');
+  assert.strictEqual(spouseSex.factId, 'i589_spouse_sex');
+  assert.strictEqual(spouseSex.step, 'family');
+  assert.deepStrictEqual(optionValues(spouseSex), ['male', 'female']);
+  assert.deepStrictEqual(
+    spouseSex.conditionalOn,
+    { factId: 'i589_marital_status', operator: 'equals', value: 'married' },
+  );
+
+  const spouseInUs = byId.i589_spouse_in_us;
+  assert.ok(spouseInUs, 'i589_spouse_in_us question exists');
+  assert.strictEqual(spouseInUs.factId, 'i589_spouse_in_us');
+  assert.strictEqual(spouseInUs.step, 'family');
+  assert.deepStrictEqual(optionValues(spouseInUs), ['yes', 'no']);
+  assert.deepStrictEqual(
+    spouseInUs.conditionalOn,
+    { factId: 'i589_marital_status', operator: 'equals', value: 'married' },
+  );
+
+  // Every question carries all five language labels (existing convention:
+  // `labels` has all five; `shortLabel` is the English short label and
+  // `shortLabels` carries the other four).
+  for (const q of [sex, court, spouseSex, spouseInUs]) {
+    for (const lang of ['EN', 'ES', 'ZH', 'HT', 'AR']) {
+      assert.ok(q.labels?.[lang], `${q.id} has a ${lang} label`);
+    }
+    assert.ok(q.shortLabel, `${q.id} has an English short label`);
+    for (const lang of ['ES', 'ZH', 'HT', 'AR']) {
+      assert.ok(q.shortLabels?.[lang], `${q.id} has a ${lang} short label`);
+    }
+    for (const o of q.options) {
+      for (const lang of ['EN', 'ES', 'ZH', 'HT', 'AR']) {
+        assert.ok(o.labels?.[lang], `${q.id} option ${o.value} has a ${lang} label`);
+      }
+    }
+  }
+
+  console.log('✓ I-589: four gap facts have questions with binder-matching values');
 });
