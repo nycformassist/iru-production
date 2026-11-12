@@ -7,6 +7,7 @@ import PathwayGuidance from './components/PathwayGuidance';
 import PathwayStaffPanel from './components/PathwayStaffPanel';
 import PathwayCheckoutSummary from './components/PathwayCheckoutSummary';
 import { INSTITUTIONAL_MODE, getStaffDestination, markCaseReportSent } from './institutional';
+import { dateEntryWarning } from './dateValidation';
 import { buildStaffReportHtml } from './reportEmail';
 import { FORMS, getActiveCatalog } from '../api/_lib/catalog.js';
 import { pricePurchase } from '../api/_lib/checkout-pricing.js';
@@ -101,6 +102,10 @@ const UI: Record<string, Record<Tier1Lang, string>> = {
   fillOneField: { EN: 'Please fill in at least one field.', ES: 'Complete al menos un campo.', ZH: '请至少填写一个字段。', HT: 'Tanpri ranpli omwen yon chan.', AR: 'يرجى ملء حقل واحد على الأقل.' },
   optional: { EN: '(optional)', ES: '(opcional)', ZH: '(可选)', HT: '(opsyonèl)', AR: '(اختياري)' },
   selectPlaceholder: { EN: 'Select…', ES: 'Seleccionar…', ZH: '请选择…', HT: 'Chwazi…', AR: 'اختر…' },
+  // Inline date warnings (2026-11-12 live-walk defect): warn at entry
+  // time, never block — the report CONFLICT stays the filing gate.
+  dateWarningFutureDob: { EN: 'This date of birth is in the future. Please check the date.', ES: 'Esta fecha de nacimiento está en el futuro. Por favor, revise la fecha.', ZH: '该出生日期在未来。请核对日期。', HT: 'Dat nesans sa a nan lavni. Tanpri verifye dat la.', AR: 'تاريخ الميلاد هذا في المستقبل. يرجى التحقق من التاريخ.' },
+  dateWarningEntryBeforeDob: { EN: 'This entry date is before the date of birth. Please check both dates.', ES: 'Esta fecha de entrada es anterior a la fecha de nacimiento. Por favor, revise ambas fechas.', ZH: '该入境日期早于出生日期。请核对这两个日期。', HT: 'Dat antre sa a anvan dat nesans la. Tanpri verifye tou de dat yo.', AR: 'تاريخ الدخول هذا قبل تاريخ الميلاد. يرجى التحقق من التاريخين.' },
   startOver: { EN: '← Start Over', ES: '← Empezar de nuevo', ZH: '← 重新开始', HT: '← Rekòmanse', AR: '← البدء من جديد' },
   downloadPdf: { EN: 'Download PDF', ES: 'Descargar PDF', ZH: '下载 PDF', HT: 'Telechaje PDF', AR: 'تحميل PDF' },
   officialInstructions: { EN: 'Official instructions', ES: 'Instrucciones oficiales', ZH: '官方说明', HT: 'Enstriksyon ofisyèl', AR: 'التعليمات الرسمية' },
@@ -334,6 +339,21 @@ export default function Tier1Flow({ formKey, questions, steps, info, lang, asses
           <input data-testid={`question-input-${q.id}`} type={q.type} value={textVal} onChange={e => setTextVal(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') goNext(); }}
             style={{ width: '100%', padding: '0.7rem', fontSize: '1rem', border: '1px solid #e2e8f0', borderRadius: 8, boxSizing: 'border-box' }} />
+        )}
+        {/* Inline date warning (2026-11-12 live-walk defect): a future
+            date of birth, or an entry date before the date of birth,
+            warns the moment it is typed. textVal is the value just
+            typed; answers holds the saved DOB when this question is
+            the entry date. Never blocks entry. */}
+        {q.type === 'date' && dateEntryWarning(q.id, textVal, answers) === 'future-dob' && (
+          <div data-testid="date-warning" style={{ marginTop: '0.6rem', background: '#fffbeb', border: '1px solid #f59e0b', borderRadius: 8, padding: '0.7rem 0.9rem', color: '#92400e', fontSize: '0.95rem', fontWeight: 600 }}>
+            {UI.dateWarningFutureDob[lang]}
+          </div>
+        )}
+        {q.type === 'date' && dateEntryWarning(q.id, textVal, answers) === 'entry-before-dob' && (
+          <div data-testid="date-warning" style={{ marginTop: '0.6rem', background: '#fffbeb', border: '1px solid #f59e0b', borderRadius: 8, padding: '0.7rem 0.9rem', color: '#92400e', fontSize: '0.95rem', fontWeight: 600 }}>
+            {UI.dateWarningEntryBeforeDob[lang]}
+          </div>
         )}
         {/* Carbon Pass 2 L-1: 'select' questions — and radio groups with
             more than 6 options (e.g. 51 states) — render as a native

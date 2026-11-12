@@ -123,7 +123,14 @@ describe('welcome screen redesign', () => {
   it('markup: all five language cards keep the existing behavior and gain the selected state + chevron', () => {
     const app = readFileSync(join(HERE, '..', 'src', 'App.tsx'), 'utf8');
     assert.ok(app.includes('LANGUAGES.map((l) => ('), 'cards still come from the LANGUAGES map');
-    assert.ok(app.includes("onClick={() => { setLang(l.code); setStage('DASHBOARD'); setCurrentQ(0); }}"), 'selection routes to dashboard');
+    // Full-assessment entry (2026-11-12): selection routes to PHASE1
+    // when a full assessment is pending (staff "Open full assessment"
+    // / DTC dashboard button set the flag before opening LANG), and
+    // to DASHBOARD otherwise. The old literal onClick routed to
+    // DASHBOARD unconditionally, which made the full assessment
+    // unreachable — a closed loop with no forward path to PHASE1.
+    assert.ok(app.includes("onClick={() => { setLang(l.code); setCurrentQ(0); if (fullAssessmentPending)"), 'selection still sets the language and resets the question index');
+    assert.ok(app.includes("if (fullAssessmentPending) { setFullAssessmentPending(false); setStage('PHASE1'); } else { setStage('DASHBOARD'); }"), 'selection routes to the full assessment when one is pending, dashboard otherwise');
     assert.ok(app.includes('lang === l.code ? \'border-blue-600 bg-blue-50 shadow-sm\''), 'selected card state keyed on current lang');
     assert.ok(app.includes('aria-pressed={lang === l.code}'), 'selected state exposed to assistive tech');
     assert.ok(app.includes('<ChevronRight className="w-5 h-5 text-blue-500 shrink-0" aria-hidden="true" />'), 'chevron rendered per card');
