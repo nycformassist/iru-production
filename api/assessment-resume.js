@@ -5,23 +5,9 @@
  * - Returns 403 if key doesn't match (even with valid token)
  * - Returns 404 if token not found, 410 if expired
  */
-import pg from 'pg';
 import crypto from 'crypto';
 import { entitlementStore } from './_lib/entitlement.js';
-
-const { Pool } = pg;
-let pool = null;
-function getPool() {
-    // Test hook (same globalThis convention as __IRU_AI_CLIENT__):
-    // a test may inject a pool-like { query() } instead of Postgres.
-    if (globalThis.__IRU_ASSESSMENT_DB__) return globalThis.__IRU_ASSESSMENT_DB__;
-    if (!pool) {
-        const connStr = process.env.IRU_DB_URL || process.env.DATABASE_URL;
-        if (!connStr) throw new Error('IRU_DB_URL not configured');
-        pool = new Pool({ connectionString: connStr, max: 5 });
-    }
-    return pool;
-}
+import { getPool, storageErrorResponse } from './_lib/assessment-store.js';
 
 export default async function handler(req, res, store = entitlementStore) {
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -46,7 +32,7 @@ export default async function handler(req, res, store = entitlementStore) {
             return res.status(400).json({ error: 'token and clientKey required' });
         }
         const clientKeyHash = crypto.createHash('sha256').update(clientKey).digest('hex');
-        const db = getPool();
+        const db = await getPool();
         const result = await db.query(
             `SELECT id, form_id, facts, progress, status, updated_at, expires_at, client_key_hash
              FROM assessments WHERE token=$1`,
@@ -75,6 +61,6 @@ export default async function handler(req, res, store = entitlementStore) {
         });
     } catch (e) {
         console.error('assessment-resume error:', e.message);
-        return res.status(500).json({ error: 'Resume failed' });
+        return storageErrorResponse(res, e, 'Resume failed');
     }
 }

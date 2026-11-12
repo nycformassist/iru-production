@@ -5,23 +5,9 @@
  * - If token provided: updates existing (verifies clientKeyHash matches)
  * - If no token: creates new, stores clientKeyHash
  */
-import pg from 'pg';
 import crypto from 'crypto';
 import { entitlementStore } from './_lib/entitlement.js';
-
-const { Pool } = pg;
-let pool = null;
-function getPool() {
-    // Test hook (same globalThis convention as __IRU_AI_CLIENT__):
-    // a test may inject a pool-like { query() } instead of Postgres.
-    if (globalThis.__IRU_ASSESSMENT_DB__) return globalThis.__IRU_ASSESSMENT_DB__;
-    if (!pool) {
-        const connStr = process.env.IRU_DB_URL || process.env.DATABASE_URL;
-        if (!connStr) throw new Error('IRU_DB_URL not configured');
-        pool = new Pool({ connectionString: connStr, max: 5 });
-    }
-    return pool;
-}
+import { getPool, storageErrorResponse } from './_lib/assessment-store.js';
 
 export default async function handler(req, res, store = entitlementStore) {
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -45,10 +31,13 @@ export default async function handler(req, res, store = entitlementStore) {
         if (!clientKeyHash || !/^[a-f0-9]{64}$/.test(clientKeyHash)) {
             return res.status(400).json({ error: 'clientKeyHash required (SHA-256 hex)' });
         }
-        if (!form_id || !['n400','i485','i130','i90','i765'].includes(form_id)) {
+        // 'i589' is accepted: the DTC app offers the I-589 questionnaire
+        // and its Save Progress posts form_id 'i589' (fix 2026-11-12 —
+        // the allowlist predates the I-589 form, so I-589 saves 400d).
+        if (!form_id || !['n400','i485','i130','i90','i765','i589'].includes(form_id)) {
             return res.status(400).json({ error: 'Invalid form_id' });
         }
-        const db = getPool();
+        const db = await getPool();
         if (token) {
             const result = await db.query(
                 `UPDATE assessments SET facts=$1, progress=$2, updated_at=NOW(), status='in_progress'
@@ -80,6 +69,6 @@ export default async function handler(req, res, store = entitlementStore) {
         }
     } catch (e) {
         console.error('assessment-save error:', e.message);
-        return res.status(500).json({ error: 'Save failed' });
+        return storageErrorResponse(res, e, 'Save failed');
     }
 }

@@ -115,6 +115,40 @@ function t(map: Record<string, string> | undefined, lang: Tier1Lang): string {
   return map[lang] || map['EN'] || '';
 }
 
+/**
+ * Merge the current question's typed-but-uncommitted input into the
+ * answers record, WITHOUT required-field validation (saving partial
+ * progress must be allowed). Used by Save Progress so the current
+ * answer reaches the server payload AND the localStorage autosave.
+ *
+ * Defect (live walk 2026-11-12, ported from institutional commit
+ * ac857d1): handleSave built the fact record from `answers` only,
+ * but the current question's value lives in the input state
+ * (textVal / radioVal / rgData) until "Next" commits it — so the
+ * typed answer was never saved, and on a failed save it lived only
+ * in the input state and was lost on reload/resume. The merge must
+ * be silent (no alert): a required-but-empty current question must
+ * not block saving the progress made so far.
+ */
+export function mergeCurrentInput(
+  base: Record<string, any>,
+  question: Tier1Question | undefined,
+  input: { textVal: string; radioVal: string; rgData: Record<string, any[]> },
+): Record<string, any> {
+  if (!question) return base;
+  const n = { ...base };
+  if (question.type === 'repeating_group') {
+    const entries = input.rgData[question.groupId!] || [];
+    if (entries.length) n[question.id] = entries; else delete n[question.id];
+  } else {
+    const val = question.type === 'radio' || question.type === 'select'
+      ? input.radioVal
+      : input.textVal.trim();
+    if (val) n[question.id] = val; else delete n[question.id];
+  }
+  return n;
+}
+
 interface Props {
   formKey: string;
   questions: Tier1Question[];
@@ -186,6 +220,18 @@ export default function Tier1Flow({ formKey, questions, steps, info, lang, asses
     setIsSaving(true);
     setSaveError(null);
     try {
+      // Commit the current question's typed-but-uncommitted input
+      // FIRST (defect 2026-11-12 — see mergeCurrentInput): the value
+      // lives in the input state until "Next" commits it, so a save
+      // built from `answers` alone never included it, and on a failed
+      // save the value was lost on reload/resume because it was never
+      // persisted. Committing here puts it in the server payload AND
+      // in the localStorage autosave (via the answers effect), so a
+      // failed server save is no longer destructive — the answer
+      // stays in the field and in storage, and only the error banner
+      // shows.
+      const mergedAnswers = mergeCurrentInput(answers, visible[qi], { textVal, radioVal, rgData });
+      setAnswers(mergedAnswers);
       let clientKey = localStorage.getItem('iru_client_key');
       if (!clientKey) {
         clientKey = crypto.randomUUID();
@@ -196,7 +242,7 @@ export default function Tier1Flow({ formKey, questions, steps, info, lang, asses
       const hashBuffer = await crypto.subtle.digest('SHA-256', data);
       const hashArray = Array.from(new Uint8Array(hashBuffer));
       const clientKeyHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-      const factRecord = buildFactRecord(answers);
+      const factRecord = buildFactRecord(mergedAnswers);
       // Persistence is gated server-side (any paid entitlement).
       const saveHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
       const saveTokenHeader = tier1TokenFor(formKey);
@@ -208,7 +254,7 @@ export default function Tier1Flow({ formKey, questions, steps, info, lang, asses
           clientKeyHash,
           form_id: formKey,
           facts: factRecord.facts,
-          progress: { qi, answers: Object.keys(answers).length },
+          progress: { qi, answers: Object.keys(mergedAnswers).length },
         }),
       });
       const result = await res.json();
