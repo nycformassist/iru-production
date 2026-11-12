@@ -4,10 +4,7 @@
   "Line1b_GivenName[0]",
   "Line7_AlienNumber[0]",
   "Line20a_I94Number[0]",
-  "Line19_DOB[0]",
-  "Line1a_FamilyName[0]",
-  "Line1b_GivenName[0]",
-  "Line7_AlienNumber[0]"
+  "Line19_DOB[0]"
  ],
  "ASK": [
   "Line1c_MiddleName[0]",
@@ -140,7 +137,6 @@
   "Pt6Line7b_PartNumber[0]",
   "Pt6Line7c_ItemNumber[0]",
   "Pt6Line7d_AdditionalInfo[0]",
-  "Line1c_MiddleName[0]",
   "Pt6Line4d_AdditionalInfo[1]"
  ],
  "CONSUMER": [
