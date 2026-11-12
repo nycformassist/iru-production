@@ -550,3 +550,97 @@ describe('assessment-save / assessment-resume gates', () => {
     });
   });
 });
+
+describe('assessment-save / assessment-resume storage provisioning (defect 2026-11-12)', () => {
+  // Live-walk defect: "Save Progress" in the staff questionnaires
+  // failed with a red "Save failed" on the institutional Preview.
+  // Root cause: the handlers require Postgres, but the `assessments`
+  // table was never created in the provisioned database — the DDL
+  // (api/_lib/assessment-schema.sql) was defined, never applied —
+  // so the INSERT threw "relation assessments does not exist" and
+  // the catch returned a generic 500 'Save failed'. The handlers now
+  // ensure the table exists before the first query, and a missing or
+  // failing store is a 503 with an honest message instead of a 500.
+  const VALID_HASH = 'b'.repeat(64);
+  const CLIENT_KEY = 'provisioning-test-key';
+  const clientKeyHash = crypto.createHash('sha256').update(CLIENT_KEY).digest('hex');
+
+  function recordingSaveDb() {
+    const seen = [];
+    return {
+      seen,
+      async query(sql) {
+        seen.push(String(sql));
+        if (/INSERT INTO assessments/.test(sql)) {
+          return { rows: [{ token: 'save-token-1', id: 'assess-1', created_at: '2026-11-05T00:00:00.000Z' }] };
+        }
+        if (/UPDATE assessments SET facts/.test(sql)) {
+          return { rows: [{ token: 'save-token-1', id: 'assess-1', updated_at: '2026-11-05T00:00:00.000Z' }] };
+        }
+        return { rows: [] };
+      },
+    };
+  }
+
+  before(() => { process.env.PAYWALL_ENABLED = 'false'; });
+  after(() => { delete process.env.PAYWALL_ENABLED; });
+  afterEach(() => {
+    delete globalThis.__IRU_ASSESSMENT_DB__;
+    delete process.env.IRU_DB_URL;
+    delete process.env.DATABASE_URL;
+  });
+
+  it('save runs CREATE TABLE IF NOT EXISTS before the first INSERT', async () => {
+    const db = recordingSaveDb();
+    globalThis.__IRU_ASSESSMENT_DB__ = db;
+    const store = createEntitlementStore();
+    const res = mockRes();
+    await saveHandler(mockReq({
+      body: { clientKeyHash: VALID_HASH, form_id: 'i765', facts: {}, progress: {} },
+    }), res, store);
+    assert.equal(res.statusCode, 201);
+    const createIdx = db.seen.findIndex((s) => /CREATE TABLE IF NOT EXISTS assessments/.test(s));
+    const insertIdx = db.seen.findIndex((s) => /INSERT INTO assessments/.test(s));
+    assert.ok(createIdx >= 0, 'the ensure DDL must run');
+    assert.ok(insertIdx > createIdx, 'the DDL must precede the INSERT');
+  });
+
+  it('save with no database configured → 503 Assessment storage is not configured', async () => {
+    delete globalThis.__IRU_ASSESSMENT_DB__;
+    delete process.env.IRU_DB_URL;
+    delete process.env.DATABASE_URL;
+    const store = createEntitlementStore();
+    const res = mockRes();
+    await saveHandler(mockReq({
+      body: { clientKeyHash: VALID_HASH, form_id: 'i765', facts: {}, progress: {} },
+    }), res, store);
+    assert.equal(res.statusCode, 503);
+    assert.equal(res.jsonBody.error, 'Assessment storage is not configured');
+  });
+
+  it('save with a failing database → 503 Assessment storage is not available', async () => {
+    const err = new Error('connect ECONNREFUSED 127.0.0.1:5432');
+    err.code = 'ECONNREFUSED';
+    globalThis.__IRU_ASSESSMENT_DB__ = { async query() { throw err; } };
+    const store = createEntitlementStore();
+    const res = mockRes();
+    await saveHandler(mockReq({
+      body: { clientKeyHash: VALID_HASH, form_id: 'i765', facts: {}, progress: {} },
+    }), res, store);
+    assert.equal(res.statusCode, 503);
+    assert.equal(res.jsonBody.error, 'Assessment storage is not available');
+  });
+
+  it('resume with no database configured → 503 Assessment storage is not configured', async () => {
+    delete globalThis.__IRU_ASSESSMENT_DB__;
+    delete process.env.IRU_DB_URL;
+    delete process.env.DATABASE_URL;
+    const store = createEntitlementStore();
+    const res = mockRes();
+    await resumeHandler(mockReq({
+      body: { token: 'resume-token-1', clientKey: CLIENT_KEY },
+    }), res, store);
+    assert.equal(res.statusCode, 503);
+    assert.equal(res.jsonBody.error, 'Assessment storage is not configured');
+  });
+});
