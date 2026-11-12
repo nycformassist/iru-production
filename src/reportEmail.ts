@@ -7,7 +7,7 @@
  * the printed page matches the email. The EMAIL path renders
  * server-side instead: the client sends the same structured input
  * to POST /api/send-report, which renders its own HTML from it
- * (api/send-report.js renderStaffReportHtml) — raw client HTML is
+ * (api/staff.js renderStaffReportHtml) — raw client HTML is
  * never accepted as an email body (Carbon Pass 1, finding 1). The
  * two renderers must stay in step (same sections, same escaping).
  *

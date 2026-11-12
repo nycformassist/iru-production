@@ -25,6 +25,22 @@
       "destination": "/api/fill?form=i589"
     },
     {
+      "source": "/api/org-info",
+      "destination": "/api/staff?route=org-info"
+    },
+    {
+      "source": "/api/send-report",
+      "destination": "/api/staff?route=send-report"
+    },
+    {
+      "source": "/api/assessment-resume",
+      "destination": "/api/assessment?route=resume"
+    },
+    {
+      "source": "/api/assessment-save",
+      "destination": "/api/assessment?route=save"
+    },
+    {
       "source": "/api/(.*)",
       "destination": "/api/$1"
     },
@@ -38,12 +54,11 @@
       "maxDuration": 60,
       "includeFiles": "public/forms/**,api/build-mode.json"
     },
-    "api/assessment-save.js": {
+    "api/assessment.js": {
       "maxDuration": 10,
       "includeFiles": "api/build-mode.json"
     },
-    "api/assessment-resume.js": {
-      "maxDuration": 10,
+    "api/staff.js": {
       "includeFiles": "api/build-mode.json"
     },
     "api/analyze.js": {

@@ -7,7 +7,7 @@
  * - org-staff.js: per-org staff email registry (test org routes to the
  *   owner's test address; unlisted orgs resolve to null — no real org
  *   staff address is configured during testing).
- * - send-report.js: staff delivery endpoint — method, validation,
+ * - staff.js (send-report route): staff delivery endpoint — method, validation,
  *   rate limit, not-configured (missing RESEND_API_KEY), registry
  *   resolution (authoritative), and the Resend call shape (browser
  *   User-Agent header, single recipient, test-mode address).
@@ -19,7 +19,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { serverBuildMode, isInstitutionalServer, resetServerModeCache } from './_lib/server-mode.js';
 import { resolveOrgStaffEmail, ORG_STAFF } from './_lib/org-staff.js';
-import sendReport from './send-report.js';
+import { sendReportHandler as sendReport } from './staff.js';
 
 // The C-2 gate makes /api/send-report institutional-only. These tests
 // exercise the endpoint, so they run with the IRU_SERVER_MODE override;

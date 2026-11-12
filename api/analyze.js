@@ -233,7 +233,7 @@ async function handler(req, res, store = entitlementStore) {
   // is accepted scope-agnostically. No consumption: the assessment
   // may be re-run while entitled. Paywall off → unchanged behavior.
   // INSTITUTIONAL MODE: the organization holds access, so the consumer
-  // paid-access gate is skipped (same pattern as assessment-save.js /
+  // paid-access gate is skipped (same pattern as assessment.js /
   // generate-form.js).
   if (process.env.PAYWALL_ENABLED === 'true' && !isInstitutionalServer()) {
     const fullToken = (req.headers && req.headers['x-entitlement-token'])

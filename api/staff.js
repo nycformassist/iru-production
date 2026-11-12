@@ -1,4 +1,15 @@
 /**
+ * /api/staff — Staff dispatcher (institutional mode only).
+ *
+ * CONSOLIDATION (Vercel Hobby 12-function limit, 2026-11-12): this
+ * single function serves both staff endpoints, dispatching on
+ * ?route= (vercel.json rewrites the original URLs here):
+ *   GET  /api/org-info    → /api/staff?route=org-info
+ *   POST /api/send-report → /api/staff?route=send-report
+ * The two handlers below are moved verbatim from api/org-info.js and
+ * api/send-report.js (both deleted); every URL, method, request shape,
+ * and response shape is preserved.
+ *
  * POST /api/send-report — Staff delivery (institutional mode only).
  *
  * Sends a completed Tier 1 readiness report to a staff member's email
@@ -53,7 +64,7 @@
  * and the report content are never logged.
  */
 import { createLimiter, clientIp } from './_lib/ratelimit.js';
-import { resolveOrgStaff } from './_lib/org-staff.js';
+import { ORG_STAFF, resolveOrgStaff } from './_lib/org-staff.js';
 import { isInstitutionalServer } from './_lib/server-mode.js';
 
 const sendLimiter = createLimiter({ capacity: 5, windowMs: 10 * 60 * 1000 });
@@ -64,6 +75,27 @@ const MAX_REPORT_BYTES = 200 * 1024;
 // that hit default (non-browser) HTTP clients on Resend's API.
 const BROWSER_UA =
   'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36';
+
+// ── GET /api/org-info — read-only staff receiving setup ──────────────
+// Returns the organizations whose completed-case reports the server
+// will deliver, as [{ slug, orgName, configured }]. NO email addresses
+// are ever returned: the destination is server-configured at
+// sale/install time (api/_lib/org-staff.js) and staff cannot change it
+// from the device (Carbon Pass 2, finding C-2). Not gated to
+// institutional builds (the response carries no PII or credentials).
+// Moved verbatim from api/org-info.js.
+export async function orgInfoHandler(req, res) {
+  if (req.method !== 'GET') {
+    res.setHeader('Allow', 'GET');
+    return res.status(405).json({ error: 'Method not allowed. Use GET.' });
+  }
+  const orgs = Object.entries(ORG_STAFF).map(([slug, entry]) => ({
+    slug,
+    orgName: entry && typeof entry.name === 'string' ? entry.name : slug,
+    configured: !!(entry && typeof entry.staffEmail === 'string' && entry.staffEmail.includes('@')),
+  }));
+  return res.status(200).json(orgs);
+}
 
 // ── Server-side report rendering ───────────────────────────────────────
 // Mirrors src/reportEmail.ts buildStaffReportHtml (the print path).
@@ -214,7 +246,7 @@ export function renderStaffReportHtml(report) {
     `</body></html>`;
 }
 
-export default async function handler(req, res) {
+export async function sendReportHandler(req, res) {
   // Institutional-only endpoint (Carbon Pass 2, finding C-2): on
   // consumer builds this route does not exist — it must never act as
   // an unauthenticated email relay there.
@@ -339,4 +371,15 @@ export default async function handler(req, res) {
     deliveredTo: orgStaff.staffEmail,
     orgName: orgStaff.orgName,
   });
+}
+
+// ── Dispatcher (Vercel serves this file as one function) ──────────────
+// vercel.json rewrites /api/org-info and /api/send-report here with
+// ?route= set. An unknown or missing route is a 404 (the route does
+// not exist), never a fallback to a handler.
+export default async function handler(req, res) {
+  const route = req.query && typeof req.query.route === 'string' ? req.query.route : '';
+  if (route === 'org-info') return orgInfoHandler(req, res);
+  if (route === 'send-report') return sendReportHandler(req, res);
+  return res.status(404).json({ error: 'Not found.' });
 }

@@ -26,8 +26,8 @@ import crypto from 'node:crypto';
 import { createEntitlementStore } from './_lib/entitlement.js';
 import analyzeHandler from './analyze.js';
 import reviewHandler from './review-image.js';
-import saveHandler from './assessment-save.js';
-import resumeHandler from './assessment-resume.js';
+import { saveHandler } from './assessment.js';
+import { resumeHandler } from './assessment.js';
 
 const GOOD_ASSESSMENT = {
   readinessSummary: 'ok', factsProvided: [], missingInformation: [],
