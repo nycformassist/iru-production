@@ -24,15 +24,15 @@ export const REPEATING_SETS_589 = {
       // Entry 1 (most recent)
       { pdfSuffix: 'TextField4[0]', fieldId: 'entry_place', label: 'Entry 1 place' },
       { pdfSuffix: 'TextField4[1]', fieldId: 'entry_status', label: 'Entry 1 status' },
-      { pdfSuffix: 'DateTimeField3[0]', fieldId: 'entry_date', label: 'Entry 1 date' },
+      { pdfSuffix: 'DateTimeField3[0]', fieldId: 'entry_date', label: 'Entry 1 date', dateMDY: true },
       // Entry 2
       { pdfSuffix: 'TextField4[2]', fieldId: 'entry_place', label: 'Entry 2 place', itemIndex: 1 },
       { pdfSuffix: 'TextField4[3]', fieldId: 'entry_status', label: 'Entry 2 status', itemIndex: 1 },
-      { pdfSuffix: 'DateTimeField3[1]', fieldId: 'entry_date', label: 'Entry 2 date', itemIndex: 1 },
+      { pdfSuffix: 'DateTimeField3[1]', fieldId: 'entry_date', label: 'Entry 2 date', itemIndex: 1, dateMDY: true },
       // Entry 3
       { pdfSuffix: 'TextField4[4]', fieldId: 'entry_place', label: 'Entry 3 place', itemIndex: 2 },
       { pdfSuffix: 'TextField4[5]', fieldId: 'entry_status', label: 'Entry 3 status', itemIndex: 2 },
-      { pdfSuffix: 'DateTimeField3[2]', fieldId: 'entry_date', label: 'Entry 3 date', itemIndex: 2 },
+      { pdfSuffix: 'DateTimeField3[2]', fieldId: 'entry_date', label: 'Entry 3 date', itemIndex: 2, dateMDY: true },
     ],
   },
 
@@ -52,10 +52,10 @@ export const REPEATING_SETS_589 = {
       { pdfSuffix: 'TextField13[5]', fieldId: 'address_line_2', label: 'Last address line 2' },
       { pdfSuffix: 'TextField13[6]', fieldId: 'district', label: 'Last address district' },
       { pdfSuffix: 'TextField13[7]', fieldId: 'address_notes', label: 'Last address notes' },
-      { pdfSuffix: 'DateTimeField20[0]', fieldId: 'from_date_alt', label: 'Last address from date (alt)' },
-      { pdfSuffix: 'DateTimeField21[0]', fieldId: 'from_date', label: 'Last address from date' },
-      { pdfSuffix: 'DateTimeField22[0]', fieldId: 'to_date', label: 'Last address to date' },
-      { pdfSuffix: 'DateTimeField23[0]', fieldId: 'to_date_alt', label: 'Last address to date (alt)' },
+      { pdfSuffix: 'DateTimeField20[0]', fieldId: 'from_date_alt', label: 'Last address from date (alt)', dateMDY: true },
+      { pdfSuffix: 'DateTimeField21[0]', fieldId: 'from_date', label: 'Last address from date', dateMDY: true },
+      { pdfSuffix: 'DateTimeField22[0]', fieldId: 'to_date', label: 'Last address to date', dateMDY: true },
+      { pdfSuffix: 'DateTimeField23[0]', fieldId: 'to_date_alt', label: 'Last address to date (alt)', dateMDY: true },
     ],
   },
 
@@ -104,7 +104,7 @@ export const REPEATING_SETS_589 = {
         ['ChildLast', 'family_name', 'Last name'],
         ['ChildFirst', 'given_name', 'First name'],
         ['ChildMiddle', 'middle_name', 'Middle name'],
-        ['ChildDOB', 'date_of_birth', 'Date of birth'],
+        ['ChildDOB', 'date_of_birth', 'Date of birth', true],
         ['ChildNat', 'nationality', 'Nationality'],
         ['ChildRace', 'race', 'Race/ethnic group'],
         ['ChildCity', 'birth_city', 'Birth city'],
@@ -122,12 +122,13 @@ export const REPEATING_SETS_589 = {
       for (let i = 0; i < 4; i++) {
         const n = i + 1;
         const sf = subforms[i];
-        for (const [prefix, fieldId, label] of coreFields) {
+        for (const [prefix, fieldId, label, dateMDY] of coreFields) {
           fields.push({
             pdfField: `form1[0].${sf}.${prefix}${n}[0]`,
             fieldId: fieldId,
             label: `Child ${n} ${label.toLowerCase()}`,
             itemIndex: i,
+            ...(dateMDY ? { dateMDY: true } : {}),
           });
         }
         // Sex checkboxes (Male[0], Female[1])
@@ -287,6 +288,13 @@ export function expandRepeatingSet(setId) {
     itemIndex: f.itemIndex || 0,
     groupId: set.groupId,
     section: set.section,
+    // Carbon Pass 2, M-5: the flags MUST survive expansion — the old
+    // map dropped them, so dateMDY (set on residences_5yr from/to and
+    // the date fields above) never reached the fill loop and ISO dates
+    // were written raw into MM/DD/YYYY boxes; likewise `checkbox`
+    // (sex boxes) never reached the fill loop's kind:'checkbox'.
+    ...(f.dateMDY ? { dateMDY: true } : {}),
+    ...(f.checkbox ? { checkbox: true } : {}),
   }));
 }
 

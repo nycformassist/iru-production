@@ -2,7 +2,9 @@
  * I-90 Tier 1 Questionnaire — Application to Replace Permanent Resident Card
  *
  * Tier 1 scope: guided intake → factRecord → readiness assessment → preparation report + form download.
- * No PDF field mapping (I-90 PDF is not fillable — verified 2026-11-02, 0 AcroForm fields).
+ * PDF field mapping: fillable — answers fill the I-90 AcroForm PDF via
+ * api/fill.py (i90_full_binder) and Tier1Flow generateCompletedForm
+ * ('Generate completed I-90').
  *
  * Key concept: the applicant selects ONE reason for filing (2.a through 2.j).
  *
@@ -551,5 +553,5 @@ export const I90_FORM_INFO = {
   titles: { ES: "Solicitud de reemplazo de tarjeta de residente permanente", ZH: "永久居民卡补发申请", HT: "Aplikasyon pou Ranplase Kat Rezidan Pèmanan", AR: "طلب استبدال بطاقة الإقامة الدائمة" },
   pdfUrl: "https://www.uscis.gov/sites/default/files/document/forms/i-90.pdf",
   instructionsUrl: "https://www.uscis.gov/sites/default/files/document/forms/i-90instr.pdf",
-  fillable: false,
+  fillable: true,
 };

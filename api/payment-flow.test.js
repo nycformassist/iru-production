@@ -242,8 +242,11 @@ describe('paywall gate on form generation (§11 no double consumption)', () => {
       upsertFact(record, { id: 'family_name', value: 'Testfamily', source: 'answer' }, T0);
 
       // No token → 402.
+      // H-5: the entitlement is created + paid in the singleton store,
+      // so pass it as the injected store — the durable snapshot no
+      // longer merges the singleton in (Carbon Pass 2, finding H-5).
       const noTok = mockRes();
-      await generateHandler(mockReq({ body: { formId: 'I-765', factRecord: record } }), noTok);
+      await generateHandler(mockReq({ body: { formId: 'I-765', factRecord: record } }), noTok, entitlementStore);
       assert.equal(noTok.statusCode, 402);
 
       // Paid token → 200 with a PDF; second use → 402 (consumed).
@@ -252,11 +255,11 @@ describe('paywall gate on form generation (§11 no double consumption)', () => {
       const { entitlementToken, entitlementId } = coRes.body;
       entitlementStore.markPaidBySession(`sess_gate_${entitlementId}`, 'evt_gate');
       const okRes = mockRes();
-      await generateHandler(mockReq({ body: { formId: 'I-765', factRecord: record, entitlementToken } }), okRes);
+      await generateHandler(mockReq({ body: { formId: 'I-765', factRecord: record, entitlementToken } }), okRes, entitlementStore);
       assert.equal(okRes.statusCode, 200);
       assert.ok(okRes.body.pdfBase64.length > 1000);
       const again = mockRes();
-      await generateHandler(mockReq({ body: { formId: 'I-765', factRecord: record, entitlementToken } }), again);
+      await generateHandler(mockReq({ body: { formId: 'I-765', factRecord: record, entitlementToken } }), again, entitlementStore);
       assert.equal(again.statusCode, 402);
     } finally {
       delete process.env.PAYWALL_ENABLED;

@@ -31,6 +31,7 @@ export interface StaffReportInput {
   steps?: { id: string; title: Record<string, string> | string }[];
   questions?: {
     id: string;
+    factId?: string;
     step: string;
     type: string;
     groupId?: string;
@@ -120,7 +121,11 @@ export function buildStaffReportHtml(input: StaffReportInput): string {
         const display = displayAnswer(q, answers[q.id], lang);
         if (!display) return '';
         const short = q.shortLabels?.[lang] || q.shortLabel || labelText(q.labels as any, lang);
-        const fact = input.factRecord?.facts?.[q.id];
+        // Provenance badges look up the fact record by factId when the
+        // question carries one (Carbon Pass 2, finding M-3): facts are
+        // keyed by q.factId || q.id, so facts[q.id] missed every
+        // question whose id differs from its factId.
+        const fact = input.factRecord?.facts?.[q.factId || q.id];
         const badge =
           fact?.status === 'corrected'
             ? ` <span style="font-size:0.75rem;background:#fef3c7;color:#b45309;padding:0.1rem 0.4rem;border-radius:999;">Corrected (${(fact.corrections || []).length}x)</span>`

@@ -53,7 +53,8 @@
  * and the report content are never logged.
  */
 import { createLimiter, clientIp } from './_lib/ratelimit.js';
-import { resolveOrgStaffEmail } from './_lib/org-staff.js';
+import { resolveOrgStaff } from './_lib/org-staff.js';
+import { isInstitutionalServer } from './_lib/server-mode.js';
 
 const sendLimiter = createLimiter({ capacity: 5, windowMs: 10 * 60 * 1000 });
 
@@ -164,7 +165,7 @@ export function renderStaffReportHtml(report) {
         if (!display) return '';
         const short = (q.shortLabels && typeof q.shortLabels === 'object' && q.shortLabels[lang])
           || q.shortLabel || labelText(q.labels, lang);
-        const fact = facts[q.id] && typeof facts[q.id] === 'object' ? facts[q.id] : null;
+        const fact = facts[q.factId || q.id] && typeof facts[q.factId || q.id] === 'object' ? facts[q.factId || q.id] : null;
         const badge =
           fact && fact.status === 'corrected'
             ? ` <span style="font-size:0.75rem;background:#fef3c7;color:#b45309;padding:0.1rem 0.4rem;border-radius:999;">Corrected (${Array.isArray(fact.corrections) ? fact.corrections.length : 0}x)</span>`
@@ -214,6 +215,10 @@ export function renderStaffReportHtml(report) {
 }
 
 export default async function handler(req, res) {
+  // Institutional-only endpoint (Carbon Pass 2, finding C-2): on
+  // consumer builds this route does not exist — it must never act as
+  // an unauthenticated email relay there.
+  if (!isInstitutionalServer()) return res.status(404).json({ error: 'Not found.' });
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
     return res.status(405).json({ error: 'Method not allowed. Use POST.' });
@@ -237,10 +242,11 @@ export default async function handler(req, res) {
   // Strict registry resolution (finding 1): the org MUST be listed
   // server-side. An omitted or unlisted org is rejected — the client
   // cannot supply a recipient address, and there is no fallback.
-  const staffEmail = resolveOrgStaffEmail(org);
-  if (!staffEmail) {
+  const orgStaff = resolveOrgStaff(org);
+  if (!orgStaff) {
     return res.status(400).json({ error: 'No staff delivery is configured for this organization.' });
   }
+  const staffEmail = orgStaff.staffEmail;
   // Structured report data only. Client HTML is never read or used.
   const report = body.report && typeof body.report === 'object' ? body.report : null;
   if (!report) {
@@ -261,9 +267,16 @@ export default async function handler(req, res) {
   if (!KNOWN_FORMS.has(formNumber)) {
     return res.status(400).json({ error: 'Unknown form number.' });
   }
-  const participantName = typeof body.participantName === 'string'
-    ? body.participantName.trim().slice(0, 200)
-    : (typeof report.participantName === 'string' ? report.participantName.trim().slice(0, 200) : '');
+  // Strip control / bidi-override characters before the name is used
+  // in the subject (Carbon Pass 2, finding M-2): CR/LF or U+202E in a
+  // participant-supplied name must never reach a mail header.
+  const stripHeaderChars = (v) =>
+    (typeof v === 'string' ? v : '').replace(/[\r\n\x00-\x1f\u202a-\u202e\u2066-\u2069]/g, '');
+  const participantName = stripHeaderChars(
+    typeof body.participantName === 'string'
+      ? body.participantName.trim().slice(0, 200)
+      : (typeof report.participantName === 'string' ? report.participantName.trim().slice(0, 200) : ''),
+  );
 
   // The server renders the email HTML from the structured report.
   const html = renderStaffReportHtml({ ...report, formNumber, participantName });
@@ -301,17 +314,29 @@ export default async function handler(req, res) {
   }
 
   if (!upstream.ok) {
+    // Map every non-2xx upstream status to 502 (429 for rate limit)
+    // and return a sanitized message — the raw provider message is
+    // never forwarded (Carbon Pass 2, finding M-2: it can disclose
+    // account details in test mode). The provider's own rejection is
+    // still logged server-side, so a test-mode recipient restriction
+    // is observable without being surfaced to the caller.
+    const status = upstream.status === 429 ? 429 : 502;
     const message =
       (data && (data.message || data.error)) || `Email service returned ${upstream.status}.`;
-    // Surface the provider's own rejection (e.g. test-mode recipient
-    // restriction) instead of rewriting it into a false success.
     console.error('[iru] send-report: Resend rejected', upstream.status, message);
-    return res.status(upstream.status === 401 || upstream.status === 403 ? 502 : upstream.status).json({
-      error: message,
+    return res.status(status).json({
+      error: 'The email service could not send this report. Please try again.',
       reason: 'provider-rejected',
       status: upstream.status,
     });
   }
 
-  return res.status(200).json({ ok: true, id: data && data.id ? data.id : null });
+  // The destination reported here is the server-side registry entry —
+  // never a client-supplied value (Carbon Pass 2, finding C-2).
+  return res.status(200).json({
+    ok: true,
+    id: data && data.id ? data.id : null,
+    deliveredTo: orgStaff.staffEmail,
+    orgName: orgStaff.orgName,
+  });
 }

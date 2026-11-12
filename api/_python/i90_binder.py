@@ -72,7 +72,7 @@ def build_i90_plan(facts):
             # If value doesn't match, skip (don't check the box)
         else:
             # Text field: use standard binder logic
-            from binder import bind as core_bind
+            from _python.binder import bind as core_bind
             single_reg = {fact_id: {"kind": "text", "field": spec["field"], "required": False}}
             p, r = core_bind(single_reg, {fact_id: fact})
             plan.extend(p)

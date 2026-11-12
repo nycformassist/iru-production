@@ -48,6 +48,9 @@ const AUTHENTICITY_DISCLAIMER =
 function getVisionClient(apiKey) {
   if (globalThis.__IRU_VISION_CLIENT__) return globalThis.__IRU_VISION_CLIENT__;
   const ai = new GoogleGenAI({ apiKey });
+  // Default verified against the live AI Studio models.list on 2026-11-12
+  // (gemini-3.8-flash listed with generateContent support) — do not
+  // re-flag as nonexistent without re-checking the live list.
   const model = process.env.GEMINI_MODEL || "gemini-3.8-flash";
   return {
     async reviewImage({ imageBase64, mimeType, prompt }) {
@@ -261,8 +264,12 @@ async function handler(req, res, store = entitlementStore) {
 
 // Raw handler for unit tests (singleton default). Vercel serves the
 // durable-wrapped default: load → restore → run → save (CAS).
+// Read-only peek gate (Carbon Pass 2, finding H-5): this handler only
+// peeks at entitlements, never mutates the store, so the durable
+// snapshot is loaded and the handler streams directly to the real
+// response without captureRes() buffering.
 export { handler };
-export default withDurableStore(handler);
+export default withDurableStore(handler, { readOnly: true });
 
 /** Magic-byte signatures for the allowed image types. Never throws. */
 function imageSignatureMatches(bytes, mimeType) {

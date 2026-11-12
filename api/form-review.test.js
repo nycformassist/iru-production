@@ -121,8 +121,11 @@ describe('form review experience (B2C §5)', () => {
       await blankFormHandler(mockReq({ method: 'GET', query: { form: 'I-765' } }), blank);
       assert.equal(blank.statusCode, 200);
       // Preparation of I-765 is still refused — blank access changed nothing:
+      // H-5: the entitlement is seeded into the singleton store, so pass
+      // it as the injected store — the durable snapshot no longer merges
+      // the singleton in (Carbon Pass 2, finding H-5).
       const gen = mockRes();
-      await generateHandler(mockReq({ body: { formId: 'I-765', factRecord: baseRecord(), entitlementToken: token } }), gen);
+      await generateHandler(mockReq({ body: { formId: 'I-765', factRecord: baseRecord(), entitlementToken: token } }), gen, entitlementStore);
       assert.equal(gen.statusCode, 402);
       assert.equal(gen.body.reason, 'form-not-covered');
       // And the entitlement itself was not consumed or altered by the download:

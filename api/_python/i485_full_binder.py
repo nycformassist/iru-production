@@ -110,9 +110,9 @@ def build_i485_full_plan(facts, addresses=None, biographic=None):
             _yes_vals = [str(_v).lower() for _v in _pair.get("yes_values", ["yes", "y", "true", "1"])]
             _no_vals = [str(_v).lower() for _v in _pair.get("no_values", ["no", "n", "false", "0"])]
             if _val in _yes_vals:
-                plan.append((_yf, "Yes", "checkbox", _fid))
+                plan.append((_yf, True, "checkbox", _fid))
             elif _val in _no_vals:
-                plan.append((_nf, "Yes", "checkbox", _fid))
+                plan.append((_nf, True, "checkbox", _fid))
     except Exception as _e:
         print("[i485_full_binder] " + _e.__class__.__name__ + " in i485 yes/no pairs: " + str(_e), file=sys.stderr)
 
@@ -144,7 +144,7 @@ def build_i485_full_plan(facts, addresses=None, biographic=None):
                         _field = _v2
                         break
             if _field:
-                plan.append((_field, "Yes", "checkbox", _fid))
+                plan.append((_field, True, "checkbox", _fid))
     except Exception as _e:
         print("[i485_full_binder] " + _e.__class__.__name__ + " in i485 checkbox groups: " + str(_e), file=sys.stderr)
 

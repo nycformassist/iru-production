@@ -75,10 +75,13 @@ function paidFormprep(formId) {
 }
 async function limitedEval(token, ip) {
   const res = mockRes();
+  // H-5: entitlements are seeded into the singleton store, so pass it
+  // as the injected store — the durable snapshot no longer merges the
+  // singleton in (Carbon Pass 2, finding H-5).
   await analyzeHandler(mockReq({
     headers: { 'x-forwarded-for': ip || nextIp(), ...(token ? { 'x-entitlement-token': token } : {}) },
     body: { mode: 'limited', answers: { ...ANSWERS } },
-  }), res);
+  }), res, entitlementStore);
   return res;
 }
 function syntheticRecord() {
@@ -129,7 +132,7 @@ describe('evaluation protection (PAYWALL_ENABLED)', () => {
     assert.equal(again.statusCode, 402);
     // And it never authorizes a paid deliverable:
     const gen = mockRes();
-    await generateHandler(mockReq({ body: { formId: 'I-589', factRecord: syntheticRecord(), entitlementToken: evaluation.token } }), gen);
+    await generateHandler(mockReq({ body: { formId: 'I-589', factRecord: syntheticRecord(), entitlementToken: evaluation.token } }), gen, entitlementStore);
     assert.equal(gen.statusCode, 402);
   });
 
@@ -162,16 +165,16 @@ describe('evaluation protection (PAYWALL_ENABLED)', () => {
     const oneForm = paidFormprep('I-589');
     // The one-form (I-589) token cannot generate the OTHER form:
     const wrong = mockRes();
-    await generateHandler(mockReq({ body: { formId: 'I-765', factRecord: syntheticRecord(), entitlementToken: oneForm.token } }), wrong);
+    await generateHandler(mockReq({ body: { formId: 'I-765', factRecord: syntheticRecord(), entitlementToken: oneForm.token } }), wrong, entitlementStore);
     assert.equal(wrong.statusCode, 402);
     assert.equal(wrong.body.reason, 'form-not-covered');
     // The covered form generates, exactly once:
     const okRes = mockRes();
-    await generateHandler(mockReq({ body: { formId: 'I-589', factRecord: syntheticRecord(), entitlementToken: oneForm.token } }), okRes);
+    await generateHandler(mockReq({ body: { formId: 'I-589', factRecord: syntheticRecord(), entitlementToken: oneForm.token } }), okRes, entitlementStore);
     assert.equal(okRes.statusCode, 200);
     assert.ok(okRes.body.pdfBase64.length > 1000);
     const replay = mockRes();
-    await generateHandler(mockReq({ body: { formId: 'I-589', factRecord: syntheticRecord(), entitlementToken: oneForm.token } }), replay);
+    await generateHandler(mockReq({ body: { formId: 'I-589', factRecord: syntheticRecord(), entitlementToken: oneForm.token } }), replay, entitlementStore);
     assert.equal(replay.statusCode, 402);
   });
 
@@ -193,7 +196,7 @@ describe('evaluation protection (PAYWALL_ENABLED)', () => {
     assert.ok(!('pdfBase64' in own.body), 'status never returns generated files');
     // Generation with Mallory's evaluation token cannot touch Alice's grant:
     const gen = mockRes();
-    await generateHandler(mockReq({ body: { formId: 'I-589', factRecord: syntheticRecord(), entitlementToken: mallory.token } }), gen);
+    await generateHandler(mockReq({ body: { formId: 'I-589', factRecord: syntheticRecord(), entitlementToken: mallory.token } }), gen, entitlementStore);
     assert.equal(gen.statusCode, 402);
   });
 

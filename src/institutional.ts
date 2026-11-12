@@ -154,17 +154,21 @@ export function markCaseReportSent(id: string, staffEmail: string): StaffCase | 
 // hardcoded address, and the consumer never enters a staff email and
 // never opens a mail app.
 //
-// How the staff email is configured per organization (two layers):
-//   1. DEVICE (this layer, works now): staff configures their org's
-//      receiving email once in the Staff Dashboard ("Staff receiving
-//      setup"). It is stored on the device and the consumer module on
-//      that device routes to it. Each org's staff sets their own.
-//   2. SERVER (upgrade path): api/org-staff.json maps org slugs to staff
-//      emails. When an org is in that registry, /api/send-report
-//      resolves it server-side (authoritative — the client cannot
-//      choose the recipient). The owner populates it with real staff
-//      emails; it ships empty because no real staff email has been
-//      provided and none is invented here.
+// How the staff email is configured per organization (Carbon Pass 2,
+// finding C-2 — the device layer below is READ-ONLY now):
+//   1. SERVER (authoritative): api/_lib/org-staff.js maps org slugs to
+//      staff emails. /api/send-report resolves it server-side; the
+//      client cannot choose the recipient. The owner populates it with
+//      real staff emails at sale/install time. GET /api/org-info
+//      exposes the configured org slugs/names (never emails) so the
+//      Staff Dashboard can display the receiving setup.
+//   2. DEVICE (legacy read path, no longer writable): an org config
+//      stored on this device by an earlier build is still readable via
+//      getOrgConfig()/resolveOrgSlug() for the Tier 1 send flow, but
+//      nothing in the UI can create or change one anymore —
+//      saveOrgConfig was removed because a client-set slug/email can
+//      never route (the server allowlist rejects it) and misled staff
+//      about where completed reports were sent.
 // The org is identified by a URL `?org=<slug>` when the consumer arrives
 // via an org link (their own phone), else by the device org config
 // (a staff terminal / staff-started case).
@@ -199,15 +203,6 @@ export function getOrgConfig(): OrgConfig | null {
   } catch {
     return null;
   }
-}
-
-export function saveOrgConfig(orgName: string, staffEmail: string): OrgConfig | null {
-  const name = (orgName || '').trim();
-  const email = (staffEmail || '').trim();
-  if (!email.includes('@')) return null;
-  const cfg: OrgConfig = { orgSlug: slugifyOrg(name) || 'organization', orgName: name || 'Your organization', staffEmail: email };
-  staffStoreSet(ORG_CONFIG_KEY, JSON.stringify(cfg));
-  return cfg;
 }
 
 /** Org slug for this session: URL `?org=` wins, else the device config. */

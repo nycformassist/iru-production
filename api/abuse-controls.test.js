@@ -287,10 +287,13 @@ describe('WS5 (d) access isolation at the HTTP layer', () => {
       entitlementStore.markPaidBySession('sess_ws5_b', 'evt_ws5_b');
 
       // B's valid token against A's covered form → 402 (scope mismatch).
+      // H-5: entitlements are seeded into the singleton store, so pass
+      // it as the injected store — the durable snapshot no longer merges
+      // the singleton in (Carbon Pass 2, finding H-5).
       const bPeek = mockRes();
       await generateHandler(reqFrom('10.20.10.1', {
         body: { formId: 'I-589', factRecord: baseRecord(), entitlementToken: b.token },
-      }), bPeek);
+      }), bPeek, entitlementStore);
       assert.equal(bPeek.statusCode, 402);
       assert.equal(bPeek.body.reason, 'scope-mismatch');
 
@@ -298,7 +301,7 @@ describe('WS5 (d) access isolation at the HTTP layer', () => {
       const aWrongForm = mockRes();
       await generateHandler(reqFrom('10.20.10.2', {
         body: { formId: 'I-765', factRecord: baseRecord(), entitlementToken: a.token },
-      }), aWrongForm);
+      }), aWrongForm, entitlementStore);
       assert.equal(aWrongForm.statusCode, 402);
       assert.equal(aWrongForm.body.reason, 'form-not-covered');
 
@@ -306,7 +309,7 @@ describe('WS5 (d) access isolation at the HTTP layer', () => {
       const aOk = mockRes();
       await generateHandler(reqFrom('10.20.10.3', {
         body: { formId: 'I-589', factRecord: baseRecord(), entitlementToken: a.token },
-      }), aOk);
+      }), aOk, entitlementStore);
       assert.equal(aOk.statusCode, 200, "A's entitlement is intact after B's attempts");
       // ...exactly once. A's was a SINGLE-form entitlement, so the
       // delivery exhausted it: the store flips to CONSUMED and the
@@ -315,7 +318,7 @@ describe('WS5 (d) access isolation at the HTTP layer', () => {
       const aAgain = mockRes();
       await generateHandler(reqFrom('10.20.10.4', {
         body: { formId: 'I-589', factRecord: baseRecord(), entitlementToken: a.token },
-      }), aAgain);
+      }), aAgain, entitlementStore);
       assert.equal(aAgain.statusCode, 402);
       assert.equal(aAgain.body.reason, 'state-CONSUMED');
 
@@ -329,18 +332,18 @@ describe('WS5 (d) access isolation at the HTTP layer', () => {
       const firstUse = mockRes();
       await generateHandler(reqFrom('10.20.10.5', {
         body: { formId: 'I-589', factRecord: baseRecord(), entitlementToken: bundle.token },
-      }), firstUse);
+      }), firstUse, entitlementStore);
       assert.equal(firstUse.statusCode, 200);
       const repeatUse = mockRes();
       await generateHandler(reqFrom('10.20.10.6', {
         body: { formId: 'I-589', factRecord: baseRecord(), entitlementToken: bundle.token },
-      }), repeatUse);
+      }), repeatUse, entitlementStore);
       assert.equal(repeatUse.statusCode, 402);
       assert.equal(repeatUse.body.reason, 'form-already-delivered');
       const otherForm = mockRes();
       await generateHandler(reqFrom('10.20.10.7', {
         body: { formId: 'I-765', factRecord: baseRecord(), entitlementToken: bundle.token },
-      }), otherForm);
+      }), otherForm, entitlementStore);
       assert.equal(otherForm.statusCode, 200, 'the undelivered bundle form remains usable');
     } finally { delete process.env.PAYWALL_ENABLED; }
   });

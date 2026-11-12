@@ -2,7 +2,13 @@
  * I-485 Tier 1 Questionnaire — Application to Register Permanent Residence or Adjust Status
  *
  * Tier 1 scope: guided intake → factRecord → readiness assessment → preparation report + form download.
- * No PDF field mapping (I-485 PDF is not fillable — verified 2026-11-02, 0 AcroForm fields).
+ * PDF field mapping: Form I-485 (Edition 09/18/26) IS fillable (730 AcroForm widgets).
+ * Filled by api/fill.py via api/_python/i485_full_binder.py (see i485_detailed_registry.json,
+ * i485_yesno_pairs.json); Tier1Flow.tsx offers the completed-form download.
+ * The pre-2026-11-12 'not fillable / 0 fields' note was wrong. Part 9 of the form
+ * (General Eligibility and Inadmissibility Grounds) is the source of the
+ * admissibility questions below; the 'Pt8/Pt9' prefixes in the old shortLabels
+ * were internal PDF widget names, not form part numbers.
  *
  * Key concept: the applicant must have an underlying basis for adjustment
  * (approved family/employment petition, asylum grant, etc.).
@@ -2298,7 +2304,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_01",
-    shortLabel: "Admissibility: Pt8Line13_YesNo",
+    shortLabel: "Violated nonimmigrant status terms",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_01",
@@ -2310,7 +2316,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_02",
-    shortLabel: "Admissibility: Pt8Line17_YesNo",
+    shortLabel: "Voluntary departure not honored",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_02",
@@ -2322,7 +2328,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_03",
-    shortLabel: "Admissibility: Pt8Line18_YesNo",
+    shortLabel: "In removal/exclusion/deportation proceedings",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_03",
@@ -2334,7 +2340,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_04",
-    shortLabel: "Admissibility: Pt8Line19_YesNo",
+    shortLabel: "Final order of exclusion/deportation/removal",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_04",
@@ -2346,7 +2352,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_05",
-    shortLabel: "Admissibility: Pt8Line1_YesNo",
+    shortLabel: "Member of organization/association/group",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_05",
@@ -2358,7 +2364,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_06",
-    shortLabel: "Admissibility: Pt8Line20_YesNo",
+    shortLabel: "Prior final removal order reinstated",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_06",
@@ -2370,7 +2376,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_07",
-    shortLabel: "Admissibility: Pt8Line22_YesNo",
+    shortLabel: "Arrested/cited/charged or diversion program",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_07",
@@ -2382,7 +2388,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_08",
-    shortLabel: "Admissibility: Pt8Line23_YesNo",
+    shortLabel: "Applied for relief from removal",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_08",
@@ -2394,7 +2400,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_09",
-    shortLabel: "Admissibility: Pt8Line24a_YesNo",
+    shortLabel: "J-1 exchange visitor, 2-year residence requirement",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_09",
@@ -2406,7 +2412,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_10",
-    shortLabel: "Admissibility: Pt8Line24b_YesNo",
+    shortLabel: "Complied with 2-year foreign residence requirement",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_10",
@@ -2418,7 +2424,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_11",
-    shortLabel: "Admissibility: Pt8Line24c_YesNo",
+    shortLabel: "Waiver of 2-year foreign residence requirement",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_11",
@@ -2430,7 +2436,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_12",
-    shortLabel: "Admissibility: Pt8Line25_YesNo",
+    shortLabel: "Ordered punished / liberty restrained by judge",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_12",
@@ -2442,7 +2448,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_13",
-    shortLabel: "Admissibility: Pt8Line26_YesNo",
+    shortLabel: "Violated controlled substance law",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_13",
@@ -2454,7 +2460,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_14",
-    shortLabel: "Admissibility: Pt8Line27_YesNo",
+    shortLabel: "Trafficked / benefited from drug trafficking",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_14",
@@ -2466,7 +2472,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_15",
-    shortLabel: "Admissibility: Pt8Line28_YesNo",
+    shortLabel: "Spouse/child of drug trafficker, benefited in last 5 years",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_15",
@@ -2478,7 +2484,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_16",
-    shortLabel: "Admissibility: Pt8Line29_YesNo",
+    shortLabel: "Knew benefit came from spouse/parent drug trafficking",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_16",
@@ -2490,7 +2496,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_17",
-    shortLabel: "Admissibility: Pt8Line30_YesNo",
+    shortLabel: "Engaged in prostitution",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_17",
@@ -2502,7 +2508,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_18",
-    shortLabel: "Admissibility: Pt8Line31_YesNo",
+    shortLabel: "Procured/imported persons for prostitution",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_18",
@@ -2514,7 +2520,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_19",
-    shortLabel: "Admissibility: Pt8Line32_YesNo",
+    shortLabel: "Received proceeds from prostitution",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_19",
@@ -2526,7 +2532,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_20",
-    shortLabel: "Admissibility: Pt8Line33_YesNo",
+    shortLabel: "Intends illegal gambling / commercialized vice",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_20",
@@ -2538,7 +2544,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_21",
-    shortLabel: "Admissibility: Pt8Line34_YesNo",
+    shortLabel: "Exercised immunity to avoid prosecution",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_21",
@@ -2550,7 +2556,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_22",
-    shortLabel: "Admissibility: Pt8Line35a_YesNo",
+    shortLabel: "Served as foreign government official",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_22",
@@ -2562,7 +2568,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_23",
-    shortLabel: "Admissibility: Pt8Line35b_YesNo",
+    shortLabel: "Responsible for religious freedom violations",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_23",
@@ -2574,7 +2580,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_24",
-    shortLabel: "Admissibility: Pt8Line36_YesNo",
+    shortLabel: "Sex trafficking by force/fraud/coercion",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_24",
@@ -2586,7 +2592,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_25",
-    shortLabel: "Admissibility: Pt8Line37_YesNo",
+    shortLabel: "Trafficked person into involuntary servitude/slavery",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_25",
@@ -2598,7 +2604,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_26",
-    shortLabel: "Admissibility: Pt8Line38_YesNo",
+    shortLabel: "Aided human trafficking",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_26",
@@ -2610,7 +2616,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_27",
-    shortLabel: "Admissibility: Pt8Line40_YesNo",
+    shortLabel: "Knew benefit came from spouse/parent trafficking",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_27",
@@ -2622,7 +2628,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_28",
-    shortLabel: "Admissibility: Pt8Line41_YesNo",
+    shortLabel: "Money laundering",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_28",
@@ -2634,7 +2640,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_29",
-    shortLabel: "Admissibility: Pt8Line42c_YesNo",
+    shortLabel: "Intends to oppose/overthrow U.S. Government",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_29",
@@ -2646,7 +2652,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_30",
-    shortLabel: "Admissibility: Pt8Line42d_YesNo",
+    shortLabel: "Intends other unlawful activity",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_30",
@@ -2658,7 +2664,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_31",
-    shortLabel: "Admissibility: Pt8Line43a_YesNo",
+    shortLabel: "Weapons/paramilitary training",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_31",
@@ -2670,7 +2676,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_32",
-    shortLabel: "Admissibility: Pt8Line43b_YesNo",
+    shortLabel: "Kidnapping/assassination/hijacking/sabotage",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_32",
@@ -2682,7 +2688,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_33",
-    shortLabel: "Admissibility: Pt8Line43c_YesNo",
+    shortLabel: "Used weapon/explosive to endanger others",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_33",
@@ -2694,7 +2700,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_34",
-    shortLabel: "Admissibility: Pt8Line43d_YesNo",
+    shortLabel: "Threatened/planned acts in Items 43.b-43.c",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_34",
@@ -2706,7 +2712,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_35",
-    shortLabel: "Admissibility: Pt8Line43e_YesNo",
+    shortLabel: "Incited acts in Items 43.b-43.c",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_35",
@@ -2718,7 +2724,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_36",
-    shortLabel: "Admissibility: Pt8Line43g_YesNo",
+    shortLabel: "Recruited/funded group doing Items 43.b-43.e acts",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_36",
@@ -2730,7 +2736,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_37",
-    shortLabel: "Admissibility: Pt8Line43h_YesNo",
+    shortLabel: "Funded/supported Items 43.b-43.e activities",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_37",
@@ -2742,7 +2748,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_38",
-    shortLabel: "Admissibility: Pt8Line43i_YesNo",
+    shortLabel: "Funded/supported person/group doing Items 43.b-43.e acts",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_38",
@@ -2754,7 +2760,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_39",
-    shortLabel: "Admissibility: Pt8Line44_YesNo",
+    shortLabel: "Intends Items 43.b-43.e activities",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_39",
@@ -2766,7 +2772,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_40",
-    shortLabel: "Admissibility: Pt8Line45_YesNo",
+    shortLabel: "Intends activity endangering U.S. welfare/safety/security",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_40",
@@ -2778,7 +2784,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_41",
-    shortLabel: "Admissibility: Pt8Line46_YesNo",
+    shortLabel: "Spouse/child of person who did Items 43.b-43.i acts",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_41",
@@ -2790,7 +2796,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_42",
-    shortLabel: "Admissibility: Pt8Line47_YesNo",
+    shortLabel: "Sold/provided/transported weapons",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_42",
@@ -2802,7 +2808,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_43",
-    shortLabel: "Admissibility: Pt8Line48_YesNo",
+    shortLabel: "Worked/volunteered where people detained",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_43",
@@ -2814,7 +2820,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_44",
-    shortLabel: "Admissibility: Pt8Line49_YesNo",
+    shortLabel: "Member of group that used weapons",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_44",
@@ -2826,7 +2832,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_45",
-    shortLabel: "Admissibility: Pt8Line50_YesNo",
+    shortLabel: "Served in military/police unit",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_45",
@@ -2838,7 +2844,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_46",
-    shortLabel: "Admissibility: Pt8Line51_YesNo",
+    shortLabel: "Served in armed group",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_46",
@@ -2850,7 +2856,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_47",
-    shortLabel: "Admissibility: Pt8Line52_YesNo",
+    shortLabel: "Member of Communist/totalitarian party",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_47",
@@ -2862,7 +2868,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_48",
-    shortLabel: "Admissibility: Pt8Line53a_YesNo",
+    shortLabel: "Torture",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_48",
@@ -2874,7 +2880,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_49",
-    shortLabel: "Admissibility: Pt8Line53b_YesNo",
+    shortLabel: "Genocide",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_49",
@@ -2886,7 +2892,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_50",
-    shortLabel: "Admissibility: Pt8Line53c_YesNo",
+    shortLabel: "Killing / trying to kill",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_50",
@@ -2898,7 +2904,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_51",
-    shortLabel: "Admissibility: Pt8Line53d_YesNo",
+    shortLabel: "Intentionally/severely injuring",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_51",
@@ -2910,7 +2916,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_52",
-    shortLabel: "Admissibility: Pt8Line54_YesNo",
+    shortLabel: "Recruited child under 15 for hostilities/armed group",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_52",
@@ -2922,7 +2928,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_53",
-    shortLabel: "Admissibility: Pt8Line55_YesNo",
+    shortLabel: "Used child under 15 in hostilities",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_53",
@@ -2934,7 +2940,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_54",
-    shortLabel: "Admissibility: Pt9Line10_YesNo",
+    shortLabel: "Denied admission to the United States",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_54",
@@ -2946,7 +2952,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_55",
-    shortLabel: "Admissibility: Pt9Line11_YesNo",
+    shortLabel: "Denied a U.S. visa",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_55",
@@ -2958,7 +2964,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_56",
-    shortLabel: "Admissibility: Pt9Line12_YesNo",
+    shortLabel: "Worked in the U.S. without authorization",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_56",
@@ -2970,7 +2976,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_57",
-    shortLabel: "Admissibility: Pt9Line23_YesNo",
+    shortLabel: "Committed a crime of any kind",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_57",
@@ -2982,7 +2988,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_58",
-    shortLabel: "Admissibility: Pt9Line24_YesNo",
+    shortLabel: "Pled guilty / convicted of crime",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_58",
@@ -2994,7 +3000,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_59",
-    shortLabel: "Admissibility: Pt9Line39_YesNo",
+    shortLabel: "Spouse/child of human trafficker, benefited in last 5 years",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_59",
@@ -3006,7 +3012,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_60",
-    shortLabel: "Admissibility: Pt9Line63_YesNo",
+    shortLabel: "Received means-tested public benefit",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_60",
@@ -3018,7 +3024,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_61",
-    shortLabel: "Admissibility: Pt9Line67_YesNo",
+    shortLabel: "Failed to attend removal proceedings",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_61",
@@ -3030,7 +3036,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_62",
-    shortLabel: "Admissibility: Pt9Line68_YesNo",
+    shortLabel: "Submitted altered/fraudulent documents",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_62",
@@ -3042,7 +3048,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_63",
-    shortLabel: "Admissibility: Pt9Line69_YesNo",
+    shortLabel: "Lied/misrepresented on visa or immigration application",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_63",
@@ -3054,7 +3060,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_64",
-    shortLabel: "Admissibility: Pt9Line70_YesNo",
+    shortLabel: "Falsely claimed U.S. citizenship",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_64",
@@ -3066,7 +3072,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_65",
-    shortLabel: "Admissibility: Pt9Line71_YesNo",
+    shortLabel: "Stowaway on vessel/aircraft",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_65",
@@ -3078,7 +3084,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_66",
-    shortLabel: "Admissibility: Pt9Line72_YesNo",
+    shortLabel: "Alien smuggling",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_66",
@@ -3090,7 +3096,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_67",
-    shortLabel: "Admissibility: Pt9Line73_YesNo",
+    shortLabel: "Final civil penalty order (INA 274C)",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_67",
@@ -3102,7 +3108,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_68",
-    shortLabel: "Admissibility: Pt9Line74_YesNo",
+    shortLabel: "Excluded/deported/removed or departed after order",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_68",
@@ -3114,7 +3120,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_69",
-    shortLabel: "Admissibility: Pt9Line75_YesNo",
+    shortLabel: "Entered without inspection/admission/parole",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_69",
@@ -3126,7 +3132,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_70",
-    shortLabel: "Admissibility: Pt9Line76_YesNo",
+    shortLabel: "Unlawfully present since April 1, 1997",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_70",
@@ -3138,7 +3144,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_71",
-    shortLabel: "Admissibility: Pt9Line77_YesNo",
+    shortLabel: "Trafficking central reason for unlawful presence",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_71",
@@ -3150,7 +3156,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_72",
-    shortLabel: "Admissibility: Pt9Line78a_YesNo",
+    shortLabel: "Reentered without inspection after 1+ year unlawful presence",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_72",
@@ -3162,7 +3168,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_73",
-    shortLabel: "Admissibility: Pt9Line78b_YesNo",
+    shortLabel: "Reentered without inspection after deportation/removal",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_73",
@@ -3174,7 +3180,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_74",
-    shortLabel: "Admissibility: Pt9Line79_YesNo",
+    shortLabel: "Plans to practice polygamy",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_74",
@@ -3186,7 +3192,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_75",
-    shortLabel: "Admissibility: Pt9Line80_YesNo",
+    shortLabel: "Accompanying helpless inadmissible alien (INA 232(c))",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_75",
@@ -3198,7 +3204,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_76",
-    shortLabel: "Admissibility: Pt9Line81_YesNo",
+    shortLabel: "Detained U.S. citizen child abroad",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_76",
@@ -3210,7 +3216,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_77",
-    shortLabel: "Admissibility: Pt9Line82_YesNo",
+    shortLabel: "Voted in violation of U.S. law",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_77",
@@ -3222,7 +3228,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_78",
-    shortLabel: "Admissibility: Pt9Line83_YesNo",
+    shortLabel: "Renounced U.S. citizenship to avoid taxes",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_78",
@@ -3234,7 +3240,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_79",
-    shortLabel: "Admissibility: Pt9Line84a_YesNo",
+    shortLabel: "Applied for military exemption as alien",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_79",
@@ -3246,7 +3252,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_80",
-    shortLabel: "Admissibility: Pt9Line84b_YesNo",
+    shortLabel: "Relieved/discharged from military service as alien",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_80",
@@ -3258,7 +3264,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_81",
-    shortLabel: "Admissibility: Pt9Line84c_YesNo",
+    shortLabel: "Convicted of desertion from U.S. armed forces",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_81",
@@ -3270,7 +3276,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_82",
-    shortLabel: "Admissibility: Pt9Line85_YesNo",
+    shortLabel: "Left/remained outside U.S. to avoid military service",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_82",
@@ -3282,7 +3288,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_83",
-    shortLabel: "Admissibility: a_YesNo",
+    shortLabel: "Intends espionage/sabotage",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_83",
@@ -3294,7 +3300,7 @@ export const I485_QUESTIONS = [
   },
   {
     id: "i485_adm_84",
-    shortLabel: "Admissibility: b_YesNo",
+    shortLabel: "Intends export-control violations",
     step: "admissibility",
     type: "radio",
     factId: "i485_adm_84",
@@ -3330,5 +3336,5 @@ export const I485_FORM_INFO = {
   titles: { ES: "Solicitud de registro de residencia permanente o ajuste de estatus", ZH: "永久居留登记或身份调整申请", HT: "Aplikasyon pou Anrejistre Rezidans Pèmanan oswa Ajiste Estati", AR: "طلب تسجيل الإقامة الدائمة أو تعديل الوضع" },
   pdfUrl: "https://www.uscis.gov/sites/default/files/document/forms/i-485.pdf",
   instructionsUrl: "https://www.uscis.gov/sites/default/files/document/forms/i-485instr.pdf",
-  fillable: false,
+  fillable: true,
 };

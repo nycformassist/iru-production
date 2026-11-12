@@ -227,11 +227,18 @@ class handler(BaseHTTPRequestHandler):
             with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
                 tmp_path = tmp.name
             filled, errors = apply_fill(template_path, tmp_path, plan)
+            # M-8: surface apply_fill errors instead of discarding them.
+            # Log field names only (never PII values) server-side and
+            # expose the count so silent mapping failures are visible.
+            if errors:
+                sys.stderr.write("[fill] apply_fill errors (%d): %s\n" % (
+                    len(errors), "; ".join(e.split(": ", 1)[0] for e in errors)))
             with open(tmp_path, 'rb') as f: pdf_bytes = f.read()
             self.send_response(200)
             self.send_header('Content-Type', 'application/pdf')
             self.send_header('Content-Disposition', 'attachment; filename="%s"' % download_name)
             self.send_header('X-Fields-Filled', str(filled))
+            self.send_header('X-Fill-Errors', str(len(errors)))
             self.send_header('X-Review-Items', str(len(review)))
             self.end_headers()
             self.wfile.write(pdf_bytes)

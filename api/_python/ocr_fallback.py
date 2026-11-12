@@ -6,6 +6,7 @@ Uncertain extractions enter review, never silently accepted.
 import fitz  # PyMuPDF
 import json
 import os
+import tempfile
 
 def ocr_fallback(pdf_path, form_key, confidence_threshold=0.7):
     """
@@ -31,41 +32,50 @@ def ocr_fallback(pdf_path, form_key, confidence_threshold=0.7):
 
     for page_num, page in enumerate(doc):
         pix = page.get_pixmap(dpi=200)
-        img_path = f"/tmp/ocr_p{page_num}.png"
-        pix.save(img_path)
+        # Unique temp file per invocation (Carbon Pass 2, H-4): the old
+        # predictable /tmp/ocr_p{page_num}.png raced across concurrent
+        # invocations and leaked on exception. Always unlinked in
+        # finally, even when OCR raises.
+        fd, img_path = tempfile.mkstemp(prefix=f"ocr_p{page_num}_", suffix=".png")
+        os.close(fd)
+        try:
+            pix.save(img_path)
 
-        # OCR with positions
-        results = reader.readtext(img_path)
+            # OCR with positions
+            results = reader.readtext(img_path)
 
-        for bbox, text, conf in results:
-            # Skip low-confidence entirely
-            if conf < 0.3:
-                continue
+            for bbox, text, conf in results:
+                # Skip low-confidence entirely
+                if conf < 0.3:
+                    continue
 
-            # Map to field via position/label heuristics
-            # For now, flag everything for review unless high confidence
-            # and matches a known field pattern
-            field_id = f"ocr_p{page_num}_{int(bbox[0][0])}_{int(bbox[0][1])}"
+                # Map to field via position/label heuristics
+                # For now, flag everything for review unless high confidence
+                # and matches a known field pattern
+                field_id = f"ocr_p{page_num}_{int(bbox[0][0])}_{int(bbox[0][1])}"
 
-            if conf >= confidence_threshold:
-                extractions.append({
-                    "field": field_id,
-                    "value": text,
-                    "confidence": float(conf),
-                    "source": "ocr-extraction",
-                    "page": page_num,
-                })
-            else:
-                review_queue.append({
-                    "fact": field_id,
-                    "reason": "uncertain",
-                    "detail": f"OCR extracted '{text}' at confidence {conf:.0%}. "
-                             "Verify before accepting.",
-                    "value": text,
-                    "confidence": float(conf),
-                })
-
-        os.unlink(img_path)
+                if conf >= confidence_threshold:
+                    extractions.append({
+                        "field": field_id,
+                        "value": text,
+                        "confidence": float(conf),
+                        "source": "ocr-extraction",
+                        "page": page_num,
+                    })
+                else:
+                    review_queue.append({
+                        "fact": field_id,
+                        "reason": "uncertain",
+                        "detail": f"OCR extracted '{text}' at confidence {conf:.0%}. "
+                                 "Verify before accepting.",
+                        "value": text,
+                        "confidence": float(conf),
+                    })
+        finally:
+            try:
+                os.unlink(img_path)
+            except OSError:
+                pass
 
     doc.close()
     return extractions, review_queue

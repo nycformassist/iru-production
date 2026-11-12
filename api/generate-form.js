@@ -126,10 +126,13 @@ export async function generateFormDraft({ formId, factRecord, lang = 'EN', expec
   plan.fillErrors = [];
   const actuallyFilled = [];
   for (const item of plan.fill) {
-    if (SIGNATURE_FIELD_PATTERN.test(item.pdfField)) {
-      throw new Error(`refusing to fill signature field: ${item.pdfField}`);
-    }
     try {
+      // Inside the per-field try (Carbon Pass 2, finding H-6): one
+      // signature field is recorded in plan.fillErrors instead of
+      // aborting the whole draft with a 500.
+      if (SIGNATURE_FIELD_PATTERN.test(item.pdfField)) {
+        throw new Error(`refusing to fill signature field: ${item.pdfField}`);
+      }
       const field = form.getField(item.pdfField);
       const typeName = field.constructor.name;
       if (item.kind === 'checkbox' || typeName === 'PDFCheckBox') {

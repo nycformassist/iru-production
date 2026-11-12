@@ -6,8 +6,19 @@ Built from i130_baseline_locked.json (438 fields, zero unclassified).
 Organization: question groups, each mapping to one or more fields.
 Reuses: address.py (101 fields), biographic.py (30 fields).
 """
-from address import I130_ADDRESS_BLOCKS
-from biographic import BIOGRAPHIC_REGISTRY
+# Two homes, two import paths (same rule as the I-589 binder,
+# i589_full_binder.py:30-33): the worktree copy loads as
+# _python.i130_full_registry (Vercel, api/ on sys.path), the engine
+# copy as a top-level module (local api_server imports from
+# ../iru-form-engine). Bare `from address import ...` crashes with
+# ModuleNotFoundError on a cold start when api/_python is not on
+# sys.path (Carbon Pass 2, H-4).
+try:
+    from _python.address import I130_ADDRESS_BLOCKS
+    from _python.biographic import BIOGRAPHIC_REGISTRY
+except ImportError:  # pragma: no cover - engine-copy import path
+    from address import I130_ADDRESS_BLOCKS
+    from biographic import BIOGRAPHIC_REGISTRY
 
 # Full field name prefix resolver
 def F(subform, name):

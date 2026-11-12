@@ -31,6 +31,7 @@ import { withDurableStore } from './_lib/withStore.js';
 import { verifyStripeSignature } from './_lib/stripewebhook.js';
 import { createLimiter, clientIp } from './_lib/ratelimit.js';
 import { assertPaidStoreAvailable } from './_lib/paymentStore.js';
+import { checkSessionAgainstRecord } from './_lib/paymentConfig.js';
 
 export const config = { api: { bodyParser: false } };
 
@@ -177,31 +178,8 @@ async function handler(req, res, store = entitlementStore) {
   return res.status(200).json({ received: true, ignored: true });
 }
 
-/**
- * Defense-in-depth checks. Only fields Stripe actually sent are
- * checked — an absent field is not a mismatch (older payload shapes).
- * Returns null when everything present matches, else a mismatch object
- * for adjudicateMismatch().
- */
-function checkSessionAgainstRecord(session, record) {
-  if (session.amount_total !== undefined && session.amount_total !== null
-    && Number(session.amount_total) !== record.amountCents) {
-    return { type: 'amount-mismatch', reason: 'amount-mismatch', amountCents: Number(session.amount_total), currency: session.currency || null, details: { expectedCents: record.amountCents } };
-  }
-  if (session.currency !== undefined && session.currency !== null
-    && String(session.currency).toLowerCase() !== String(record.currency || 'usd').toLowerCase()) {
-    return { type: 'currency-mismatch', reason: 'currency-mismatch', amountCents: session.amount_total ?? null, currency: session.currency, details: { expectedCurrency: record.currency } };
-  }
-  const metaId = session.metadata && session.metadata.entitlementId;
-  if (metaId !== undefined && metaId !== null && metaId !== record.id) {
-    return { type: 'session-identity-mismatch', reason: 'session-identity-mismatch', details: { field: 'metadata.entitlementId' } };
-  }
-  if (session.client_reference_id !== undefined && session.client_reference_id !== null
-    && session.client_reference_id !== record.id) {
-    return { type: 'session-identity-mismatch', reason: 'session-identity-mismatch', details: { field: 'client_reference_id' } };
-  }
-  return null;
-}
+// checkSessionAgainstRecord lives in lib/paymentConfig.js (shared with
+// /api/verify-session — Carbon Pass 2, finding M-7).
 
 // Raw handler for unit tests (singleton default). Vercel serves the
 // durable-wrapped default: load → restore → run → save (CAS).

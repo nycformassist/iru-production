@@ -50,7 +50,7 @@ async function handler(req, res, store = entitlementStore) {
         if (!clientKeyHash || !/^[a-f0-9]{64}$/.test(clientKeyHash)) {
             return res.status(400).json({ error: 'clientKeyHash required (SHA-256 hex)' });
         }
-        if (!form_id || !['n400','i485','i130','i90','i765'].includes(form_id)) {
+        if (!form_id || !['n400','i485','i130','i90','i765','i589'].includes(form_id)) {
             return res.status(400).json({ error: 'Invalid form_id' });
         }
         const db = getPool();
@@ -91,5 +91,9 @@ async function handler(req, res, store = entitlementStore) {
 
 // Raw handler for unit tests (singleton default). Vercel serves the
 // durable-wrapped default: load → restore → run → save (CAS).
+// Read-only peek gate (Carbon Pass 2, finding H-5): this handler only
+// peeks at entitlements, never mutates the store, so the durable
+// snapshot is loaded and the handler runs directly against the real
+// response without captureRes() buffering.
 export { handler };
-export default withDurableStore(handler);
+export default withDurableStore(handler, { readOnly: true });

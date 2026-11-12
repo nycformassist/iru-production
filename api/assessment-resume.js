@@ -85,5 +85,9 @@ async function handler(req, res, store = entitlementStore) {
 
 // Raw handler for unit tests (singleton default). Vercel serves the
 // durable-wrapped default: load → restore → run → save (CAS).
+// Read-only peek gate (Carbon Pass 2, finding H-5): this handler only
+// peeks at entitlements, never mutates the store, so the durable
+// snapshot is loaded and the handler runs directly against the real
+// response without captureRes() buffering.
 export { handler };
-export default withDurableStore(handler);
+export default withDurableStore(handler, { readOnly: true });

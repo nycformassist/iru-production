@@ -1,5 +1,8 @@
 // I-765 (Employment Authorization) Tier 1 questionnaire
 // BronxWorks workflow: guided intake → readiness assessment → staff report
+// PDF field mapping: fillable — answers fill the I-765 AcroForm PDF via
+// api/fill.py (i765_full_binder) and Tier1Flow generateCompletedForm
+// ('Generate completed I-765').
 // NOTE (owner ruling D-1): applicant SELECTS eligibility category; IRU does not infer/recommend/default.
 
 export const I765_QUESTIONS = [
@@ -127,5 +130,5 @@ export const I765_FORM_INFO = {
   edition: '08/21/25',
   pdfUrl: 'https://www.uscis.gov/sites/default/files/document/forms/i-765.pdf',
   instructionsUrl: 'https://www.uscis.gov/sites/default/files/document/forms/i-765instr.pdf',
-  fillable: false,
+  fillable: true,
 };

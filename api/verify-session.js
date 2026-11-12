@@ -13,7 +13,7 @@ import { entitlementStore } from './_lib/entitlement.js';
 import { withDurableStore } from './_lib/withStore.js';
 import { createLimiter, clientIp } from './_lib/ratelimit.js';
 import { assertPaidStoreAvailable } from './_lib/paymentStore.js';
-import { getTestStripeSecretKey } from './_lib/paymentConfig.js';
+import { getTestStripeSecretKey, checkSessionAgainstRecord } from './_lib/paymentConfig.js';
 
 const limiter = createLimiter({ capacity: 10, windowMs: 10 * 60 * 1000 });
 
@@ -60,6 +60,25 @@ async function handler(req, res, store = entitlementStore) {
   }
   if (session.payment_status !== 'paid') {
     return res.status(402).json({ ok: false, paymentStatus: session.payment_status });
+  }
+
+  // Defense-in-depth cross-checks (Carbon Pass 2, finding M-7):
+  // identical to api/webhook.js — amount, currency, and session
+  // identity are verified against the persisted record BEFORE any
+  // grant. A mismatch is adjudicated as an exception (grant refused,
+  // money flagged for manual review), never a grant; an unknown
+  // session is not granted either. Previously this endpoint marked
+  // paid as soon as Stripe said 'paid', so a mismatch granted the
+  // entitlement here and the later webhook saw it as a duplicate.
+  const record = store.getSessionRecord(session.id);
+  if (!record) {
+    return res.status(200).json({ ok: false, paid: false, reason: 'unknown-session' });
+  }
+  const mismatch = checkSessionAgainstRecord(session, record);
+  if (mismatch) {
+    const adjudicated = store.adjudicateMismatch(session.id, 'verify-session:' + session.id, mismatch);
+    console.log(`[iru] verify-session: mismatch ${mismatch.reason} -> exception ${adjudicated.exception ? adjudicated.exception.id : 'n/a'}`);
+    return res.status(200).json({ ok: false, paid: false, exception: true, exceptionId: adjudicated.exception ? adjudicated.exception.id : null, reason: mismatch.reason });
   }
 
   // Mark the pre-created entitlement paid (idempotent — webhook is a no-op after this).

@@ -2,7 +2,9 @@
  * I-130 Tier 1 Questionnaire — Petition for Alien Relative
  *
  * Tier 1 scope: guided intake → factRecord → readiness assessment → preparation report + form download.
- * No PDF field mapping (I-130 PDF is not fillable — verified 2026-11-02, 0 AcroForm fields).
+ * PDF field mapping: fillable — answers fill the I-130 AcroForm PDF via
+ * api/fill.py (i130_full_registry.py AUTO_REGISTRY) and Tier1Flow
+ * generateCompletedForm ('Generate completed I-130').
  *
  * Key structural difference from N-400: TWO people — the petitioner (U.S. citizen or LPR
  * filing the petition) and the beneficiary (the relative seeking to immigrate).
@@ -234,20 +236,11 @@ export const I130_QUESTIONS = [
     required: true,
   },
   {
-    id: "i130_pet_family",
-    shortLabel: "Petitioner family name",
-    step: "petitioner",
-    type: "text",
-    factId: "i130_pet_family",
-    labels: { EN: "Petitioner family name" },
-    required: true,
-  },
-  {
     id: "i130_pet_street",
     shortLabel: "Petitioner street",
     step: "petitioner",
     type: "text",
-    factId: "i130_pet_street",
+    factId: "i130_petitioner_street",
     labels: { EN: "Petitioner street" },
     required: true,
   },
@@ -256,7 +249,7 @@ export const I130_QUESTIONS = [
     shortLabel: "Petitioner city",
     step: "petitioner",
     type: "text",
-    factId: "i130_pet_city",
+    factId: "i130_petitioner_city",
     labels: { EN: "Petitioner city" },
     required: true,
   },
@@ -265,7 +258,7 @@ export const I130_QUESTIONS = [
     shortLabel: "Petitioner state",
     step: "petitioner",
     type: "text",
-    factId: "i130_pet_state",
+    factId: "i130_petitioner_state",
     labels: { EN: "Petitioner state" },
     required: true,
   },
@@ -274,7 +267,7 @@ export const I130_QUESTIONS = [
     shortLabel: "Petitioner ZIP",
     step: "petitioner",
     type: "text",
-    factId: "i130_pet_zip",
+    factId: "i130_petitioner_zip",
     labels: { EN: "Petitioner ZIP" },
     required: true,
   },
@@ -283,26 +276,8 @@ export const I130_QUESTIONS = [
     shortLabel: "Petitioner country",
     step: "petitioner",
     type: "text",
-    factId: "i130_pet_country",
+    factId: "i130_petitioner_country",
     labels: { EN: "Petitioner country" },
-    required: true,
-  },
-  {
-    id: "i130_pet_cob",
-    shortLabel: "Petitioner country of birth",
-    step: "petitioner",
-    type: "text",
-    factId: "i130_pet_cob",
-    labels: { EN: "Petitioner country of birth" },
-    required: true,
-  },
-  {
-    id: "i130_ben_family",
-    shortLabel: "Beneficiary family name",
-    step: "beneficiary",
-    type: "text",
-    factId: "i130_ben_family",
-    labels: { EN: "Beneficiary family name" },
     required: true,
   },
   {
@@ -310,7 +285,7 @@ export const I130_QUESTIONS = [
     shortLabel: "Beneficiary street",
     step: "beneficiary",
     type: "text",
-    factId: "i130_ben_street",
+    factId: "i130_beneficiary_street",
     labels: { EN: "Beneficiary street" },
     required: true,
   },
@@ -319,7 +294,7 @@ export const I130_QUESTIONS = [
     shortLabel: "Beneficiary city",
     step: "beneficiary",
     type: "text",
-    factId: "i130_ben_city",
+    factId: "i130_beneficiary_city",
     labels: { EN: "Beneficiary city" },
     required: true,
   },
@@ -328,7 +303,7 @@ export const I130_QUESTIONS = [
     shortLabel: "Beneficiary state",
     step: "beneficiary",
     type: "text",
-    factId: "i130_ben_state",
+    factId: "i130_beneficiary_state",
     labels: { EN: "Beneficiary state" },
     required: true,
   },
@@ -337,7 +312,7 @@ export const I130_QUESTIONS = [
     shortLabel: "Beneficiary ZIP",
     step: "beneficiary",
     type: "text",
-    factId: "i130_ben_zip",
+    factId: "i130_beneficiary_zip",
     labels: { EN: "Beneficiary ZIP" },
     required: true,
   },
@@ -348,28 +323,6 @@ export const I130_QUESTIONS = [
     type: "text",
     factId: "i130_beneficiary_country",
     labels: { EN: "Beneficiary: What is their current country of residence?" },
-    required: true,
-  },
-  {
-    id: "i130_ben_cob",
-    shortLabel: "Beneficiary country of birth",
-    step: "beneficiary",
-    type: "text",
-    factId: "i130_ben_cob",
-    labels: { EN: "Beneficiary country of birth" },
-    required: true,
-  },
-  {
-    id: "i130_ben_gender",
-    shortLabel: "Beneficiary gender",
-    step: "beneficiary",
-    type: "radio",
-    factId: "i130_ben_gender",
-    options: [
-      { value: "male", labels: { EN: "Male" } },
-      { value: "female", labels: { EN: "Female" } },
-    ],
-    labels: { EN: "Beneficiary gender" },
     required: true,
   },
   {
@@ -1151,5 +1104,5 @@ export const I130_FORM_INFO = {
   edition: "04/01/24",
   pdfUrl: "https://www.uscis.gov/sites/default/files/document/forms/i-130.pdf",
   instructionsUrl: "https://www.uscis.gov/sites/default/files/document/forms/i-130instr.pdf",
-  fillable: false,
+  fillable: true,
 };

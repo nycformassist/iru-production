@@ -152,8 +152,29 @@ def apply_fill(pdf_path, out_path, fill_plan):
             if w.field_name in plan_by_name:
                 value, kind, fact_id = plan_by_name[w.field_name]
                 found.add(w.field_name)
+                # H-6: signature fields are NEVER filled by automation —
+                # skip and record, so a registry slip cannot sign a form.
+                if re.search(r'signature', w.field_name, re.I):
+                    errors.append(f"{w.field_name} (fact {fact_id}): "
+                                  "signature field skipped, never filled")
+                    continue
                 try:
-                    w.field_value = value
+                    if kind == "checkbox":
+                        # M-8: a truthy checkbox value must use the
+                        # widget's actual export value. Setting the
+                        # literal string "Yes" leaves the box unchecked
+                        # when on_state() is "Y", "1", or "2".
+                        if value is True or (isinstance(value, str)
+                                and value.strip().lower() in ("yes", "true", "1", "y")):
+                            try:
+                                on_state = w.on_state()
+                            except Exception:
+                                on_state = None
+                            w.field_value = on_state or True
+                        else:
+                            w.field_value = False
+                    else:
+                        w.field_value = value
                     w.update()
                     filled += 1
                 except Exception as e:

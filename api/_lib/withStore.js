@@ -29,7 +29,7 @@
  * COMMERCE ONLY. The snapshot never holds immigration case data.
  */
 
-import { createEntitlementStore, entitlementStore } from './entitlement.js';
+import { createEntitlementStore } from './entitlement.js';
 import { createPostgresSnapshotBackend } from './store-postgres.js';
 import { createMemorySnapshotBackend, assertPaidStoreAvailable } from './paymentStore.js';
 import { isInstitutionalServer } from './server-mode.js';
@@ -110,23 +110,17 @@ function replay(realRes, captured) {
   realRes.status(captured.statusCode).json(captured.body);
 }
 
-/**
- * Merge entitlements seeded into the handler's default store (the
- * singleton) over a loaded durable snapshot. The snapshot wins on
- * conflict (it holds the last persisted state, including any
- * consumption); the singleton only adds entitlements the snapshot
- * lacks. Returns a new snapshot object; neither input is mutated.
- */
-function mergeEntitlements(baseSnap, overlaySnap) {
-  const byId = new Map();
-  for (const e of baseSnap.entitlements || []) byId.set(e.id, e);
-  for (const e of overlaySnap.entitlements || []) {
-    if (!byId.has(e.id)) byId.set(e.id, e);
-  }
-  return { ...baseSnap, entitlements: [...byId.values()] };
-}
+// NOTE (Carbon Pass 2, finding H-5): the old mergeEntitlements step
+// that merged the warm-instance in-memory singleton into every
+// request's store was REMOVED — it re-introduced stale state across
+// serverless instances, resurrected reset/migrated entitlements back
+// into Postgres, and merged entitlements without recoveryIdentities,
+// ledger, or intents. The durable snapshot is now the only source: a
+// request store is restored from it, or starts empty when no snapshot
+// exists. Tests that seed entitlements must pass the seeded store as
+// the injectedStore arg or use _setTestBackend — never the singleton.
 
-export function withDurableStore(handler) {
+export function withDurableStore(handler, options = {}) {
   return async (req, res, injectedStore) => {
     // Test/embedding contract (Carbon Pass 1, finding 10 follow-up):
     // a caller-provided store is used as-is. The caller owns it
@@ -157,27 +151,36 @@ export function withDurableStore(handler) {
       return res.status(503).json({ error: 'Checkout is not configured.' });
     }
 
+    // Read-only peek path (Carbon Pass 2, finding H-5): handlers that
+    // only PEEK at entitlements never mutate the store, so there is
+    // nothing to persist — load the durable snapshot, run the handler
+    // directly against the real response, and stream without the
+    // captureRes() buffering that defeated SSE delivery in
+    // /api/analyze. `options.readOnly` is `true` for always-read-only
+    // handlers, or a (req) => boolean predicate for handlers with
+    // both a read-only path and a mutating path (analyze.js: the
+    // limited-evaluation path CONSUMES, so it keeps the durable
+    // capture-save-replay path below).
+    const readOnlyOption = options.readOnly;
+    const readOnly = typeof readOnlyOption === 'function' ? readOnlyOption(req) : !!readOnlyOption;
+    if (readOnly) {
+      const loaded = await backend.load();
+      const store = createEntitlementStore();
+      if (loaded && loaded.snapshot) store.restore(loaded.snapshot);
+      await handler(req, res, store);
+      return;
+    }
+
     // Single attempt, retried once on version conflict.
     for (let attempt = 0; attempt < 2; attempt++) {
       const loaded = await backend.load();
       // The request store is a fresh store restored from the durable
-      // snapshot, merged with entitlements seeded directly into the
-      // handler's default store (the singleton). In production the
-      // singleton is empty, so the merge is a no-op. In tests,
-      // entitlements are seeded into the singleton; once a backend
-      // snapshot exists the durable path would otherwise hide them
-      // and wrongly 402 paid users (a finding-10 regression). The
-      // backend snapshot wins on conflict — it holds the last
-      // persisted state, including any consumption — so the singleton
-      // only ADDS entitlements the snapshot lacks. Only entitlements
-      // are merged: the gate checks consult them, and the other
-      // snapshot fields (ledger, intents, recovery) stay with the
-      // durable snapshot.
+      // snapshot ONLY — the warm-instance singleton is never merged
+      // in (finding H-5). When no snapshot exists the store starts
+      // empty.
       const store = createEntitlementStore();
       if (loaded && loaded.snapshot) {
-        store.restore(mergeEntitlements(loaded.snapshot, entitlementStore.snapshot()));
-      } else {
-        store.restore(entitlementStore.snapshot());
+        store.restore(loaded.snapshot);
       }
       const before = JSON.stringify(store.snapshot());
 

@@ -65,6 +65,35 @@ export function checkPaywallAgreement(body, env = process.env) {
   return { ok: true };
 }
 
+/**
+ * Defense-in-depth cross-checks of a Stripe checkout session against
+ * the persisted entitlement record (moved here from api/webhook.js,
+ * Carbon Pass 2, finding M-7, so /api/verify-session runs the identical
+ * checks before granting instead of only the webhook doing so). Only
+ * fields Stripe actually sent are checked — an absent field is not a
+ * mismatch (older payload shapes). Returns null when everything
+ * present matches, else a mismatch object for adjudicateMismatch().
+ */
+export function checkSessionAgainstRecord(session, record) {
+  if (session.amount_total !== undefined && session.amount_total !== null
+    && Number(session.amount_total) !== record.amountCents) {
+    return { type: 'amount-mismatch', reason: 'amount-mismatch', amountCents: Number(session.amount_total), currency: session.currency || null, details: { expectedCents: record.amountCents } };
+  }
+  if (session.currency !== undefined && session.currency !== null
+    && String(session.currency).toLowerCase() !== String(record.currency || 'usd').toLowerCase()) {
+    return { type: 'currency-mismatch', reason: 'currency-mismatch', amountCents: session.amount_total ?? null, currency: session.currency, details: { expectedCurrency: record.currency } };
+  }
+  const metaId = session.metadata && session.metadata.entitlementId;
+  if (metaId !== undefined && metaId !== null && metaId !== record.id) {
+    return { type: 'session-identity-mismatch', reason: 'session-identity-mismatch', details: { field: 'metadata.entitlementId' } };
+  }
+  if (session.client_reference_id !== undefined && session.client_reference_id !== null
+    && session.client_reference_id !== record.id) {
+    return { type: 'session-identity-mismatch', reason: 'session-identity-mismatch', details: { field: 'client_reference_id' } };
+  }
+  return null;
+}
+
 /** Returns { ok: true, origin } or { ok: false, reason }. */
 export function resolveAppOrigin(env = process.env) {
   // Prefer explicit IRU_APP_ORIGIN; fall back to Vercel's automatic VERCEL_URL

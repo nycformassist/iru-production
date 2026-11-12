@@ -26,7 +26,7 @@
  * procedural information, not legal advice, and does not determine
  * eligibility.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { LanguageSelector } from '../paywall';
 import {
   STAFF_FORM_KEYS,
@@ -34,9 +34,6 @@ import {
   listStaffCases,
   createStaffCase,
   updateStaffCase,
-  getOrgConfig,
-  saveOrgConfig,
-  TEST_STAFF_EMAIL,
   type StaffCase,
   type StaffCaseStatus,
 } from '../institutional';
@@ -64,23 +61,29 @@ export default function StaffDashboard({
   const [participantName, setParticipantName] = useState('');
   const [selectedForm, setSelectedForm] = useState<string>('i589');
   const [cases, setCases] = useState<StaffCase[]>(() => listStaffCases());
-  // Staff receiving setup — per-organization, configured by staff.
-  // TESTING: until an org account is created at sale/install time, all
-  // completed cases route to the owner's test address below. At install
-  // the owner creates the org's account with their real staff email.
-  const [orgConfig, setOrgConfig] = useState(() => getOrgConfig());
-  const [orgName, setOrgName] = useState(() => getOrgConfig()?.orgName || '');
-  const [orgEmail, setOrgEmail] = useState(() => getOrgConfig()?.staffEmail || '');
-  const [orgSaved, setOrgSaved] = useState(false);
-
-  const saveReceivingSetup = () => {
-    const saved = saveOrgConfig(orgName, orgEmail);
-    if (saved) {
-      setOrgConfig(saved);
-      setOrgSaved(true);
-      setTimeout(() => setOrgSaved(false), 4000);
-    }
-  };
+  // Staff receiving setup — READ-ONLY, server-configured (Carbon Pass 2,
+  // finding C-2). The destination comes from the server-side registry
+  // (api/_lib/org-staff.js) via GET /api/org-info; no email is ever
+  // entered or stored on this device, because a client-set address can
+  // never route — the server allowlist is authoritative, and an editable
+  // input misled staff about where completed reports were sent.
+  const [orgs, setOrgs] = useState<{ slug: string; orgName: string; configured: boolean }[] | null>(null);
+  const [orgsError, setOrgsError] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/org-info')
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('org-info failed'))))
+      .then((data) => {
+        if (!cancelled && Array.isArray(data)) setOrgs(data);
+        else if (!cancelled) setOrgsError(true);
+      })
+      .catch(() => {
+        if (!cancelled) setOrgsError(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const startCase = () => {
     const c = createStaffCase(participantName, selectedForm);
@@ -114,64 +117,41 @@ export default function StaffDashboard({
           <LanguageSelector lang={lang} onLanguageChange={onLanguageChange} />
         </div>
 
-        {/* Staff receiving setup — per-organization staff email */}
+        {/* Staff receiving setup — read-only, server-configured */}
         <div className="bg-white border border-slate-200 rounded-xl p-5 mb-6">
           <h2 className="font-bold text-lg mb-1">Staff receiving setup</h2>
           <p className="text-slate-600 text-sm mb-3">
             When a participant completes a case and confirms, the report is
             sent to your organization&apos;s staff email — automatically routed,
-            no mail app, no address for the participant to enter. Each
-            organization has its own receiving setup.
+            no mail app, no address for the participant to enter. The
+            destination is configured on the server at install time and
+            cannot be changed from this device.
           </p>
-          {orgConfig ? (
-            <p data-testid="staff-receiving-current" className="text-sm mb-3">
-              Currently sending to <strong>{orgConfig.orgName}</strong> staff —{' '}
-              <strong>{orgConfig.staffEmail}</strong>
+          {orgsError ? (
+            <p data-testid="staff-receiving-current" className="text-sm mb-3 text-slate-600">
+              Could not load the server receiving setup. Reports send only
+              to organizations configured on the server.
+            </p>
+          ) : orgs === null ? (
+            <p data-testid="staff-receiving-current" className="text-sm mb-3 text-slate-600">
+              Loading receiving setup…
+            </p>
+          ) : orgs.length === 0 ? (
+            <p data-testid="staff-receiving-current" className="text-sm mb-3 text-slate-600">
+              No organization receiving setup is configured on the server yet.
+              The owner creates the organization&apos;s account at sale/install
+              time with its real staff email.
             </p>
           ) : (
-            <p data-testid="staff-receiving-current" className="text-sm mb-3">
-              No organization receiving email configured on this device. Until
-              one is set, test sends go to the owner&apos;s test address{' '}
-              <strong>{TEST_STAFF_EMAIL}</strong>. At sale/install time the
-              owner creates the organization&apos;s account with its real staff email.
-            </p>
-          )}
-          <label className="block text-sm font-medium text-slate-700 mb-1" htmlFor="staff-org-name">
-            Organization name
-          </label>
-          <input
-            id="staff-org-name"
-            data-testid="staff-org-name"
-            type="text"
-            value={orgName}
-            onChange={(e) => setOrgName(e.target.value)}
-            placeholder="e.g. BronxWorks"
-            className="w-full border border-slate-300 rounded-lg px-3 py-2 mb-3"
-          />
-          <label className="block text-sm font-medium text-slate-700 mb-1" htmlFor="staff-org-email">
-            Staff receiving email
-          </label>
-          <input
-            id="staff-org-email"
-            data-testid="staff-org-email"
-            type="email"
-            value={orgEmail}
-            onChange={(e) => setOrgEmail(e.target.value)}
-            placeholder={TEST_STAFF_EMAIL}
-            className="w-full border border-slate-300 rounded-lg px-3 py-2 mb-3"
-          />
-          <button
-            data-testid="staff-save-receiving"
-            onClick={saveReceivingSetup}
-            disabled={!orgEmail.includes('@')}
-            className="bg-blue-600 text-white font-semibold rounded-lg px-4 py-2 hover:bg-blue-700 disabled:opacity-50"
-          >
-            Save receiving setup
-          </button>
-          {orgSaved && (
-            <span data-testid="staff-receiving-saved" className="text-green-700 text-sm ml-3">
-              ✓ Saved — completed cases on this device now route to {orgConfig?.staffEmail}.
-            </span>
+            <ul data-testid="staff-receiving-current" className="text-sm mb-3 space-y-1">
+              {orgs.map((o) => (
+                <li key={o.slug}>
+                  Currently sending to <strong>{o.orgName}</strong> staff{' '}
+                  <span className="text-slate-500">({o.slug})</span>
+                  {o.configured ? '' : ' — not configured'}
+                </li>
+              ))}
+            </ul>
           )}
         </div>
 

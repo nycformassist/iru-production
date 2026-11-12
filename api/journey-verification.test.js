@@ -537,7 +537,11 @@ describe('P5 journey — EN, historical evaluation + formprep purchase → add-o
   }
   async function generateViaHandler(formId, token, record, ip) {
     const res = jsonRes();
-    await generateHandler(mockReq(ip, { formId, factRecord: record, entitlementToken: token, lang: 'EN' }), res);
+    // H-5: entitlements live in the singleton store in this journey
+    // (checkout/webhook are the raw handlers), so pass it as the
+    // injected store — the durable snapshot no longer merges the
+    // singleton in (Carbon Pass 2, finding H-5).
+    await generateHandler(mockReq(ip, { formId, factRecord: record, entitlementToken: token, lang: 'EN' }), res, entitlementStore);
     return res;
   }
 
@@ -587,10 +591,12 @@ process.env.STRIPE_WEBHOOK_SECRET = 'whsec_test_local';
 
       // Step 2: the paid historical evaluation is delivered through
       // /api/analyze (mode 'limited', paywall on) and consumed exactly once.
+      // H-5: the historical entitlement is seeded into the singleton
+      // store — pass it as the injected store (Carbon Pass 2, finding H-5).
       const evalRes = jsonRes();
       await analyzeHandler(mockReq('10.21.5.2', {
         mode: 'limited', answers: baseAnswers(), lang: 'EN', entitlementToken: evaluation.token,
-      }), evalRes);
+      }), evalRes, entitlementStore);
       assert.equal(evalRes.statusCode, 200, JSON.stringify(evalRes.body));
       assert.equal(evalRes.body.evaluation.kind, 'limited-evaluation');
 

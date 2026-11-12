@@ -17,9 +17,22 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { serverBuildMode, isInstitutionalServer } from './_lib/server-mode.js';
+import { serverBuildMode, isInstitutionalServer, resetServerModeCache } from './_lib/server-mode.js';
 import { resolveOrgStaffEmail, ORG_STAFF } from './_lib/org-staff.js';
 import sendReport from './send-report.js';
+
+// The C-2 gate makes /api/send-report institutional-only. These tests
+// exercise the endpoint, so they run with the IRU_SERVER_MODE override;
+// the consumer-mode 404 gate is covered by its own test below.
+function asInstitutional() {
+  process.env.IRU_SERVER_MODE = 'institutional';
+  resetServerModeCache();
+}
+
+function asConsumer() {
+  delete process.env.IRU_SERVER_MODE;
+  resetServerModeCache();
+}
 
 function mockRes() {
   const res = {
@@ -63,13 +76,26 @@ test('org-staff: unlisted orgs resolve to null (no real org staff address during
 });
 
 // ── send-report endpoint ───────────────────────────────────────────────
+// C-2 gate: on consumer builds the endpoint does not exist (404).
+test('send-report: consumer mode returns 404 (institutional-only endpoint)', async () => {
+  asConsumer();
+  const res = mockRes();
+  await sendReport(mockReq({
+    ip: '10.0.0.1',
+    body: { org: 'test', formNumber: 'I-589', report: { formNumber: 'I-589', executiveSummary: 'x' } },
+  }), res);
+  assert.equal(res.statusCode, 404);
+});
+
 test('send-report: non-POST is rejected', async () => {
+  asInstitutional();
   const res = mockRes();
   await sendReport(mockReq({ method: 'GET', ip: '10.0.0.2' }), res);
   assert.equal(res.statusCode, 405);
 });
 
 test('send-report: missing RESEND_API_KEY returns 503 not-configured (never sends without it)', async () => {
+  asInstitutional();
   const saved = process.env.RESEND_API_KEY;
   delete process.env.RESEND_API_KEY;
   try {
@@ -86,6 +112,7 @@ test('send-report: missing RESEND_API_KEY returns 503 not-configured (never send
 });
 
 test('send-report: unlisted org is rejected — no client-supplied recipient fallback', async () => {
+  asInstitutional();
   process.env.RESEND_API_KEY = 're_test_key';
   try {
     const res = mockRes();
@@ -101,6 +128,7 @@ test('send-report: unlisted org is rejected — no client-supplied recipient fal
 });
 
 test('send-report: omitted org is rejected', async () => {
+  asInstitutional();
   process.env.RESEND_API_KEY = 're_test_key';
   try {
     const res = mockRes();
@@ -115,6 +143,7 @@ test('send-report: omitted org is rejected', async () => {
 });
 
 test('send-report: missing report content is rejected', async () => {
+  asInstitutional();
   process.env.RESEND_API_KEY = 're_test_key';
   try {
     const res = mockRes();
@@ -129,6 +158,7 @@ test('send-report: missing report content is rejected', async () => {
 });
 
 test('send-report: unknown form number is rejected', async () => {
+  asInstitutional();
   process.env.RESEND_API_KEY = 're_test_key';
   try {
     const res = mockRes();
@@ -143,6 +173,7 @@ test('send-report: unknown form number is rejected', async () => {
 });
 
 test('send-report: registry org resolves server-side and Resend is called with the test address + server-rendered HTML', async () => {
+  asInstitutional();
   process.env.RESEND_API_KEY = 're_test_key';
   const calls = [];
   const realFetch = globalThis.fetch;
@@ -202,6 +233,7 @@ test('send-report: registry org resolves server-side and Resend is called with t
 });
 
 test('send-report: unlisted org is rejected even with a valid client staff email (no fallback)', async () => {
+  asInstitutional();
   process.env.RESEND_API_KEY = 're_test_key';
   const calls = [];
   const realFetch = globalThis.fetch;
@@ -229,6 +261,7 @@ test('send-report: unlisted org is rejected even with a valid client staff email
 });
 
 test('send-report: Resend rejection is surfaced, not rewritten into a false success', async () => {
+  asInstitutional();
   process.env.RESEND_API_KEY = 're_test_key';
   const realFetch = globalThis.fetch;
   globalThis.fetch = async () => ({
@@ -243,7 +276,12 @@ test('send-report: Resend rejection is surfaced, not rewritten into a false succ
       body: { org: 'test', formNumber: 'I-589', report: { formNumber: 'I-589', executiveSummary: 'x' } },
     }), res);
     assert.equal(res.statusCode, 502);
-    assert.match(res.body.error, /testing emails/);
+    // M-2: the raw provider message is NOT forwarded (it can disclose
+    // account details in test mode). The caller gets a sanitized error
+    // and the provider-rejected reason; the raw message stays in the
+    // server log only.
+    assert.match(res.body.error, /could not send this report/);
+    assert.doesNotMatch(res.body.error, /testing emails/);
     assert.equal(res.body.reason, 'provider-rejected');
   } finally {
     globalThis.fetch = realFetch;
@@ -252,6 +290,7 @@ test('send-report: Resend rejection is surfaced, not rewritten into a false succ
 });
 
 test('send-report: per-IP rate limit blocks the 6th send in 10 minutes', async () => {
+  asInstitutional();
   process.env.RESEND_API_KEY = 're_test_key';
   const realFetch = globalThis.fetch;
   globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({ id: 're_x' }) });

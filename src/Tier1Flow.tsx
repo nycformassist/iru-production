@@ -100,6 +100,7 @@ const UI: Record<string, Record<Tier1Lang, string>> = {
   atLeastOne: { EN: 'Please add at least one entry.', ES: 'Agregue al menos una entrada.', ZH: '请至少添加一条。', HT: 'Tanpri ajoute omwen yon antre.', AR: 'يرجى إضافة إدخال واحد على الأقل.' },
   fillOneField: { EN: 'Please fill in at least one field.', ES: 'Complete al menos un campo.', ZH: '请至少填写一个字段。', HT: 'Tanpri ranpli omwen yon chan.', AR: 'يرجى ملء حقل واحد على الأقل.' },
   optional: { EN: '(optional)', ES: '(opcional)', ZH: '(可选)', HT: '(opsyonèl)', AR: '(اختياري)' },
+  selectPlaceholder: { EN: 'Select…', ES: 'Seleccionar…', ZH: '请选择…', HT: 'Chwazi…', AR: 'اختر…' },
   startOver: { EN: '← Start Over', ES: '← Empezar de nuevo', ZH: '← 重新开始', HT: '← Rekòmanse', AR: '← البدء من جديد' },
   downloadPdf: { EN: 'Download PDF', ES: 'Descargar PDF', ZH: '下载 PDF', HT: 'Telechaje PDF', AR: 'تحميل PDF' },
   officialInstructions: { EN: 'Official instructions', ES: 'Instrucciones oficiales', ZH: '官方说明', HT: 'Enstriksyon ofisyèl', AR: 'التعليمات الرسمية' },
@@ -175,7 +176,18 @@ export default function Tier1Flow({ formKey, questions, steps, info, lang, asses
   useEffect(() => {
     persistAnswers(answers);
   }, [answers]);
-  const [rgData, setRgData] = useState<Record<string, any[]>>({});
+  const [rgData, setRgData] = useState<Record<string, any[]>>(() => {
+    // Carbon Pass 2 H-3: hydrate repeating-group entries from the answers
+    // restored from localStorage on mount. rgData used to start as {},
+    // so a reload showed 0 entries and adding one overwrote the saved set.
+    const init: Record<string, any[]> = {};
+    for (const qq of questions) {
+      if (qq.type === 'repeating_group' && qq.groupId && Array.isArray(answers[qq.id]) && answers[qq.id].length) {
+        init[qq.groupId] = answers[qq.id];
+      }
+    }
+    return init;
+  });
   const [rgEditing, setRgEditing] = useState<number | null>(null);
   const [textVal, setTextVal] = useState('');
   const [radioVal, setRadioVal] = useState('');
@@ -242,6 +254,13 @@ export default function Tier1Flow({ formKey, questions, steps, info, lang, asses
     if (!cur) return;
     setTextVal(answers[cur.id] ?? '');
     setRadioVal(answers[cur.id] ?? '');
+    // Carbon Pass 2 H-3: keep the repeating-group editor in sync with the
+    // restored answers when navigating between questions.
+    if (cur.type === 'repeating_group' && cur.groupId && Array.isArray(answers[cur.id])) {
+      const gid = cur.groupId;
+      const saved = answers[cur.id];
+      setRgData(prev => ({ ...prev, [gid]: saved }));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentQId]);
 
@@ -268,7 +287,13 @@ export default function Tier1Flow({ formKey, questions, steps, info, lang, asses
     if (q.type === 'repeating_group') {
       const entries = rgData[q.groupId!] || [];
       if (q.required && entries.length === 0) { alert(UI.atLeastOne[lang]); return false; }
-      if (entries.length) setAnswers(a => ({ ...a, [q.id]: entries }));
+      // Carbon Pass 2 H-3: deleting all entries must delete the answer,
+      // or the stale entries survive in answers after the user removed them.
+      setAnswers(a => {
+        const n = { ...a };
+        if (entries.length) n[q.id] = entries; else delete n[q.id];
+        return n;
+      });
       return true;
     }
     const val = q.type === 'radio' || q.type === 'select' ? radioVal : textVal.trim();
@@ -310,7 +335,20 @@ export default function Tier1Flow({ formKey, questions, steps, info, lang, asses
             onKeyDown={e => { if (e.key === 'Enter') goNext(); }}
             style={{ width: '100%', padding: '0.7rem', fontSize: '1rem', border: '1px solid #e2e8f0', borderRadius: 8, boxSizing: 'border-box' }} />
         )}
-        {(q.type === 'radio' || q.type === 'select') && (
+        {/* Carbon Pass 2 L-1: 'select' questions — and radio groups with
+            more than 6 options (e.g. 51 states) — render as a native
+            <select> instead of a giant radio-card list. Genuine small
+            radio groups keep the radio-card rendering. Both share radioVal. */}
+        {(q.type === 'select' || (q.options?.length || 0) > 6) && (
+          <select data-testid={`question-select-${q.id}`} value={radioVal} onChange={e => setRadioVal(e.target.value)}
+            style={{ width: '100%', padding: '0.7rem', fontSize: '1rem', border: '1px solid #e2e8f0', borderRadius: 8, boxSizing: 'border-box', background: '#fff' }}>
+            <option value="">{UI.selectPlaceholder[lang]}</option>
+            {(q.options || []).map(o => (
+              <option key={o.value} value={o.value}>{t(o.labels, lang)}</option>
+            ))}
+          </select>
+        )}
+        {q.type === 'radio' && (q.options?.length || 0) <= 6 && (
           <div>{(q.options || []).map(o => (
             <label key={o.value} style={{ display: 'block', padding: '0.7rem 0.9rem', margin: '0.35rem 0', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, cursor: 'pointer' }}>
               <input type="radio" name={'q_' + q.id} value={o.value} checked={radioVal === o.value}
@@ -514,10 +552,21 @@ function Tier1Report({ info, lang, result, questions, steps, answers, factRecord
         setSendResult({ ok: false, message: (data && data.error) || 'Could not send the report. Please try again.' });
         return;
       }
-      if (staffCaseId) markCaseReportSent(staffCaseId, staffEmail);
+      // Carbon Pass 2 C-2: the sent confirmation must name the SERVER-
+      // resolved destination (data.deliveredTo / data.orgName from the
+      // /api/send-report response), never the client-entered staff email
+      // — the server's org registry is the only authority on where the
+      // report actually went. /api/send-report currently returns only
+      // { ok, id }, so until it returns deliveredTo/orgName the
+      // confirmation stays generic instead of asserting a destination.
+      const deliveredTo = typeof (data as any)?.deliveredTo === 'string' ? (data as any).deliveredTo : '';
+      const deliveredOrg = typeof (data as any)?.orgName === 'string' ? (data as any).orgName : '';
+      if (staffCaseId && deliveredTo) markCaseReportSent(staffCaseId, deliveredTo);
       setSendResult({
         ok: true,
-        message: `Report sent to ${orgDisplayName} staff (${staffEmail}).`,
+        message: deliveredTo
+          ? `Report sent to ${deliveredOrg || 'staff'} (${deliveredTo}).`
+          : 'Report sent to staff.',
         sentAt: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
       });
       setSendConfirming(false);

@@ -42,6 +42,9 @@ function getAiClient(apiKey) {
   // Model is configurable: gemini-2.5-flash was retired for new API users
   // (live test 2026-10-11 returned 404). Default to a verified-working model;
   // override via GEMINI_MODEL without a code change if it is retired again.
+  // Default verified against the live AI Studio models.list on 2026-11-12
+  // (gemini-3.8-flash listed with generateContent support) — do not
+  // re-flag as nonexistent without re-checking the live list.
   const model = process.env.GEMINI_MODEL || "gemini-3.8-flash";
   return {
     async *generateContentStream(prompt) {
@@ -268,6 +271,9 @@ async function handler(req, res, store = entitlementStore) {
 
   // C3 diagnostics: enough to tell a provider error from a timeout from blank
   // output after the fact (privacy-safe: no prompt, answers, or model text).
+  // Default verified against the live AI Studio models.list on 2026-11-12
+  // (gemini-3.8-flash listed with generateContent support) — do not
+  // re-flag as nonexistent without re-checking the live list.
   const modelName = process.env.GEMINI_MODEL || "gemini-3.8-flash";
   let attempt = 0;
   let chunksSent = 0;
@@ -397,5 +403,19 @@ async function handler(req, res, store = entitlementStore) {
 
 // Raw handler for unit tests (singleton default). Vercel serves the
 // durable-wrapped default: load → restore → run → save (CAS).
+// Read-only peek gate (Carbon Pass 2, finding H-5): the full-assessment
+// SSE path only peeks at entitlements, so it streams directly to the
+// real response without captureRes() buffering. The limited-evaluation
+// path CONSUMES an entitlement and keeps the durable
+// capture-save-replay path.
+function isNonLimitedRequest(req) {
+  const raw = req && req.body;
+  let body = raw;
+  if (typeof raw === 'string') {
+    try { body = JSON.parse(raw); } catch { body = null; }
+  }
+  return !(body && typeof body === 'object' && body.mode === 'limited');
+}
+
 export { handler };
-export default withDurableStore(handler);
+export default withDurableStore(handler, { readOnly: isNonLimitedRequest });

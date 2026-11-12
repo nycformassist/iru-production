@@ -119,13 +119,6 @@
   ]
  },
  {
-  "base": "P9_Line5a",
-  "fields": [
-   "P9_Line5a[0]",
-   "P9_Line5a[1]"
-  ]
- },
- {
   "base": "P9_Line7a",
   "fields": [
    "P9_Line7a[0]",

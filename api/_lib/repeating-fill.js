@@ -15,6 +15,7 @@
  */
 
 import { REPEATING_SETS_589, expandRepeatingSet } from './forms/repeating-589.js';
+import { TRANSFORMS } from './formmap.js';
 
 /**
  * Build fill plan entries for repeating groups.
@@ -98,9 +99,13 @@ export function buildRepeatingFillPlan(record, entry) {
         }
 
         if (value !== null && value !== undefined && String(value).trim() !== '') {
+          // M-5: date fields carry dateMDY:true from expandRepeatingSet
+          // — format ISO YYYY-MM-DD to MM/DD/YYYY before pushing, so
+          // USCIS date boxes never receive a raw ISO string.
+          const outValue = mapping.dateMDY ? TRANSFORMS.dateMDY(value) : String(value);
           fill.push({
             pdfField: mapping.pdfField,
-            value: String(value),
+            value: outValue,
             label: mapping.label,
             source: 'repeating-group',
             groupId: set.groupId,
@@ -121,8 +126,23 @@ export function buildRepeatingFillPlan(record, entry) {
         if (text) supplementBSections.push(text);
         continue;
       }
-      const overflowMappings = getOverflowMappings(set, overflowItems.length, overflowItems);
-      
+      // Supplement A has exactly 2 overflow slots (children 5-6).
+      // Children 7+ have no Supplement A copy to land on — multi-PDF
+      // merging is not implemented — so they go to the aggregated
+      // Supplement B continuation text instead of emitting fake
+      // #subform[12]_copyN field names (Carbon Pass 2, M-5).
+      let overflowForMappings = overflowItems;
+      if (set.overflowTo === 'supplement_a') {
+        const extraItems = overflowItems.slice(2);
+        if (extraItems.length > 0) {
+          summary.supplementsNeeded.add('supplement_b');
+          const text = formatOverflowText(set, extraItems, set.maxInline + 2);
+          if (text) supplementBSections.push(text);
+        }
+        overflowForMappings = overflowItems.slice(0, 2);
+      }
+      const overflowMappings = getOverflowMappings(set, overflowForMappings.length, overflowForMappings);
+
       for (const mapping of overflowMappings) {
         // Supplement B mappings use pre-formatted _overflowText
         if (mapping._overflowText) {
@@ -137,14 +157,15 @@ export function buildRepeatingFillPlan(record, entry) {
           });
           continue;
         }
-        
+
         // Standard overflow: get value from item
-        const item = overflowItems[mapping.itemIndex] || overflowItems[0];
+        const item = overflowForMappings[mapping.itemIndex] || overflowForMappings[0];
         const value = item.fields?.[mapping.fieldId] ?? item.facts?.[mapping.fieldId];
         if (value !== null && value !== undefined && String(value).trim() !== '') {
+          const outValue = mapping.dateMDY ? TRANSFORMS.dateMDY(value) : String(value);
           overflow.push({
             pdfField: mapping.pdfField,
-            value: String(value),
+            value: outValue,
             label: mapping.label,
             source: 'repeating-group-overflow',
             groupId: set.groupId,
@@ -195,6 +216,18 @@ export function buildRepeatingFillPlan(record, entry) {
  * the applicant's full list (e.g. residences #6, #7), not the overflow
  * slice.
  */
+/**
+ * Date-valued field ids in overflow text (M-5): ISO dates are
+ * formatted to MM/DD/YYYY like inline date fields, so Supplement B
+ * continuation text never shows a raw YYYY-MM-DD. TRANSFORMS.dateMDY
+ * passes non-ISO values through unchanged.
+ */
+const OVERFLOW_DATE_KEYS = new Set([
+  'date_of_birth', 'entry_date', 'from_date', 'to_date',
+  'from_date_alt', 'to_date_alt', 'passport_expiry',
+  'employment_auth_expiry',
+]);
+
 function formatOverflowText(set, items, offset = 0) {
   const overflowTexts = [];
   for (let i = 0; i < items.length; i++) {
@@ -202,7 +235,11 @@ function formatOverflowText(set, items, offset = 0) {
     const fields = item.fields || item.facts || {};
     const fieldStrs = Object.entries(fields)
       .filter(([k, v]) => v && String(v).trim() !== '' && !k.startsWith('_'))
-      .map(([k, v]) => `${k}=${v}`)
+      .map(([k, v]) => {
+        const out = (OVERFLOW_DATE_KEYS.has(k) || k.endsWith('_date'))
+          ? TRANSFORMS.dateMDY(v) : v;
+        return `${k}=${out}`;
+      })
       .join(', ');
     if (fieldStrs) {
       overflowTexts.push(`${set.section} #${offset + i + 1}: ${fieldStrs}`);
@@ -315,49 +352,13 @@ function getOverflowMappings(set, count, items = []) {
       }
     }
 
-    // 7+ children: Generate mappings for additional Supplement A copies
-    // Each copy holds 2 children. Child 7-8 go on copy 1, 9-10 on copy 2, etc.
-    // The PDF page duplication is handled in generate-form.js.
-    // Field names for copy N use the pattern: #subform[12]_copy{N}
-    // (The actual PDF field creation for copies is the material complexity
-    // noted in the report; mappings are generated here for the extension.)
-    const totalOverflow = count;
-    const copiesNeeded = Math.ceil(totalOverflow / 2);
-    
-    for (let copyNum = 1; copyNum < copiesNeeded; copyNum++) {
-      // Copy 0 is the template's built-in Supplement A (handled above)
-      // Copies 1+ are programmatically generated
-      const startIdx = 2 + (copyNum * 2); // Children 7-8, 9-10, etc.
-      const endIdx = Math.min(startIdx + 2, totalOverflow);
-      
-      for (let i = startIdx; i < endIdx; i++) {
-        const n = 5 + i; // Child number (7, 8, 9, ...)
-        const slotInCopy = (i - 2) % 2; // 0 or 1 within the copy
-        const base = `form1[0].#subform[12]_copy${copyNum}`;
-        const tfOffset = slotInCopy === 0 ? 0 : 10;
-        const dtIdx = slotInCopy;
-        
-        // Same 26-field mapping as the template copy (8 core + 18 detail)
-        // This ensures consistency across all Supplement A copies
-        mappings.push(
-          { pdfField: `${base}.TextField12[${tfOffset}]`, fieldId: 'family_name', label: `SuppA Copy${copyNum} Child ${n} last`, itemIndex: i },
-          { pdfField: `${base}.TextField12[${tfOffset+1}]`, fieldId: 'given_name', label: `SuppA Copy${copyNum} Child ${n} first`, itemIndex: i },
-          // ... (full 26-field mapping follows the same pattern as above)
-          // For brevity, the full mapping is generated programmatically
-          // See the template copy mapping above for the complete field list
-        );
-      }
-    }
-
-    // Marker for PDF generation to know additional copies are needed
-    if (count > 2) {
-      mappings.push({
-        pdfField: '__SUPPLEMENT_A_COPIES__',
-        fieldId: '_supplement_a_copies',
-        label: `Supplement A additional copies needed: ${copiesNeeded - 1}`,
-        itemIndex: -1,
-      });
-    }
+    // 7+ children: there is NO further Supplement A copy to map to.
+    // Children 7+ are appended to the aggregated Supplement B
+    // continuation text by buildRepeatingFillPlan (Carbon Pass 2,
+    // M-5) — emitting fake `#subform[12]_copyN` field names only
+    // produced fillErrors in generate-form.js and silently lost the
+    // children's data. This function maps at most the 2 real
+    // Supplement A slots (children 5-6).
   } else {
     // Supplement B overflow is NOT mapped per-group here anymore: the
     // old code wrote each group's chunks to TextField31[0..2]

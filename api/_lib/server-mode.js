@@ -20,6 +20,14 @@ let cached = null;
 
 export function serverBuildMode() {
   if (cached) return cached;
+  // Explicit override (tests and local dev only): IRU_SERVER_MODE set to
+  // 'institutional' forces institutional mode without touching the
+  // committed build-mode.json. Unset in production, so the fail-closed
+  // file-based resolution below is unchanged there.
+  if (process.env.IRU_SERVER_MODE === 'institutional') {
+    cached = 'institutional';
+    return cached;
+  }
   try {
     const here = dirname(fileURLToPath(import.meta.url));
     const raw = readFileSync(join(here, '..', 'build-mode.json'), 'utf8');
@@ -29,6 +37,12 @@ export function serverBuildMode() {
     cached = 'consumer';
   }
   return cached;
+}
+
+// Test hook: drop the cached mode so a test can switch modes within one
+// process by changing IRU_SERVER_MODE. Never used in production code.
+export function resetServerModeCache() {
+  cached = null;
 }
 
 export function isInstitutionalServer() {

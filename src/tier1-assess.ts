@@ -309,6 +309,15 @@ function parseAnyDate(raw: any): Date | null {
     const d = new Date(Number(ym[1]), Number(ym[2]) - 1, 1);
     return Number.isNaN(d.getTime()) ? null : d;
   }
+  // Carbon Pass 2 L-2: ISO date-only strings (from <input type="date">)
+  // parse as UTC midnight via new Date(s), shifting a day earlier in US
+  // timezones. Construct local midnight instead, consistent with the
+  // local-midnight branches above and with today.setHours(0,0,0,0).
+  const ymd = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (ymd) {
+    const d = new Date(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3]));
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
   const y = /^(\d{4})$/.exec(s);
   if (y) {
     const d = new Date(Number(y[1]), 0, 1);

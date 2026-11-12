@@ -99,6 +99,8 @@ import { N400_QUESTIONS, N400_STEPS, N400_FORM_INFO } from './n400-questions';
 import { I130_QUESTIONS, I130_STEPS, I130_FORM_INFO } from './i130-questions';
 import { I485_QUESTIONS, I485_STEPS, I485_FORM_INFO } from './i485-questions';
 import { I90_QUESTIONS, I90_STEPS, I90_FORM_INFO } from './i90-questions';
+import { I589_QUESTIONS } from './i589-questions';
+import { I765_QUESTIONS } from './i765-questions';
 import { EntryScreen, GuideFlow, PackageSelect, EvalIntake, EvalReport, RecoverFlow, pt as ppt, suggestForms, getStoredToken, setStoredToken, getEvalToken, setEvalToken, getFormTokens, setFormToken, removeFormToken, getReadinessTokens, setReadinessToken, removeReadinessToken } from './paywall';
 
 // Nationwide layered resource model (local → statewide → national → fallback).
@@ -1324,6 +1326,10 @@ export default function App() {
     setCopied(false);
     // Complete reset: every form's drafts AND version counters clear.
     setFormDraftStore(emptyFormDraftStore());
+    // Carbon Pass 2 M-4: reset the PHASE3 repeating step, or the next
+    // run jumps straight into the previous run's repeating step and
+    // skips the regular PHASE3 questions.
+    setRepeatingStep(null);
     setEditingFactId('');
     setPurchaseState({ hasEvaluation: false, ownedForms: [], ownedReadinessForms: [] });
     // Start Over hardening (2026-10-28): the remaining workflow state
@@ -2990,7 +2996,12 @@ export default function App() {
       onLanguageChange={(code) => setLang(code as any)}
       onStartForm={(formKey, c) => { setStaffCase(c); setTier1Form(formKey as any); setPathwaySuggestions([]); setStage('PATHWAY'); }}
       onOpenCase={(c) => { setStaffCase(c); setTier1Form(c.formKey as any); setStage('TIER1'); }}
-      onFullAssessment={() => setStage('LANG')}
+      // Carbon Pass 2 H-2: starting the Full Readiness Assessment for a
+      // new participant must first wipe the previous participant's
+      // full-assessment state (answers, factRecord, uploads, photo,
+      // drafts, assessment) and the sessionStorage recovery key, so
+      // Participant B never sees Participant A's data.
+      onFullAssessment={() => { handleStartOver(); setStage('LANG'); }}
     />
   );
   if (stage === 'STAFF') {
@@ -3125,9 +3136,31 @@ export default function App() {
           setResumeError(data.error || 'Resume failed. Check your token.');
           return;
         }
-        // Navigate to the form — Tier1Flow restores its own autosaved
-        // answers (iru_tier1_<formKey>); the resume payload itself is
-        // not stored (no localStorage copy of applicant data is kept here).
+        // Carbon Pass 2 H-3: write the resumed facts back to localStorage
+        // so cross-device resume actually works — Tier1Flow restores its
+        // answers ONLY from localStorage (iru_tier1_<formKey>), which is
+        // empty on another device. facts are keyed by factId with
+        // { value, ... } entries; invert factId -> question.id into the
+        // answers shape Tier1Flow reads ({ answers, savedAt, formKey }).
+        // Unknown factIds (no matching question) are dropped, never guessed.
+        const resumedFacts: Record<string, any> = (data.facts && typeof data.facts === 'object') ? data.facts : {};
+        const resumeQuestions: { id: string; factId?: string }[] =
+          ({ n400: N400_QUESTIONS, i130: I130_QUESTIONS, i485: I485_QUESTIONS, i90: I90_QUESTIONS, i589: I589_QUESTIONS, i765: I765_QUESTIONS } as Record<string, { id: string; factId?: string }[]>)[data.form_id] || [];
+        const factIdToQid = new Map<string, string>();
+        for (const qq of resumeQuestions) factIdToQid.set(qq.factId || qq.id, qq.id);
+        const resumedAnswers: Record<string, any> = {};
+        for (const [factId, fact] of Object.entries(resumedFacts)) {
+          const qid = factIdToQid.get(factId);
+          if (!qid) continue;
+          resumedAnswers[qid] = (fact && typeof fact === 'object' && 'value' in fact) ? (fact as any).value : fact;
+        }
+        try {
+          localStorage.setItem(`iru_tier1_${data.form_id}`, JSON.stringify({
+            answers: resumedAnswers,
+            savedAt: Date.now(),
+            formKey: data.form_id,
+          }));
+        } catch { /* storage full/unavailable — Tier1Flow starts empty */ }
         setTier1Form(data.form_id as any);
         setStage('TIER1');
       } catch (e: any) {
@@ -3224,7 +3257,13 @@ export default function App() {
       {INSTITUTIONAL_MODE() && (
         <button
           data-testid="staff-back-to-dashboard"
-          onClick={() => setStage('STAFF')}
+          // Carbon Pass 2 H-2: returning to the staff dashboard wipes the
+          // full-assessment state and the sessionStorage recovery key
+          // (handleStartOver) before landing on STAFF, so the next
+          // participant's assessment cannot inherit this one's data.
+          // handleStartOver sets stage 'LANG'; the setStage('STAFF')
+          // after it wins (batched state updates apply in order).
+          onClick={() => { handleStartOver(); setStage('STAFF'); }}
           className="self-start relative z-10 mb-4 text-sm font-semibold text-blue-700 hover:text-blue-900"
           style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '0.25rem 0' }}
         >

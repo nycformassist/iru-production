@@ -1,5 +1,8 @@
 // I-589 (Asylum) Tier 1 questionnaire — extracted from production IRU logic
 // BronxWorks workflow: guided intake → readiness assessment → staff report
+// PDF field mapping: fillable — answers fill the I-589 AcroForm PDF via
+// api/fill.py (i589_full_binder) and Tier1Flow generateCompletedForm
+// ('Generate completed I-589').
 
 export const I589_QUESTIONS = [
   // --- Eligibility: one-year filing deadline ---
@@ -167,5 +170,5 @@ export const I589_FORM_INFO = {
   edition: '07/28/26',
   pdfUrl: 'https://www.uscis.gov/sites/default/files/document/forms/i-589.pdf',
   instructionsUrl: 'https://www.uscis.gov/sites/default/files/document/forms/i-589instr.pdf',
-  fillable: false,
+  fillable: true,
 };

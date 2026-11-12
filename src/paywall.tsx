@@ -698,6 +698,13 @@ Object.assign(PAYWALL_LABELS, {
     HT: 'Nou pa jwenn acha pou imèl sa a. Tcheke òtograf la epi eseye ankò.',
     AR: 'تعذر العثور على عملية شراء لهذا البريد. تحقق من الإملاء وحاول مرة أخرى.',
   },
+  recoverUnavailable: {
+    EN: 'Email recovery is temporarily unavailable. Please try again later.',
+    ES: 'La recuperación por correo no está disponible temporalmente. Inténtelo de nuevo más tarde.',
+    ZH: '电子邮件恢复暂时不可用。请稍后再试。',
+    HT: 'Rekiperasyon pa imèl la pa disponib pou kounye a. Tanpri eseye ankò pita.',
+    AR: 'استعادة الوصول عبر البريد الإلكتروني غير متاحة مؤقتًا. يرجى المحاولة مرة أخرى لاحقًا.',
+  },
   recoverNote: {
     EN: 'Email delivery is being connected — if the email doesn’t arrive, your token is safe and you can try again.',
     ES: 'La entrega por correo se está conectando — si el correo no llega, su token está seguro y puede intentarlo de nuevo.',
@@ -995,8 +1002,14 @@ export function RecoverFlow({ lang, onNavigate }: Props) {
         body: JSON.stringify({ email }),
       });
       const data = await resp.json().catch(() => null);
-      if (!resp.ok || !data || !data.token) throw new Error('not-found');
-      setStoredToken(data.token);
+      // 503 means recovery delivery is not wired/enabled (api/recover.js
+      // gates on IRU_RECOVERY_EMAIL_ENABLED) — say so honestly instead
+      // of claiming no purchase exists (Carbon Pass 2, finding M-6).
+      if (resp.status === 503) { setError(pt('recoverUnavailable', lang)); return; }
+      // The server never returns a token in the response (Pass 1 #14):
+      // a 200 means { ok: true, delivered: true } — the token arrives
+      // by email only. Never expect data.token here.
+      if (!resp.ok || !data || !data.ok || !data.delivered) throw new Error('not-found');
       setDone(true);
     } catch {
       setError(pt('recoverFail', lang));

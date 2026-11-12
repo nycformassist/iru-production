@@ -3,12 +3,15 @@ Cross-form registries: full Tier 1 fact -> field mappings for all four forms.
 Built from baselines + Tier 1 question definitions.
 """
 import json
+import os
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
 
 def load_baseline(form):
-    return json.load(open(f'/home/hatch/workspace/iru-form-engine/{form}_baseline.json'))
+    return json.load(open(os.path.join(_HERE, f'{form}_baseline.json')))
 
 def load_fields(form):
-    return json.load(open(f'/home/hatch/workspace/iru-form-engine/{form}_fields.json'))
+    return json.load(open(os.path.join(_HERE, f'{form}_fields.json')))
 
 def build_registry(form, fact_mappings):
     """

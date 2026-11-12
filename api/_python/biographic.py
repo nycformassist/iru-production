@@ -110,7 +110,15 @@ def bind_biographic(facts, threshold=0.7):
         elif kind in ("combobox", "text"):
             plan.append((spec["field"], str(v), "combobox" if kind == "combobox" else "text", fid))
         elif kind == "weight_digits":
-            digits = f"{int(v):03d}"  # e.g., 165 -> "165"
-            for d, fld in zip(digits, spec["fields"]):
-                plan.append((fld, d, "text", fid))
+            # Safe digit extraction (Carbon Pass 2, L-2, matching
+            # binder.py weight_digits): raw int(v) raises ValueError on
+            # "165 lbs" and "1000" writes 4 chars into 3 fields.
+            digits = "".join(c for c in str(v) if c.isdigit())
+            if not digits:
+                review.append({"fact": fid, "reason": "unmappable-value",
+                               "detail": f"Value '{v}' is not a weight in pounds."})
+            else:
+                digits = digits[-3:].rjust(3, "0")
+                for d, fld in zip(digits, spec["fields"]):
+                    plan.append((fld, d, "text", fid))
     return plan, review
