@@ -183,8 +183,16 @@ test('mergeCurrentInput: text and date values commit, empty clears', () => {
   );
   assert.deepEqual(
     mergeCurrentInput({ i589_full_name: 'Old' }, q, { textVal: '   ', radioVal: '', rgData: {} }),
-    {},
-    'clearing the input deletes the answer',
+    { i589_full_name: 'Old' },
+    // CHANGED 2026-11-13 (prefilled-answers fix): empty input state with
+    // a value in the base record now KEEPS the base value — an untouched
+    // prefilled answer is indistinguishable from "no input yet" here, and
+    // the old behaviour wiped it on every Save Progress. Deletion only
+    // happens when BOTH the input and the base record are empty (see the
+    // PrefilledAnswers tests); a prefilled value cannot be cleared from
+    // the UI in any case, because the input displays answers[q.id] while
+    // the input state is empty.
+    'an untouched prefilled value is kept, not deleted',
   );
   assert.deepEqual(
     mergeCurrentInput({ a: 1 }, undefined, { textVal: 'x', radioVal: '', rgData: {} }),

@@ -141,9 +141,18 @@ export function mergeCurrentInput(
     const entries = input.rgData[question.groupId!] || [];
     if (entries.length) n[question.id] = entries; else delete n[question.id];
   } else {
+    // FIX (prefilled answers, 2026-11-13): fall back to the base record
+    // when the input state is empty. The inputs DISPLAY the restored
+    // value (the JSX falls back to answers[q.id]) while the input state
+    // starts empty and is only seeded on navigation, so an untouched
+    // prefilled answer is indistinguishable from "no input yet" here —
+    // the old `else delete` wiped it from the server payload and from
+    // local state on every Save Progress. Only delete when NEITHER the
+    // input state NOR the base record has a value. A typed value still
+    // takes precedence over the fallback.
     const val = question.type === 'radio' || question.type === 'select'
-      ? input.radioVal
-      : input.textVal.trim();
+      ? (input.radioVal || base[question.id] || '')
+      : (input.textVal.trim() || base[question.id] || '');
     if (val) n[question.id] = val; else delete n[question.id];
   }
   return n;
@@ -274,6 +283,24 @@ export default function Tier1Flow({ formKey, questions, steps, info, lang, asses
     return q.conditionalOn.operator === 'equals' ? av === q.conditionalOn.value : av !== q.conditionalOn.value;
   });
 
+  // FIX (prefilled answers, 2026-11-13): seed the input state from the
+  // restored answers on mount. loadQ — the only place that seeds
+  // textVal/radioVal from answers — runs solely from goNext/goBack,
+  // so without this the first question's input state starts empty
+  // while the input DISPLAYS the restored value. Mount-only: the
+  // restored answers are the mount-time snapshot (later navigation is
+  // seeded by loadQ). Placed before the report early-return so the
+  // hook order stays unconditional.
+  useEffect(() => {
+    const first = visible[0];
+    if (!first || first.type === 'repeating_group') return;
+    const v = answers[first.id];
+    if (typeof v !== 'string' || !v) return;
+    if (first.type === 'radio' || first.type === 'select') setRadioVal(v);
+    else setTextVal(v);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   if (qi >= visible.length) {
     const factRecord: FactRecord = buildFactRecord(answers);
     const basic = assess(answers, lang);
@@ -318,7 +345,15 @@ export default function Tier1Flow({ formKey, questions, steps, info, lang, asses
       });
       return true;
     }
-    const val = q.type === 'radio' || q.type === 'select' ? radioVal : textVal.trim();
+    // FIX (prefilled answers, 2026-11-13): fall back to the restored
+    // answer when the input state is empty — the input DISPLAYS
+    // answers[q.id] while textVal/radioVal start empty, so without this
+    // a required prefilled question alerts "required" and refuses to
+    // advance, and a non-required one has its answer wiped. A typed
+    // value still takes precedence over the fallback.
+    const val = q.type === 'radio' || q.type === 'select'
+      ? (radioVal || answers[q.id] || '')
+      : (textVal.trim() || answers[q.id] || '');
     if (q.required && !val) { alert(UI.required[lang]); return false; }
     setAnswers(a => {
       const n = { ...a };
