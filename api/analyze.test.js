@@ -1,6 +1,6 @@
 /**
  * Handler integration tests with a stubbed AI client (no network, no cost).
- * globalThis.__IRU_AI_CLIENT__ bypasses the real Gemini SDK.
+ * globalThis.__IRU_AI_CLIENT__ bypasses the real Vertex AI client.
  */
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -46,6 +46,7 @@ beforeEach(async () => {
   delete globalThis.__IRU_AI_CLIENT__;
   delete globalThis.__LAST_PROMPT__;
   delete process.env.GEMINI_API_KEY;
+  delete process.env.VERTEX_SERVICE_ACCOUNT_JSON;
   const mod = await import('./analyze.js');
   handler = mod.default;
 });
@@ -57,7 +58,7 @@ describe('handler', () => {
     assert.equal(res.statusCode, 405);
   });
 
-  it('500 when no API key and no test client', async () => {
+  it('500 when Vertex is not configured and no test client', async () => {
     const { req, res } = mockReqRes({ ip: 't2' });
     await handler(req, res);
     assert.equal(res.statusCode, 500);

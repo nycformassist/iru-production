@@ -8,12 +8,14 @@
 //  - Applicant text is delimited data, never instructions (see lib/prompt.js).
 //  - Model output is schema-validated; legal-certainty language is rejected.
 //
-// The Gemini API key lives here only. Never reaches the client bundle.
+// The Vertex AI service account lives in the server env var
+// VERTEX_SERVICE_ACCOUNT_JSON only. Never reaches the client bundle.
+// There is no API-key path: see api/_lib/vertex-client.js.
 
 // Vercel Fluid Compute — grants 60s on Hobby, 800s on Pro.
 export const maxDuration = 60;
 
-import { GoogleGenAI } from "@google/genai";
+import { isVertexConfigured, generateVertexContentStream } from "./_lib/vertex-client.js";
 import { sanitizeAnswers, minimizeForModel, droppedFieldNames, MAX_BODY_BYTES } from "./_lib/privacy.js";
 import { buildPrompt, validateModelOutput, fallbackAssessment } from "./_lib/prompt.js";
 import { buildGapRecords } from "./_lib/evidence.js";
@@ -32,24 +34,16 @@ const evaluationLimiter = createLimiter({ capacity: 3, windowMs: 10 * 60 * 1000 
 
 /**
  * Test hook: globalThis.__IRU_AI_CLIENT__ may provide { generateContentStream(prompt) }
- * yielding { text } chunks. Production always uses the real Gemini client.
+ * yielding { text } chunks. Production always uses the Vertex AI client
+ * (api/_lib/vertex-client.js). Vertex generateContent is a single
+ * non-streaming call, so the client yields the full text as one chunk;
+ * the SSE shape (chunk events, then done) is unchanged.
  */
-function getAiClient(apiKey) {
+function getAiClient() {
   if (globalThis.__IRU_AI_CLIENT__) return globalThis.__IRU_AI_CLIENT__;
-  const ai = new GoogleGenAI({ apiKey });
-  // Model is configurable: gemini-2.5-flash was retired for new API users
-  // (live test 2026-10-11 returned 404). Default to a verified-working model;
-  // override via GEMINI_MODEL without a code change if it is retired again.
-  const model = process.env.GEMINI_MODEL || "gemini-3.8-flash";
   return {
-    async *generateContentStream(prompt) {
-      const stream = await ai.models.generateContentStream({
-        model,
-        contents: prompt,
-      });
-      for await (const chunk of stream) {
-        yield { text: chunk.text || "" };
-      }
+    generateContentStream(prompt) {
+      return generateVertexContentStream(prompt);
     },
   };
 }
@@ -97,8 +91,9 @@ export default async function handler(req, res, store = entitlementStore) {
   // The limited evaluation (mode: 'limited') is deterministic — it makes
   // no model call — so it does not require the AI service to be configured.
   const wantsLimited = !!(rawBody && typeof rawBody === 'object' && rawBody.mode === 'limited');
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey && !globalThis.__IRU_AI_CLIENT__ && !wantsLimited) {
+  // Vertex AI (service account). Fails closed with a clear error when
+  // VERTEX_SERVICE_ACCOUNT_JSON is not set — there is no API-key path.
+  if (!isVertexConfigured() && !globalThis.__IRU_AI_CLIENT__ && !wantsLimited) {
     return res.status(500).json({ error: "Analysis service is not configured." });
   }
 
@@ -263,6 +258,9 @@ export default async function handler(req, res, store = entitlementStore) {
 
   // C3 diagnostics: enough to tell a provider error from a timeout from blank
   // output after the fact (privacy-safe: no prompt, answers, or model text).
+  // Same env var + default as the Vertex client (getVertexModelNames):
+  // gemini-2.5-flash was retired on Vertex 2026-10-20, gemini-3.6-flash
+  // retires 2026-11-19 — neither may be used here.
   const modelName = process.env.GEMINI_MODEL || "gemini-3.8-flash";
   let attempt = 0;
   let chunksSent = 0;
@@ -270,7 +268,7 @@ export default async function handler(req, res, store = entitlementStore) {
   const diag = () => ({ model: modelName, attempt, chunksSent, firstChunkMs });
 
   try {
-    const client = getAiClient(apiKey);
+    const client = getAiClient();
     let fullText = "";
     for (;;) {
       attempt++;
@@ -377,7 +375,7 @@ export default async function handler(req, res, store = entitlementStore) {
       durationMs,
       message: errMsg,
       ...diag(),
-      // Never include: answers, imageReviews content, prompt, apiKey
+      // Never include: answers, imageReviews content, prompt, service account
     }));
     // Return explicit ai_unavailable status instead of fake assessment
     send({ 

@@ -8,8 +8,6 @@ export default defineConfig(({mode}) => {
   return {
     plugins: [react(), tailwindcss()],
     define: {
-      // API key is NOT injected into bundle — lives only in Vercel env vars
-      'process.env.GEMINI_API_KEY': JSON.stringify(undefined),
       // Android recovery diagnostics: build commit SHA for the ?debug=1
       // overlay. Vercel sets VERCEL_GIT_COMMIT_SHA at build time; local
       // builds fall back to 'local-dev'. Never a secret.

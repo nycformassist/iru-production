@@ -12,11 +12,13 @@
 //   PRIVACY_REVIEW.md for what is verified vs. what cannot be proven,
 //   including provider-side retention).
 //
-// The Gemini API key lives here only. Never reaches the client bundle.
+// The Vertex AI service account lives in the server env var
+// VERTEX_SERVICE_ACCOUNT_JSON only. Never reaches the client bundle.
+// There is no API-key path: see api/_lib/vertex-client.js.
 
 export const maxDuration = 60;
 
-import { GoogleGenAI } from "@google/genai";
+import { isVertexConfigured, generateVertexText } from "./_lib/vertex-client.js";
 import { createLimiter, clientIp } from "./_lib/ratelimit.js";
 import { EVIDENCE_KEYS } from "./_lib/evidence.js";
 import { sanitizeVisionReview, resolveReviewAssociation } from "./_lib/vision.js";
@@ -41,22 +43,25 @@ const AUTHENTICITY_DISCLAIMER =
 /**
  * Test hook: globalThis.__IRU_VISION_CLIENT__ may provide
  * { reviewImage({ imageBase64, mimeType, prompt }) } resolving to text.
- * Production always uses the real Gemini client.
+ * Production always uses the Vertex AI client (api/_lib/vertex-client.js).
  */
-function getVisionClient(apiKey) {
+function getVisionClient() {
   if (globalThis.__IRU_VISION_CLIENT__) return globalThis.__IRU_VISION_CLIENT__;
-  const ai = new GoogleGenAI({ apiKey });
-  const model = process.env.GEMINI_MODEL || "gemini-3.8-flash";
   return {
     async reviewImage({ imageBase64, mimeType, prompt }) {
-      const resp = await ai.models.generateContent({
-        model,
+      // Vertex AI requires every Content to carry an explicit role.
+      // The image and the instruction travel as parts of one user
+      // content; the model must return a single JSON object
+      // (responseMimeType "application/json", schema in the prompt).
+      return generateVertexText({
         contents: [
-          { inlineData: { mimeType, data: imageBase64 } },
-          { text: prompt },
+          {
+            role: "user",
+            parts: [{ inlineData: { mimeType, data: imageBase64 } }, { text: prompt }],
+          },
         ],
+        generationConfig: { responseMimeType: "application/json" },
       });
-      return resp.text || '';
     },
   };
 }
@@ -111,8 +116,9 @@ export default async function handler(req, res, store = entitlementStore) {
     return res.status(429).json({ error: 'Too many requests. Please try again later.' });
   }
 
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey && !globalThis.__IRU_VISION_CLIENT__) {
+  // Vertex AI (service account). Fails closed with a clear error when
+  // VERTEX_SERVICE_ACCOUNT_JSON is not set — there is no API-key path.
+  if (!isVertexConfigured() && !globalThis.__IRU_VISION_CLIENT__) {
     return res.status(500).json({ error: 'Analysis service is not configured.' });
   }
 
@@ -218,7 +224,7 @@ export default async function handler(req, res, store = entitlementStore) {
   imageBytes = null;
 
   try {
-    const client = getVisionClient(apiKey);
+    const client = getVisionClient();
     const text = await withTimeout(
       client.reviewImage({ imageBase64, mimeType, prompt: buildVisionPrompt(relatedEvidenceKey, reviewLang) }),
       50000

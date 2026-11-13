@@ -35,6 +35,7 @@ let handler;
 beforeEach(async () => {
   delete globalThis.__IRU_VISION_CLIENT__;
   delete process.env.GEMINI_API_KEY;
+  delete process.env.VERTEX_SERVICE_ACCOUNT_JSON;
   handler = (await import('./review-image.js')).default;
 });
 
@@ -54,7 +55,7 @@ describe('handler', () => {
     assert.equal(res.statusCode, 405);
   });
 
-  it('500 when no API key and no test client', async () => {
+  it('500 when Vertex is not configured and no test client', async () => {
     const { req, res } = mockReqRes({ ip: 'img-b' });
     await handler(req, res);
     assert.equal(res.statusCode, 500);
